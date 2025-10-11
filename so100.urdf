@@ -306,15 +306,15 @@
     </inertial>
     <visual>
       <geometry>
-        <box size="0.02 0.02 0.01"/>
+        <box size="0.05 0.05 0.03"/>
       </geometry>
       <material name="camera_material">
-        <color rgba="0.2 0.2 0.2 1.0"/>
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
       <geometry>
-        <box size="0.02 0.02 0.01"/>
+        <box size="0.05 0.05 0.03"/>
       </geometry>
     </collision>
   </link>
@@ -367,7 +367,7 @@
   <joint name="wrist_camera_joint" type="fixed">
     <parent link="wrist"/>
     <child link="wrist_camera"/>
-    <origin xyz="-0.660 0.070 1.270" rpy="0.0000 0.6109 -2.0944"/>
+    <origin xyz="0.0 -0.075 0" rpy="0.0 0.0 0.0"/>
   </joint>
 
   <!-- Top View Camera Joint -->

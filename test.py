@@ -90,7 +90,7 @@ side_camera = Camera(
 )
 
 wrist_camera = Camera(
-    prim_path="/World/wrist_camera_standalone",
+    prim_path=f"{prim_path}/wrist_camera",
     name="wrist_camera",
     frequency=30,
     resolution=(640, 480)
@@ -103,9 +103,22 @@ world.scene.add(wrist_camera)
 print("Cameras added to scene:")
 print(f"- Top camera: {top_camera.prim_path}")
 print(f"- Side camera: {side_camera.prim_path}")
-print(f"- Wrist camera: {wrist_camera.prim_path} (follows robot wrist with offset)")
+print(f"- Wrist camera: {wrist_camera.prim_path} (attached to robot wrist via URDF)")
 
 world.reset()
+
+# Debug camera initialization
+try:
+    wrist_camera.initialize()
+    print("Wrist camera initialized successfully")
+    
+    # Check camera pose after a moment
+    import time
+    time.sleep(0.1)
+    cam_pos, cam_orient = wrist_camera.get_world_pose()
+    print(f"Wrist camera world pose: position={cam_pos}, orientation={cam_orient}")
+except Exception as e:
+    print(f"Error initializing wrist camera: {e}")
 
 def get_link_world_pose(link_name):
     stage = get_context().get_stage()
@@ -135,15 +148,22 @@ def update_camera_from_wrist(offset_x, offset_y, offset_z, rot_pitch, rot_yaw, r
     if wrist_pos is None:
         return None, None
     
+    # Get wrist rotation as scipy Rotation object
     wrist_rot = R.from_quat([wrist_orient[0], wrist_orient[1], wrist_orient[2], wrist_orient[3]])
     wrist_matrix = wrist_rot.as_matrix()
     
+    # Transform camera offset position by wrist rotation
     local_offset = np.array([offset_x, offset_y, offset_z])
     world_offset = wrist_matrix @ local_offset
     cam_pos = wrist_pos + world_offset
     
-    cam_rot = R.from_euler('xyz', [rot_pitch, rot_yaw, rot_roll], degrees=True)
-    cam_quat = cam_rot.as_quat()
+    # Create camera's local rotation (relative to wrist)
+    cam_local_rot = R.from_euler('xyz', [rot_pitch, rot_yaw, rot_roll], degrees=True)
+    
+    # Compose wrist rotation with camera's local rotation
+    # This makes the camera rotate WITH the wrist, plus its own offset rotation
+    cam_world_rot = wrist_rot * cam_local_rot
+    cam_quat = cam_world_rot.as_quat()
     
     cam_orient = np.array([cam_quat[0], cam_quat[1], cam_quat[2], cam_quat[3]])
     
@@ -151,12 +171,12 @@ def update_camera_from_wrist(offset_x, offset_y, offset_z, rot_pitch, rot_yaw, r
     
     return cam_pos, cam_orient
 
-cam_offset_x = -0.370  
-cam_offset_y = 0.7  
-cam_offset_z = 2
-cam_rot_pitch = -120.0  
+cam_offset_x = 0
+cam_offset_y = 0
+cam_offset_z = 10
+cam_rot_pitch = 0
 cam_rot_yaw = -90
-cam_rot_roll = 0.0
+cam_rot_roll = 0
 
 top_cam_pos = np.array([0.5, 0, 8.0])  
 top_cam_orient = np.array([1, 0, 1, 0])
@@ -180,11 +200,12 @@ try:
 except Exception as e:
     print(f"Error setting side camera pose: {e}")
 
-print("Updated camera positions and orientations to look at robot:")
+print("Updated camera positions and orientations:")
 print(f"- Top camera: pos={top_cam_pos}, looking straight down at robot") 
 print(f"- Side camera: pos={side_cam_pos}, looking at robot from side")
-print(f"- Wrist camera: follows wrist with offset X={cam_offset_x}, Y={cam_offset_y}, Z={cam_offset_z}")
+print(f"- Wrist camera: attached to wrist with offset X={cam_offset_x}, Y={cam_offset_y}, Z={cam_offset_z}")
 print(f"  Wrist camera rotation: Pitch={cam_rot_pitch}°, Yaw={cam_rot_yaw}°, Roll={cam_rot_roll}°")
+print(f"  Switch to 'wrist_camera' viewport to see the wrist view!")
 
 joint_names = robot.dof_names
 print(f"Robot joints: {joint_names}")
@@ -209,8 +230,22 @@ rotation_direction = 1
 while simulation_app.is_running():
     world.step(render=True)
     
-    update_camera_from_wrist(cam_offset_x, cam_offset_y, cam_offset_z, 
-                            cam_rot_pitch, cam_rot_yaw, cam_rot_roll)
+    # Option 1: Use URDF positioning (automatic)
+    # Option 2: Override with manual positioning if needed
+    if step_count < 10:  # Only check in first few frames
+        cam_pos, cam_orient = wrist_camera.get_world_pose()
+        if cam_pos is not None:
+            # Check if camera is in a reasonable position (not too far from robot)
+            distance_from_origin = np.linalg.norm(cam_pos)
+            if distance_from_origin > 10.0:  # If camera is more than 10 units from origin
+                print(f"Warning: URDF camera position seems too far ({distance_from_origin:.2f} units). Using manual positioning.")
+                update_camera_from_wrist(cam_offset_x, cam_offset_y, cam_offset_z, 
+                                       cam_rot_pitch, cam_rot_yaw, cam_rot_roll)
+            else:
+                print(f"Using URDF camera positioning. Distance from origin: {distance_from_origin:.2f} units")
+    
+    # Force manual positioning for better control
+    update_camera_from_wrist(cam_offset_x, cam_offset_y, cam_offset_z, cam_rot_pitch, cam_rot_yaw, cam_rot_roll)
     
     if step_count % 60 == 0: 
         rotation_angle += rotation_direction * 0.1 
@@ -244,6 +279,15 @@ while simulation_app.is_running():
             wrist_cam_data = wrist_camera.get_current_frame()
             if wrist_cam_data is not None:
                 print(f"Wrist camera capturing data at step {step_count}")
+                # Debug camera pose
+                cam_pos, cam_orient = wrist_camera.get_world_pose()
+                if cam_pos is not None:
+                    print(f"  Camera position: {cam_pos}")
+                    print(f"  Camera orientation: {cam_orient}")
+            else:
+                print(f"Wrist camera data is None at step {step_count}")
+                cam_pos, cam_orient = wrist_camera.get_world_pose()
+                print(f"  Camera position: {cam_pos}")
         except Exception as e:
             print(f"Error accessing wrist camera data: {e}")
     
