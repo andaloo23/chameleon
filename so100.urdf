@@ -261,7 +261,7 @@
   <joint name="wrist_roll" type="revolute">
     <parent link="wrist"/>
     <child link="gripper"/>
-    <origin xyz="0 -0.0601 0" rpy="0 1.57079 0"/>
+    <origin xyz="0 -0.0601 0" rpy="0 3.14159 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-3.14158" upper="3.14158" effort="35" velocity="1"/>
   </joint>
@@ -367,7 +367,7 @@
   <joint name="wrist_camera_joint" type="fixed">
     <parent link="wrist"/>
     <child link="wrist_camera"/>
-    <origin xyz="0 -0.08 0.02" rpy="0 0 0"/>
+    <origin xyz="-0.660 0.070 1.270" rpy="0.0000 0.6109 -2.0944"/>
   </joint>
 
   <!-- Top View Camera Joint -->
