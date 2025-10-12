@@ -144,25 +144,26 @@ def get_link_world_pose(link_name):
 
 def update_camera_from_wrist(offset_x, offset_y, offset_z, rot_pitch, rot_yaw, rot_roll):
     wrist_pos, wrist_orient = get_link_world_pose("wrist")
+    base_pos, base_orient = get_link_world_pose("base")
     
-    if wrist_pos is None:
+    if wrist_pos is None or base_pos is None:
         return None, None
     
-    # Get wrist rotation as scipy Rotation object
-    wrist_rot = R.from_quat([wrist_orient[0], wrist_orient[1], wrist_orient[2], wrist_orient[3]])
-    wrist_matrix = wrist_rot.as_matrix()
+    # Get base rotation (this includes the shoulder_pan rotation)
+    base_rot = R.from_quat([base_orient[0], base_orient[1], base_orient[2], base_orient[3]])
+    base_matrix = base_rot.as_matrix()
     
-    # Transform camera offset position by wrist rotation
+    # Transform camera offset position by base rotation (so camera rotates with shoulder)
     local_offset = np.array([offset_x, offset_y, offset_z])
-    world_offset = wrist_matrix @ local_offset
+    world_offset = base_matrix @ local_offset
     cam_pos = wrist_pos + world_offset
     
-    # Create camera's local rotation (relative to wrist)
+    # Create camera's local rotation (relative to base)
     cam_local_rot = R.from_euler('xyz', [rot_pitch, rot_yaw, rot_roll], degrees=True)
     
-    # Compose wrist rotation with camera's local rotation
-    # This makes the camera rotate WITH the wrist, plus its own offset rotation
-    cam_world_rot = wrist_rot * cam_local_rot
+    # Compose base rotation with camera's local rotation
+    # This makes the camera rotate WITH the base/shoulder, plus its own offset rotation
+    cam_world_rot = base_rot * cam_local_rot
     cam_quat = cam_world_rot.as_quat()
     
     cam_orient = np.array([cam_quat[0], cam_quat[1], cam_quat[2], cam_quat[3]])
@@ -172,9 +173,9 @@ def update_camera_from_wrist(offset_x, offset_y, offset_z, rot_pitch, rot_yaw, r
     return cam_pos, cam_orient
 
 cam_offset_x = 0
-cam_offset_y = 0
-cam_offset_z = 10
-cam_rot_pitch = 0
+cam_offset_y = -0.2
+cam_offset_z = 2.0
+cam_rot_pitch = -90
 cam_rot_yaw = -90
 cam_rot_roll = 0
 
