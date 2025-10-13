@@ -87,92 +87,167 @@ side_camera = Camera(
     resolution=(640, 480)
 )
 
-# Create camera that will be positioned relative to wrist every frame
-wrist_camera = Camera(
-    prim_path="/World/wrist_camera_sensor", 
-    name="wrist_camera",
-    frequency=30,
-    resolution=(640, 480)
-)
-
 world.scene.add(top_camera) 
 world.scene.add(side_camera)
-world.scene.add(wrist_camera)
 
 
 world.reset()
 
-def update_wrist_camera_position():
-    """Update camera to match wrist_camera link transform exactly - maintains constant view relative to gripper"""
-    stage = get_context().get_stage()
-    
-    # First try to use the wrist_camera link from URDF
-    wrist_camera_pos, wrist_camera_orient = get_link_world_pose("wrist_camera")
-    
-    if wrist_camera_pos is not None and wrist_camera_orient is not None and not np.allclose(wrist_camera_pos, [0, 0, 0]):
-        # The wrist_camera link is available and has valid position
-        try:
-            wrist_camera.set_world_pose(position=wrist_camera_pos, orientation=wrist_camera_orient)
-            return wrist_camera_pos, wrist_camera_orient
-        except:
-            pass
-    
-    # Fallback: use wrist link with manual offset matching URDF configuration
-    wrist_pos, wrist_orient = get_link_world_pose("wrist")
-    if wrist_pos is not None and wrist_orient is not None:
-        from scipy.spatial.transform import Rotation as R
+import time
+time.sleep(1.0)
+
+def create_wrist_camera():
+    global wrist_camera
+    try:
+        wrist_camera_path = f"{prim_path}/wrist/wrist_camera_sensor"
         
-        # Get wrist rotation
-        wrist_rot = R.from_quat([wrist_orient[0], wrist_orient[1], wrist_orient[2], wrist_orient[3]])
+        wrist_camera = Camera(
+            prim_path=wrist_camera_path,
+            name="wrist_camera",
+            frequency=30,
+            resolution=(640, 480),
+        )
         
-        # Apply camera offset: position much higher up for wider top-down view
-        local_offset = np.array([0.0, 0.0, 0.8])  # Directly above wrist, 80cm up for wide view
-        world_offset = wrist_rot.as_matrix() @ local_offset
-        cam_pos = wrist_pos + world_offset
+        world.scene.add(wrist_camera)
         
-        # Apply camera rotation: straight down top-down view
-        local_cam_rot = R.from_euler('xyz', [0.0, -1.57079, 0.0])  # -90° pitch (straight down)
-        combined_rot = wrist_rot * local_cam_rot
-        cam_quat = combined_rot.as_quat()
+        wrist_camera.initialize()
         
         try:
-            wrist_camera.set_world_pose(position=cam_pos, orientation=cam_quat)
-            return cam_pos, cam_quat
-        except:
-            pass
+            stage = get_context().get_stage()
+            camera_prim = stage.GetPrimAtPath(wrist_camera_path)
+            
+            if camera_prim:
+                try:
+                    wrist_camera.set_horizontal_fov(60.0)
+                    print(f"Set camera FOV to 60 degrees via Isaac Sim method")
+                except:
+                    try:
+                        from pxr import UsdGeom
+                        camera_schema = UsdGeom.Camera(camera_prim)
+                        camera_schema.GetFocalLengthAttr().Set(18.0)
+                        print(f"Set camera focal length to 18mm for wider FOV")
+                    except Exception as usd_e:
+                        print(f"Could not set FOV via USD: {usd_e}")
+        except Exception as fov_e:
+            print(f"Could not set FOV: {fov_e}")
+        
+        print(f"Created wrist camera at {wrist_camera_path}")
+        return True
+        
+    except Exception as e:
+        print(f"Error creating wrist camera: {e}")
+        return False
+
+create_wrist_camera()
+
+def update_wrist_camera_position(verbose=False):
+    if wrist_camera is None:
+        return None, None
+        
+    try:
+        stage = get_context().get_stage()
+        camera_prim = stage.GetPrimAtPath(wrist_camera.prim_path)
+        
+        if camera_prim and camera_prim.IsValid():
+            from pxr import Gf
+            from scipy.spatial.transform import Rotation as R
+            
+            local_translation = np.array([0.0, -0.15, 0.50])  # 50cm above wrist, 15cm forward
+            
+            rotation_attempts = [
+                ("Roll +90°", R.from_euler('xyz', [1.57079632679, 0.0, 0.0])),
+                ("Pitch -90°", R.from_euler('xyz', [0.0, -1.57079632679, 0.0])),
+                ("Roll +90° + Yaw 180°", R.from_euler('xyz', [1.57079632679, 0.0, 3.14159265359])),
+                ("Matrix approach", R.from_matrix(np.array([
+                    [1, 0, 0],    # X-axis: right
+                    [0, 0, 1],    # Y-axis: forward
+                    [0, -1, 0]    # Z-axis: down
+                ])))
+            ]
+            
+            local_rotation = rotation_attempts[3][1]  # Matrix approach
+            local_quat = local_rotation.as_quat()
+            
+            if verbose:
+                print(f"Using matrix rotation approach for clean downward view")
+                print(f"Camera quaternion: {local_quat}")
+            
+            usd_quat = Gf.Quatd(local_quat[3], local_quat[0], local_quat[1], local_quat[2])
+            
+            wrist_camera.set_local_pose(
+                translation=local_translation,
+                orientation=np.array([local_quat[0], local_quat[1], local_quat[2], local_quat[3]])
+            )
+            
+            if verbose:
+                world_pos, world_orient = wrist_camera.get_world_pose()
+                print(f"Camera local transform set. World pose: pos={world_pos}, orient={world_orient}")
+                
+                try:
+                    fov = wrist_camera.get_horizontal_fov()
+                    print(f"Camera FOV: {fov} degrees")
+                except:
+                    print("Could not get camera FOV")
+            
+            return wrist_camera.get_world_pose()
+            
+        else:
+            if verbose:
+                print("Camera prim not found or invalid")
+                
+    except Exception as e:
+        if verbose:
+            print(f"Error setting camera local pose: {e}")
     
     return None, None
 
-# Initialize wrist camera
-try:
-    wrist_camera.initialize()
-    
-    # Check camera pose after a moment
-    import time
-    time.sleep(0.1)
-    cam_pos, cam_orient = wrist_camera.get_world_pose()
-except:
-    pass
 
-def get_link_world_pose(link_name):
+# Set initial camera position
+if wrist_camera is not None:
+    try:
+        update_wrist_camera_position(verbose=True)
+        
+        render_product = wrist_camera.get_render_product_path()
+        if render_product:
+            print(f"Wrist camera render product: {render_product}")
+        else:
+            print("Warning: Wrist camera has no render product")
+            
+    except Exception as e:
+        print(f"Failed to setup wrist camera: {e}")
+
+def get_link_world_pose(link_name, verbose=False):
     stage = get_context().get_stage()
     link_path = f"{prim_path}/{link_name}"
     prim = stage.GetPrimAtPath(link_path)
     
-    if prim:
-        xform = UsdGeom.Xformable(prim)
-        transform_matrix = xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-        
-        translation = transform_matrix.ExtractTranslation()
-        position = np.array([translation[0], translation[1], translation[2]])
-        
-        rotation = transform_matrix.ExtractRotationQuat()
-        orientation = np.array([rotation.GetImaginary()[0], 
-                               rotation.GetImaginary()[1], 
-                               rotation.GetImaginary()[2], 
-                               rotation.GetReal()])
-        
-        return position, orientation
+    if verbose:
+        print(f"Looking for link: {link_name} at path: {link_path}")
+        print(f"Prim exists: {prim.IsValid() if prim else False}")
+    
+    if prim and prim.IsValid():
+        try:
+            xform = UsdGeom.Xformable(prim)
+            transform_matrix = xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            
+            translation = transform_matrix.ExtractTranslation()
+            position = np.array([translation[0], translation[1], translation[2]])
+            
+            rotation = transform_matrix.ExtractRotationQuat()
+            orientation = np.array([rotation.GetImaginary()[0], 
+                                   rotation.GetImaginary()[1], 
+                                   rotation.GetImaginary()[2], 
+                                   rotation.GetReal()])
+            
+            if verbose:
+                print(f"Found valid pose for {link_name}: pos={position}, orient={orientation}")
+            return position, orientation
+        except Exception as e:
+            if verbose:
+                print(f"Error getting pose for {link_name}: {e}")
+    else:
+        if verbose:
+            print(f"Link {link_name} not found at {link_path}")
     
     return None, None
 
@@ -195,14 +270,25 @@ except:
     pass
 
 
-# Create a dedicated viewport for the wrist camera
-try:
-    viewport_api = omni.kit.viewport.utility.get_viewport_interface()
-    if viewport_api:
-        # Create a new viewport window for the wrist camera
-        viewport_api.create_instance()
-except:
-    pass
+def setup_wrist_camera_viewport():
+    """Setup viewport for wrist camera to ensure it's visible"""
+    try:
+        import omni.kit.viewport.utility as viewport_utils
+        
+        viewport_api = viewport_utils.get_viewport_interface()
+        if viewport_api:
+            viewport_window = viewport_utils.get_active_viewport_window()
+            if viewport_window:
+                viewport_window.set_active_camera(wrist_camera.prim_path)
+                print(f"Set wrist camera as active camera: {wrist_camera.prim_path}")
+            else:
+                print("No active viewport window found")
+        else:
+            print("Viewport API not available")
+    except Exception as e:
+        print(f"Failed to setup wrist camera viewport: {e}")
+
+setup_wrist_camera_viewport()
 
 joint_names = robot.dof_names
 
@@ -223,8 +309,9 @@ rotation_direction = 1
 while simulation_app.is_running():
     world.step(render=True)
     
-    # Update camera to match wrist_camera link transform exactly
-    update_wrist_camera_position()
+    if step_count == 60:
+        update_wrist_camera_position(verbose=True)
+    
     
     if step_count % 60 == 0: 
         rotation_angle += rotation_direction * 0.1 
@@ -245,16 +332,19 @@ while simulation_app.is_running():
         except:
             pass
     
-    if step_count % 120 == 0 and step_count > 0:
+    if step_count % 120 == 0 and step_count > 0 and wrist_camera is not None:
         try:
-            wrist_camera.initialize()
-            # Debug camera pose
             cam_pos, cam_orient = wrist_camera.get_world_pose()
-            if cam_pos is not None:
-                print(f"  Camera position: {cam_pos}")
-                print(f"  Camera orientation: {cam_orient}")
-        except:
-            pass
+            wrist_pos, wrist_orient = get_link_world_pose("wrist")
+            
+            print(f"Step {step_count}:")
+            print(f"  Wrist link position: {wrist_pos}")
+            print(f"  Camera sensor position: {cam_pos}")
+            print(f"  Camera sensor orientation: {cam_orient}")
+            
+            print("---")
+        except Exception as e:
+            print(f"Debug error: {e}")
     
     step_count += 1
 
