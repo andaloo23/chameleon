@@ -123,18 +123,11 @@ def update_wrist_camera_position(verbose=False):
     try:
         local_translation = np.array([0.0, 0.25, 1])
         
-        rotation_attempts = [
-            ("Roll +90°", R.from_euler('xyz', [1.57079632679, 0.0, 0.0])),
-            ("Pitch -90°", R.from_euler('xyz', [0.0, -1.57079632679, 0.0])),
-            ("Roll +90° + Yaw 180°", R.from_euler('xyz', [1.57079632679, 0.0, 3.14159265359])),
-            ("Matrix approach with 45° pitch", R.from_matrix(np.array([
-                [1, 0, 0],           # X-axis: right
-                [0, 0, 1],           # Y-axis: forward  
-                [0, -1, 0]           # Z-axis: down
-            ])) * R.from_euler('z', -0.785398163))
-        ]
-        
-        local_rotation = rotation_attempts[3][1]
+        local_rotation = R.from_matrix(np.array([
+            [1, 0, 0],           # X-axis: right
+            [0, 0, 1],           # Y-axis: forward  
+            [0, -1, 0]           # Z-axis: down
+        ])) * R.from_euler('z', -0.785398163)
         local_quat = local_rotation.as_quat()
         wrist_camera.set_local_pose(
             translation=local_translation,
@@ -161,8 +154,8 @@ def update_wrist_camera_position(verbose=False):
 
 update_wrist_camera_position(verbose=False)
 
-top_cam_pos = np.array([0.5, 0, 8.0])  
-top_cam_orient = np.array([1, 0, 1, 0])
+top_cam_pos = np.array([0, -0.75, 8.0])  
+top_cam_orient = np.array([-np.sqrt(0.25), -np.sqrt(0.25), -np.sqrt(0.25), np.sqrt(0.25)])
 
 side_cam_pos = np.array([6.0, -0.5, 0.5])
 side_cam_orient = np.array([0, 0, 0, 1])
