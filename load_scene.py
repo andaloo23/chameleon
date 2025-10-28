@@ -352,6 +352,8 @@ class IsaacPickPlaceEnv:
         self._cube_xy = cube_xy
         self._cup_xy = cup_xy
 
+        self._apply_domain_randomization()
+
     def reset(self):
         """Reset the scene with new randomized object placements."""
         self._step_counter = 0
@@ -372,6 +374,8 @@ class IsaacPickPlaceEnv:
         for _ in range(5):
             self.world.step(render=not self.headless)
 
+        self._apply_domain_randomization()
+
         return self._get_observation()
 
     def step(self, action, render=None):
@@ -385,6 +389,8 @@ class IsaacPickPlaceEnv:
         self._step_counter += 1
 
         obs = self._get_observation()
+        self._compute_reward_components(obs)
+        self._validate_state(obs)
         reward, done, info = self._compute_reward(obs)
 
         if self.capture_images and (self._step_counter % self.image_interval == 0):
@@ -420,6 +426,7 @@ class IsaacPickPlaceEnv:
         return np.clip(action, lower, upper)
 
     def _get_observation(self):
+        self._gather_sensor_observations()
         joint_positions = self.robot_articulation.get_joint_positions()
         joint_velocities = self.robot_articulation.get_joint_velocities()
         obs = {
@@ -431,6 +438,18 @@ class IsaacPickPlaceEnv:
     def _compute_reward(self, _obs):
         # Placeholder to be filled with task-specific shaping.
         return 0.0, False, {}
+
+    def _compute_reward_components(self, _obs):
+        pass
+
+    def _gather_sensor_observations(self):
+        pass
+
+    def _apply_domain_randomization(self):
+        pass
+
+    def _validate_state(self, _obs):
+        pass
 
     def _capture_images(self):
         ts = int(time.time() * 1000)
