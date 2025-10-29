@@ -160,4 +160,3 @@ class SO100Robot:
             Robot object
         """
         return self.robot
-
