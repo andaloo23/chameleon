@@ -6,6 +6,7 @@ import numpy as np
 from isaacsim import SimulationApp
 
 from cup_utils import create_cup_prim, initialize_usd_modules
+from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
 from workspace import CUP_CUBE_MIN_DISTANCE, sample_workspace_xy
@@ -104,6 +105,7 @@ class IsaacPickPlaceEnv:
         self._camera_frame_shapes = {}
 
         self.reward_engine = RewardEngine(self)
+        self.domain_randomizer = DomainRandomizer(self)
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -382,7 +384,8 @@ class IsaacPickPlaceEnv:
         return np.zeros((height, width, 3), dtype=np.float32)
 
     def _apply_domain_randomization(self):
-        pass
+        if self.domain_randomizer is not None:
+            self.domain_randomizer.randomize()
 
     def _validate_state(self, _obs):
         pass
