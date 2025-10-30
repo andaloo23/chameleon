@@ -7,6 +7,7 @@ from isaacsim import SimulationApp
 
 from cup_utils import create_cup_prim, initialize_usd_modules
 from image_utils import write_png
+from reward_engine import RewardEngine
 from workspace import CUP_CUBE_MIN_DISTANCE, sample_workspace_xy
 
 _SIMULATION_APP = None
@@ -102,10 +103,14 @@ class IsaacPickPlaceEnv:
         self._camera_failure_logged = {key: False for key in self._camera_keys}
         self._camera_frame_shapes = {}
 
+        self.reward_engine = RewardEngine(self)
+
         if self.capture_images:
             self._reset_temp_dir()
 
         self._build_scene()
+        self.reward_engine.initialize()
+        self.reward_engine.reset()
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -216,6 +221,7 @@ class IsaacPickPlaceEnv:
             self.world.step(render=not self.headless)
 
         self._apply_domain_randomization()
+        self.reward_engine.reset()
 
         return self._get_observation()
 
@@ -230,9 +236,9 @@ class IsaacPickPlaceEnv:
         self._step_counter += 1
 
         obs = self._get_observation()
-        self._compute_reward_components(obs)
+        self.reward_engine.compute_reward_components()
         self._validate_state(obs)
-        reward, done, info = self._compute_reward(obs)
+        reward, done, info = self.reward_engine.summarize_reward()
 
         if self.capture_images and (self._step_counter % self.image_interval == 0):
             self._capture_images()
@@ -270,9 +276,14 @@ class IsaacPickPlaceEnv:
         camera_frames = self._gather_sensor_observations()
         joint_positions = self.robot_articulation.get_joint_positions()
         joint_velocities = self.robot_articulation.get_joint_velocities()
+        joint_positions = joint_positions.astype(np.float32, copy=True)
+        joint_velocities = joint_velocities.astype(np.float32, copy=True)
+
+        self.reward_engine.record_joint_state(joint_positions.copy(), joint_velocities.copy())
+
         obs = {
-            "joint_positions": joint_positions.astype(np.float32, copy=True),
-            "joint_velocities": joint_velocities.astype(np.float32, copy=True),
+            "joint_positions": joint_positions.copy(),
+            "joint_velocities": joint_velocities.copy(),
         }
         for name, frame in camera_frames.items():
             if frame is not None:
@@ -280,13 +291,6 @@ class IsaacPickPlaceEnv:
             else:
                 obs[name] = None
         return obs
-
-    def _compute_reward(self, _obs):
-        # Placeholder to be filled with task-specific shaping.
-        return 0.0, False, {}
-
-    def _compute_reward_components(self, _obs):
-        pass
 
     def _gather_sensor_observations(self):
         camera_map = {
