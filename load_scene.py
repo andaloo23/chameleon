@@ -5,6 +5,10 @@ import time
 import numpy as np
 from isaacsim import SimulationApp
 
+from cup_utils import create_cup_prim, initialize_usd_modules
+from image_utils import write_png
+from workspace import CUP_CUBE_MIN_DISTANCE, sample_workspace_xy
+
 _SIMULATION_APP = None
 _SIM_HEADLESS_FLAG = None
 
@@ -44,181 +48,13 @@ def _ensure_isaac_sim(headless=False):
         UsdGeom = _UsdGeom
         UsdPhysics = _UsdPhysics
         SO100Robot = _SO100Robot
+        initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
     elif headless != _SIM_HEADLESS_FLAG:
         print(f"[warn] SimulationApp already initialized with headless={_SIM_HEADLESS_FLAG}; "
               f"requested headless={headless} ignored.")
 
     return _SIMULATION_APP
-
-
-WORKSPACE_RADIUS_RANGE = (0.35, 0.65)
-WORKSPACE_ANGLE_RANGE = (-np.pi / 2, np.pi / 2)
-MIN_OBJECT_SEPARATION = 0.18
-CUP_CUBE_MIN_DISTANCE = 0.28
-
-WORKSPACE_FORWARD_AXIS = np.array([0.0, -1.0], dtype=float)
-WORKSPACE_FORWARD_AXIS /= np.linalg.norm(WORKSPACE_FORWARD_AXIS)
-WORKSPACE_RIGHT_AXIS = np.array([WORKSPACE_FORWARD_AXIS[1], -WORKSPACE_FORWARD_AXIS[0]], dtype=float)
-WORKSPACE_RIGHT_AXIS /= np.linalg.norm(WORKSPACE_RIGHT_AXIS)
-
-
-def sample_workspace_xy(rng, existing=None, min_separation=None, max_attempts=32):
-    """Sample an (x, y) point inside the forward-facing semi-circle workspace."""
-    if existing is None:
-        existing = []
-    if min_separation is None:
-        min_separation = MIN_OBJECT_SEPARATION
-
-    candidate = None
-    for _ in range(max_attempts):
-        radius = rng.uniform(*WORKSPACE_RADIUS_RANGE)
-        angle = rng.uniform(*WORKSPACE_ANGLE_RANGE)
-        forward_component = radius * np.cos(angle)
-        right_component = radius * np.sin(angle)
-        candidate = forward_component * WORKSPACE_FORWARD_AXIS + right_component * WORKSPACE_RIGHT_AXIS
-        if all(np.linalg.norm(candidate - other) >= min_separation for other in existing):
-            return candidate
-
-    if candidate is not None:
-        return candidate
-
-    fallback = WORKSPACE_FORWARD_AXIS * WORKSPACE_RADIUS_RANGE[0]
-    if existing:
-        for shift_sign in (1, -1):
-            offset = fallback + shift_sign * min_separation * WORKSPACE_RIGHT_AXIS
-            if all(np.linalg.norm(offset - other) >= min_separation for other in existing):
-                return offset
-    return fallback
-
-
-def build_cup_mesh(outer_radius_top, outer_radius_bottom, height,
-                   inner_radius_top, inner_radius_bottom,
-                   bottom_thickness, segments=32):
-    """Create mesh data for a hollow tapered cup with a flat bottom."""
-    bottom_thickness = min(bottom_thickness, height * 0.4)
-
-    points = []
-    face_counts = []
-    face_indices = []
-
-    def angle(i):
-        return (2.0 * np.pi * i) / segments
-
-    def add_point(x, y, z):
-        points.append(Gf.Vec3f(float(x), float(y), float(z)))
-
-    for i in range(segments):
-        ang = angle(i)
-        add_point(outer_radius_bottom * np.cos(ang), outer_radius_bottom * np.sin(ang), 0.0)
-    outer_top_offset = len(points)
-    for i in range(segments):
-        ang = angle(i)
-        add_point(outer_radius_top * np.cos(ang), outer_radius_top * np.sin(ang), height)
-    inner_top_offset = len(points)
-    for i in range(segments):
-        ang = angle(i)
-        add_point(inner_radius_top * np.cos(ang), inner_radius_top * np.sin(ang), height)
-    inner_bottom_offset = len(points)
-    for i in range(segments):
-        ang = angle(i)
-        add_point(inner_radius_bottom * np.cos(ang), inner_radius_bottom * np.sin(ang), bottom_thickness)
-
-    bottom_center_top_idx = len(points)
-    add_point(0.0, 0.0, bottom_thickness)
-    bottom_center_bottom_idx = len(points)
-    add_point(0.0, 0.0, 0.0)
-
-    def add_triangle(a, b, c):
-        face_counts.append(3)
-        face_indices.extend([a, b, c])
-
-    segments_range = range(segments)
-    for i in segments_range:
-        next_i = (i + 1) % segments
-        ob_i = i
-        ob_next = next_i
-        ot_i = outer_top_offset + i
-        ot_next = outer_top_offset + next_i
-        add_triangle(ob_i, ob_next, ot_i)
-        add_triangle(ot_i, ob_next, ot_next)
-
-    for i in segments_range:
-        next_i = (i + 1) % segments
-        ib_i = inner_bottom_offset + i
-        ib_next = inner_bottom_offset + next_i
-        it_i = inner_top_offset + i
-        it_next = inner_top_offset + next_i
-        add_triangle(ib_i, it_i, ib_next)
-        add_triangle(it_i, it_next, ib_next)
-
-    for i in segments_range:
-        next_i = (i + 1) % segments
-        ob_i = i
-        ob_next = next_i
-        ib_i = inner_bottom_offset + i
-        ib_next = inner_bottom_offset + next_i
-        add_triangle(ob_i, ib_i, ob_next)
-        add_triangle(ob_next, ib_i, ib_next)
-
-    for i in segments_range:
-        next_i = (i + 1) % segments
-        ib_i = inner_bottom_offset + i
-        ib_next = inner_bottom_offset + next_i
-        add_triangle(ib_i, ib_next, bottom_center_top_idx)
-
-    for i in segments_range:
-        next_i = (i + 1) % segments
-        ob_i = i
-        ob_next = next_i
-        add_triangle(ob_i, bottom_center_bottom_idx, ob_next)
-
-    return points, face_counts, face_indices
-
-
-def create_cup_prim(stage, prim_path, position,
-                    outer_radius_top, outer_radius_bottom,
-                    inner_radius_top, inner_radius_bottom,
-                    height, bottom_thickness, color, mass):
-    """Create a hollow cup mesh prim with collision enabled and return its Xform."""
-    xform = UsdGeom.Xform.Define(stage, prim_path)
-    UsdGeom.XformCommonAPI(xform).SetTranslate(Gf.Vec3d(float(position[0]), float(position[1]), float(position[2])))
-
-    mesh_path = f"{prim_path}/CupMesh"
-    mesh = UsdGeom.Mesh.Define(stage, mesh_path)
-    points, counts, indices = build_cup_mesh(
-        outer_radius_top, outer_radius_bottom, height,
-        inner_radius_top, inner_radius_bottom, bottom_thickness
-    )
-    mesh.CreatePointsAttr(points)
-    mesh.CreateFaceVertexCountsAttr(counts)
-    mesh.CreateFaceVertexIndicesAttr(indices)
-    mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(float(color[0]), float(color[1]), float(color[2]))])
-
-    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-    UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
-    xform_prim = xform.GetPrim()
-    rigid_api = UsdPhysics.RigidBodyAPI.Apply(xform_prim)
-    rigid_api.CreateRigidBodyEnabledAttr(True)
-    rigid_api.CreateKinematicEnabledAttr(False)
-    mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
-    mass_attr = mass_api.GetMassAttr()
-    if not mass_attr:
-        mass_attr = mass_api.CreateMassAttr()
-    mass_attr.Set(float(mass))
-    return xform
-
-
-def write_png(path, rgba_uint8):
-    """Serialize an RGBA frame to disk, dropping alpha if present."""
-    import imageio.v2 as imageio
-
-    if rgba_uint8 is None:
-        return False
-
-    rgb = rgba_uint8[..., :3] if rgba_uint8.shape[-1] == 4 else rgba_uint8
-    imageio.imwrite(path, rgb)
-    return True
 
 
 class IsaacPickPlaceEnv:
@@ -260,6 +96,11 @@ class IsaacPickPlaceEnv:
         self.cup_mass = 0.25
 
         self._step_counter = 0
+
+        self._camera_keys = ("top", "side", "wrist")
+        self._last_camera_frames = {key: None for key in self._camera_keys}
+        self._camera_failure_logged = {key: False for key in self._camera_keys}
+        self._camera_frame_shapes = {}
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -426,13 +267,18 @@ class IsaacPickPlaceEnv:
         return np.clip(action, lower, upper)
 
     def _get_observation(self):
-        self._gather_sensor_observations()
+        camera_frames = self._gather_sensor_observations()
         joint_positions = self.robot_articulation.get_joint_positions()
         joint_velocities = self.robot_articulation.get_joint_velocities()
         obs = {
-            "joint_positions": joint_positions.copy(),
-            "joint_velocities": joint_velocities.copy(),
+            "joint_positions": joint_positions.astype(np.float32, copy=True),
+            "joint_velocities": joint_velocities.astype(np.float32, copy=True),
         }
+        for name, frame in camera_frames.items():
+            if frame is not None:
+                obs[name] = frame.copy()
+            else:
+                obs[name] = None
         return obs
 
     def _compute_reward(self, _obs):
@@ -443,7 +289,93 @@ class IsaacPickPlaceEnv:
         pass
 
     def _gather_sensor_observations(self):
-        pass
+        camera_map = {
+            "top": self.top_camera,
+            "side": self.side_camera,
+            "wrist": getattr(self.robot, "wrist_camera", None),
+        }
+        frames = {}
+
+        for key, camera in camera_map.items():
+            processed = None
+            if camera is not None:
+                try:
+                    raw_frame = camera.get_rgba()
+                except Exception as exc:
+                    if not self._camera_failure_logged.get(key, False):
+                        print(f"[warn] failed to fetch {key} camera frame: {exc}")
+                        self._camera_failure_logged[key] = True
+                    raw_frame = None
+                else:
+                    processed = self._prepare_camera_frame(raw_frame, key)
+                    if processed is not None:
+                        self._last_camera_frames[key] = processed
+                        self._camera_failure_logged[key] = False
+
+            if processed is None:
+                cached_frame = self._last_camera_frames.get(key)
+                if cached_frame is not None:
+                    processed = cached_frame
+                else:
+                    processed = self._allocate_empty_camera_frame(camera, key)
+                    self._last_camera_frames[key] = processed
+
+            frames[f"{key}_camera_rgb"] = processed
+
+        return frames
+
+    def _prepare_camera_frame(self, frame, key):
+        if frame is None:
+            return None
+
+        array = np.asarray(frame)
+        if array.ndim == 2:
+            array = np.stack([array] * 3, axis=-1)
+        elif array.ndim == 3:
+            channels = array.shape[-1]
+            if channels >= 3:
+                array = array[..., :3]
+            elif channels == 1:
+                array = np.repeat(array, 3, axis=-1)
+            else:
+                pad_width = 3 - channels
+                pad_shape = array.shape[:2] + (pad_width,)
+                array = np.concatenate([array, np.zeros(pad_shape, dtype=array.dtype)], axis=-1)
+        else:
+            return None
+
+        if np.issubdtype(array.dtype, np.integer):
+            array = array.astype(np.float32) / 255.0
+        else:
+            array = array.astype(np.float32, copy=False)
+            array = np.clip(array, 0.0, 1.0)
+
+        array = np.ascontiguousarray(array)
+        self._camera_frame_shapes[key] = array.shape
+        return array
+
+    def _allocate_empty_camera_frame(self, camera, key):
+        if key in self._camera_frame_shapes:
+            height, width, _ = self._camera_frame_shapes[key]
+        else:
+            width, height = 640, 480
+
+            if camera is not None:
+                resolution = None
+                try:
+                    resolution = camera.get_resolution()
+                except Exception:
+                    resolution = getattr(camera, "resolution", None)
+
+                if resolution is not None and len(resolution) >= 2:
+                    width, height = resolution[0], resolution[1]
+
+            width = int(width)
+            height = int(height)
+            self._camera_frame_shapes[key] = (height, width, 3)
+
+        height, width, _ = self._camera_frame_shapes[key]
+        return np.zeros((height, width, 3), dtype=np.float32)
 
     def _apply_domain_randomization(self):
         pass
