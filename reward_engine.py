@@ -160,6 +160,11 @@ class RewardEngine:
         validation = getattr(self.env, "last_validation_result", None)
         if validation is not None:
             info["validation"] = validation
+        if getattr(self.env, "_force_terminate", False):
+            done = True
+            info["terminated_by_validation"] = True
+            if getattr(self.env, "_termination_reason", None):
+                info["termination_reason"] = self.env._termination_reason
         return total, done, info
 
     def _update_task_state(self):

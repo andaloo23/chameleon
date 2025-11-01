@@ -21,6 +21,7 @@ Camera = None
 Gf = None
 UsdGeom = None
 UsdPhysics = None
+Usd = None
 SO100Robot = None
 
 
@@ -39,7 +40,7 @@ def _ensure_isaac_sim(headless=False):
         from omni.isaac.core.objects import DynamicCuboid as _DynamicCuboid
         from omni.usd import get_context as _get_context
         from omni.isaac.sensor import Camera as _Camera
-        from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics
+        from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics, Usd as _Usd
         from robot import SO100Robot as _SO100Robot
 
         World = _World
@@ -49,6 +50,7 @@ def _ensure_isaac_sim(headless=False):
         Gf = _Gf
         UsdGeom = _UsdGeom
         UsdPhysics = _UsdPhysics
+        Usd = _Usd
         SO100Robot = _SO100Robot
         initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
@@ -107,6 +109,9 @@ class IsaacPickPlaceEnv:
         self.reward_engine = RewardEngine(self)
         self.domain_randomizer = DomainRandomizer(self)
         self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
+        self._force_terminate = False
+        self._termination_reason = None
+        self._cup_upright_threshold_rad = np.deg2rad(25.0)
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -226,6 +231,8 @@ class IsaacPickPlaceEnv:
         self._apply_domain_randomization()
         self.reward_engine.reset()
         self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
+        self._force_terminate = False
+        self._termination_reason = None
 
         return self._get_observation()
 
@@ -243,6 +250,11 @@ class IsaacPickPlaceEnv:
         self.reward_engine.compute_reward_components()
         self._validate_state(obs)
         reward, done, info = self.reward_engine.summarize_reward()
+
+        if self._force_terminate:
+            done = True
+            info.setdefault("termination_reason", self._termination_reason or "validation_failure")
+            info["terminated_by_validation"] = True
 
         if self.capture_images and (self._step_counter % self.image_interval == 0):
             self._capture_images()
@@ -389,6 +401,51 @@ class IsaacPickPlaceEnv:
         if self.domain_randomizer is not None:
             self.domain_randomizer.randomize()
 
+    def _get_recent_collisions(self):
+        try:
+            physics = self.world.get_physics_context()
+        except Exception:
+            return None
+
+        report = None
+        for attr in ("get_contact_report", "consume_contact_report", "get_contact_reports"):
+            getter = getattr(physics, attr, None)
+            if callable(getter):
+                try:
+                    report = getter()
+                except Exception:
+                    report = None
+                if report:
+                    break
+        if report is None:
+            return None
+
+        collisions = []
+
+        if isinstance(report, dict):
+            entries = report.get("contacts") or report.get("contactReports") or report.get("pairs") or []
+        else:
+            entries = report
+
+        for entry in entries:
+            prim0 = entry.get("body0") if isinstance(entry, dict) else None
+            prim1 = entry.get("body1") if isinstance(entry, dict) else None
+            if prim0 is None and isinstance(entry, dict):
+                prim0 = entry.get("prim0") or entry.get("entity0")
+            if prim1 is None and isinstance(entry, dict):
+                prim1 = entry.get("prim1") or entry.get("entity1")
+            if prim0 is None or prim1 is None:
+                continue
+
+            impulse = entry.get("impulse") if isinstance(entry, dict) else None
+            collisions.append({
+                "prim0": prim0,
+                "prim1": prim1,
+                "impulse": impulse,
+            })
+
+        return collisions
+
     def _validate_state(self, _obs):
         flags = {
             "joints_unavailable": False,
@@ -398,6 +455,9 @@ class IsaacPickPlaceEnv:
             "cube_pose_unavailable": False,
             "cube_below_ground": False,
             "cube_out_of_workspace": False,
+            "cup_knocked_over": False,
+            "cup_collision": False,
+            "collision_report_unavailable": False,
         }
         issues = []
 
@@ -438,16 +498,63 @@ class IsaacPickPlaceEnv:
                 flags["cube_out_of_workspace"] = True
                 issues.append(f"Cube XY radius {xy_radius:.3f} exceeds workspace limit {max_radius:.3f}.")
 
+        cup_tilt = None
+        if Gf is not None and UsdGeom is not None and Usd is not None:
+            try:
+                xformable = UsdGeom.Xformable(self.cup_xform.GetPrim())
+                matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                up_vec = matrix.TransformDir(Gf.Vec3d(0.0, 0.0, 1.0))
+                up = np.array([up_vec[0], up_vec[1], up_vec[2]], dtype=float)
+                up_norm = up / (np.linalg.norm(up) + 1e-6)
+                cup_tilt = float(np.arccos(np.clip(np.dot(up_norm, np.array([0.0, 0.0, 1.0])), -1.0, 1.0)))
+            except Exception:
+                cup_tilt = None
+
+        if cup_tilt is not None and cup_tilt > self._cup_upright_threshold_rad:
+            flags["cup_knocked_over"] = True
+            tilt_deg = np.degrees(cup_tilt)
+            issues.append(f"Cup tilt {tilt_deg:.1f} deg exceeds threshold.")
+
+        collisions = self._get_recent_collisions()
+        if collisions is None:
+            flags["collision_report_unavailable"] = True
+            collisions = []
+        else:
+            cup_path = str(self.cup_xform.GetPath())
+            cube_path = getattr(self.cube, "prim_path", "/World/Cube")
+            robot_path = getattr(self.robot, "prim_path", "/World/Robot")
+            for entry in collisions:
+                prim0 = str(entry.get("prim0", ""))
+                prim1 = str(entry.get("prim1", ""))
+                pair = (prim0, prim1)
+                if (cup_path in prim0) or (cup_path in prim1):
+                    flags["cup_collision"] = True
+                    if flags["cup_knocked_over"]:
+                        self._termination_reason = "cup_knocked_over"
+                    issues.append(f"Cup involved in collision: {pair}.")
+                    break
+                if ((cube_path in prim0 and robot_path in prim1) or
+                        (cube_path in prim1 and robot_path in prim0)):
+                    issues.append(f"Cube-robot collision detected: {pair}.")
+
         ok = not issues
         result = {
             "ok": ok,
             "issues": issues,
             "flags": flags,
+            "collisions": collisions,
+            "cup_tilt_rad": cup_tilt,
+            "terminate_episode": self._force_terminate,
         }
         self.last_validation_result = result
 
         if not ok:
             print("[warn] state validation issues detected:", "; ".join(issues))
+
+        if flags.get("cup_knocked_over"):
+            self._force_terminate = True
+            if not self._termination_reason:
+                self._termination_reason = "cup_knocked_over"
 
     def _capture_images(self):
         ts = int(time.time() * 1000)
