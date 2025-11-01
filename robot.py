@@ -135,15 +135,28 @@ class SO100Robot:
         return None, None
     
     def get_random_joint_positions(self):
-        """Generate random joint positions within the defined limits.
-        
-        Returns:
-            List of random joint positions
-        """
-        return [
-            random.uniform(self.joint_limits[name][0], self.joint_limits[name][1])
-            for name in self.joint_names
-        ]
+        """Generate small random joint deltas while respecting joint limits."""
+        try:
+            current_positions = np.array(self.robot.get_joint_positions(), dtype=float)
+        except Exception:
+            current_positions = None
+
+        if current_positions is None or current_positions.size != len(self.joint_names):
+            current_positions = np.array([
+                0.5 * (self.joint_limits[name][0] + self.joint_limits[name][1])
+                for name in self.joint_names
+            ], dtype=float)
+
+        new_positions = []
+        for idx, name in enumerate(self.joint_names):
+            lower, upper = self.joint_limits[name]
+            span = max(upper - lower, 1e-6)
+            max_delta = min(0.25, 0.1 * span)
+            delta = random.uniform(-max_delta, max_delta)
+            updated = float(np.clip(current_positions[idx] + delta, lower, upper))
+            new_positions.append(updated)
+
+        return new_positions
     
     def set_joint_positions(self, positions):
         """Set the joint positions of the robot.
