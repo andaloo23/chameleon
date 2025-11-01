@@ -157,6 +157,9 @@ class RewardEngine:
             "stage_flags": self.stage_flags.copy(),
             "drop_detected": self.drop_detected,
         }
+        validation = getattr(self.env, "last_validation_result", None)
+        if validation is not None:
+            info["validation"] = validation
         return total, done, info
 
     def _update_task_state(self):

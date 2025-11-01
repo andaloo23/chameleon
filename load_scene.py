@@ -9,7 +9,7 @@ from cup_utils import create_cup_prim, initialize_usd_modules
 from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
-from workspace import CUP_CUBE_MIN_DISTANCE, sample_workspace_xy
+from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 
 _SIMULATION_APP = None
 _SIM_HEADLESS_FLAG = None
@@ -106,6 +106,7 @@ class IsaacPickPlaceEnv:
 
         self.reward_engine = RewardEngine(self)
         self.domain_randomizer = DomainRandomizer(self)
+        self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -224,6 +225,7 @@ class IsaacPickPlaceEnv:
 
         self._apply_domain_randomization()
         self.reward_engine.reset()
+        self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
 
         return self._get_observation()
 
@@ -388,7 +390,64 @@ class IsaacPickPlaceEnv:
             self.domain_randomizer.randomize()
 
     def _validate_state(self, _obs):
-        pass
+        flags = {
+            "joints_unavailable": False,
+            "joint_limit_violation": False,
+            "joint_nan": False,
+            "vel_nan": False,
+            "cube_pose_unavailable": False,
+            "cube_below_ground": False,
+            "cube_out_of_workspace": False,
+        }
+        issues = []
+
+        joint_positions = self.reward_engine.latest_joint_positions
+        joint_velocities = self.reward_engine.latest_joint_velocities
+
+        if joint_positions is None:
+            flags["joints_unavailable"] = True
+            issues.append("Joint positions unavailable.")
+        else:
+            if not np.isfinite(joint_positions).all():
+                flags["joint_nan"] = True
+                issues.append("Joint positions contain non-finite values.")
+            for idx, name in enumerate(self.robot.joint_names):
+                lower, upper = self.robot.joint_limits[name]
+                value = float(joint_positions[idx])
+                if value < lower - 1e-3 or value > upper + 1e-3:
+                    flags["joint_limit_violation"] = True
+                    issues.append(f"Joint '{name}' outside limits: {value:.3f} not in [{lower:.3f}, {upper:.3f}].")
+                    break
+
+        if joint_velocities is not None and not np.isfinite(joint_velocities).all():
+            flags["vel_nan"] = True
+            issues.append("Joint velocities contain non-finite values.")
+
+        state = getattr(self.reward_engine, "task_state", {})
+        cube_pos = state.get("cube_pos")
+        if cube_pos is None:
+            flags["cube_pose_unavailable"] = True
+            issues.append("Cube pose unavailable.")
+        else:
+            if cube_pos[2] < -0.01:
+                flags["cube_below_ground"] = True
+                issues.append(f"Cube below ground plane: z={cube_pos[2]:.3f}.")
+            xy_radius = float(np.linalg.norm(cube_pos[:2]))
+            max_radius = WORKSPACE_RADIUS_RANGE[1] + 0.15
+            if xy_radius > max_radius:
+                flags["cube_out_of_workspace"] = True
+                issues.append(f"Cube XY radius {xy_radius:.3f} exceeds workspace limit {max_radius:.3f}.")
+
+        ok = not issues
+        result = {
+            "ok": ok,
+            "issues": issues,
+            "flags": flags,
+        }
+        self.last_validation_result = result
+
+        if not ok:
+            print("[warn] state validation issues detected:", "; ".join(issues))
 
     def _capture_images(self):
         ts = int(time.time() * 1000)
