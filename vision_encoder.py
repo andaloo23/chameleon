@@ -3,7 +3,7 @@ from typing import Optional, Tuple, List, Union
 
 import torch
 from torch import nn
-from transformers import AutoModel, AutoConfig
+from transformers import AutoModel
 from peft import PeftModel
 from PIL import Image
 import torchvision.transforms as T
@@ -15,7 +15,7 @@ CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
 
 class VisionEncoder(nn.Module):
-    """Wrapper that loads GR00T base weights and a LoRA adapter on GPU."""
+    """Wrapper that loads GR00T base weights and an optional LoRA adapter on GPU."""
 
     def __init__(
         self,
@@ -33,8 +33,6 @@ class VisionEncoder(nn.Module):
         self.dtype = dtype
         self.device = device or torch.device("cuda")
 
-        self.lora_adapter_path = lora_adapter_path
-
         self.transform = T.Compose([
             T.Resize(image_size, interpolation=T.InterpolationMode.BICUBIC),
             T.CenterCrop(image_size),
@@ -42,15 +40,10 @@ class VisionEncoder(nn.Module):
             T.Normalize(mean=CLIP_MEAN, std=CLIP_STD),
         ])
 
-        config = AutoConfig.from_pretrained(
-            self.base_model_path,
-            trust_remote_code=True,
-        )
         base_model = AutoModel.from_pretrained(
             self.base_model_path,
             torch_dtype=self.dtype,
             trust_remote_code=True,
-            config=config,
         )
         base_model.to(self.device)
         if freeze_base:
