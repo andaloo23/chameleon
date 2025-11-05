@@ -5,6 +5,7 @@ from pathlib import Path
 from huggingface_hub import model_info, snapshot_download
 from huggingface_hub.utils import GatedRepoError, HfHubHTTPError
 from transformers import AutoConfig, AutoModel
+from transformers import PreTrainedModel, PretrainedConfig
 
 
 def _download_remote_code(repo_id: str, destination: Path) -> Path:
@@ -27,11 +28,11 @@ def _download_remote_code(repo_id: str, destination: Path) -> Path:
     return Path(snapshot_path)
 
 
-def register_openvla(repo_id: str = "openvla/openvla-7b-v0") -> Path:
+def register_openvla(repo_id: str = "openvla/openvla-7b") -> Path:
     local_dir = Path.home() / "models" / "openvla"
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    info = model_info(repo_id, repo_type="model")
+    info = model_info(repo_id)
     py_members = [s.rfilename for s in info.siblings if s.rfilename.endswith(".py")]
     if not py_members:
         raise RuntimeError(
@@ -68,11 +69,26 @@ def register_openvla(repo_id: str = "openvla/openvla-7b-v0") -> Path:
     cfg_module = import_module(cfg_file.stem)
     mdl_module = import_module(mdl_file.stem)
 
-    if not hasattr(cfg_module, "OpenVLAConfig") or not hasattr(mdl_module, "OpenVLAModel"):
-        raise RuntimeError("Expected OpenVLAConfig/OpenVLAModel definitions were not found in the downloaded code.")
+    cfg_candidates = []
+    for name in dir(cfg_module):
+        attr = getattr(cfg_module, name)
+        if isinstance(attr, type) and issubclass(attr, PretrainedConfig) and attr is not PretrainedConfig:
+            cfg_candidates.append(attr)
 
-    AutoConfig.register("openvla", cfg_module.OpenVLAConfig)
-    AutoModel.register(cfg_module.OpenVLAConfig, mdl_module.OpenVLAModel)
+    mdl_candidates = []
+    for name in dir(mdl_module):
+        attr = getattr(mdl_module, name)
+        if isinstance(attr, type) and issubclass(attr, PreTrainedModel) and attr is not PreTrainedModel:
+            mdl_candidates.append(attr)
+
+    if not cfg_candidates or not mdl_candidates:
+        raise RuntimeError("Could not locate config/model classes in the downloaded OpenVLA code.")
+
+    cfg_cls = cfg_candidates[0]
+    mdl_cls = mdl_candidates[0]
+
+    AutoConfig.register("openvla", cfg_cls)
+    AutoModel.register(cfg_cls, mdl_cls)
 
     return cfg_file.parent
 
@@ -80,7 +96,7 @@ def register_openvla(repo_id: str = "openvla/openvla-7b-v0") -> Path:
 if __name__ == "__main__":
     repo_path = register_openvla()
     model = AutoModel.from_pretrained(
-        "openvla/openvla-7b-v0",
+        "openvla/openvla-7b",
         torch_dtype="float16",
         trust_remote_code=True,
     )
