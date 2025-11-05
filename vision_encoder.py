@@ -15,7 +15,7 @@ CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
 
 class VisionEncoder(nn.Module):
-    """Wrapper that loads GR00T base weights and an optional LoRA adapter on GPU."""
+    """Wrapper that loads vision-language base weights and an optional LoRA adapter on GPU."""
 
     def __init__(
         self,

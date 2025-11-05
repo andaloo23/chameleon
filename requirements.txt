@@ -1,6 +1,5 @@
 huggingface-hub
 imageio
-isaacsim
 numpy
 peft
 Pillow
