@@ -1,0 +1,10 @@
+huggingface-hub
+imageio
+isaacsim
+numpy
+peft
+Pillow
+scipy
+torch
+torchvision
+transformers
