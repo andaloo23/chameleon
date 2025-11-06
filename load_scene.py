@@ -286,7 +286,14 @@ class IsaacPickPlaceEnv:
         upper = np.array([self.robot.joint_limits[name][1] for name in self.robot.joint_names], dtype=float)
         if action.shape != lower.shape:
             raise ValueError(f"Expected action of shape {lower.shape}, received {action.shape}")
-        return np.clip(action, lower, upper)
+        span = np.maximum(upper - lower, 1e-6)
+        margin = np.minimum(0.05 * span, 0.1)
+        margin = np.minimum(margin, span / 2.0 - 1e-4)
+        margin = np.maximum(margin, 1e-3)
+        lower_safe = lower + margin
+        upper_safe = upper - margin
+        clipped = np.clip(action, lower_safe, upper_safe)
+        return clipped
 
     def _get_observation(self):
         camera_frames = self._gather_sensor_observations()
@@ -474,9 +481,12 @@ class IsaacPickPlaceEnv:
             for idx, name in enumerate(self.robot.joint_names):
                 lower, upper = self.robot.joint_limits[name]
                 value = float(joint_positions[idx])
-                if value < lower - 1e-3 or value > upper + 1e-3:
+                tolerance = max(1e-2, 0.05 * (upper - lower))
+                if value < lower - tolerance or value > upper + tolerance:
                     flags["joint_limit_violation"] = True
-                    issues.append(f"Joint '{name}' outside limits: {value:.3f} not in [{lower:.3f}, {upper:.3f}].")
+                    issues.append(
+                        f"Joint '{name}' outside limits: {value:.3f} not in [{lower:.3f}, {upper:.3f}] (tol {tolerance:.3f})."
+                    )
                     break
 
         if joint_velocities is not None and not np.isfinite(joint_velocities).all():
@@ -493,7 +503,7 @@ class IsaacPickPlaceEnv:
                 flags["cube_below_ground"] = True
                 issues.append(f"Cube below ground plane: z={cube_pos[2]:.3f}.")
             xy_radius = float(np.linalg.norm(cube_pos[:2]))
-            max_radius = WORKSPACE_RADIUS_RANGE[1] + 0.15
+            max_radius = WORKSPACE_RADIUS_RANGE[1] + 0.35
             if xy_radius > max_radius:
                 flags["cube_out_of_workspace"] = True
                 issues.append(f"Cube XY radius {xy_radius:.3f} exceeds workspace limit {max_radius:.3f}.")

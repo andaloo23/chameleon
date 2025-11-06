@@ -60,14 +60,27 @@ class EpisodeResult:
 
 def _default_random_policy(env: IsaacPickPlaceEnv, observation: Dict[str, Any], step: int) -> np.ndarray:
     """Fallback random policy that samples joint targets within the robot limits."""
-    try:
-        return np.array(env.robot.get_random_joint_positions(), dtype=np.float32)
-    except Exception:
-        joint_positions = observation.get("joint_positions")
-        if joint_positions is not None:
-            noise = np.random.uniform(-0.05, 0.05, size=len(joint_positions))
-            return np.asarray(joint_positions + noise, dtype=np.float32)
-        return np.zeros(len(env.robot.joint_names), dtype=np.float32)
+    joint_names = getattr(env.robot, "joint_names", [])
+    joint_limits = getattr(env.robot, "joint_limits", {})
+    joint_positions = observation.get("joint_positions")
+
+    noisy_target: List[float] = []
+    for idx, name in enumerate(joint_names):
+        lower, upper = joint_limits.get(name, (-np.pi, np.pi))
+        span = max(upper - lower, 1e-6)
+        margin = min(max(0.05 * span, 0.01), span / 2.0 - 1e-4)
+        margin = max(margin, 1e-3)
+        low = lower + margin
+        high = upper - margin
+        center = 0.5 * (lower + upper)
+        amplitude = min(0.2 * span, (high - low) * 0.5)
+        if amplitude <= 0.0:
+            proposed = float(np.clip(center, low, high))
+        else:
+            delta = np.random.uniform(-amplitude, amplitude)
+            proposed = float(np.clip(center + delta, low, high))
+        noisy_target.append(proposed)
+    return np.asarray(noisy_target, dtype=np.float32)
 
 
 class SimulationLoop:
