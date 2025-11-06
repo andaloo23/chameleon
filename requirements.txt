@@ -4,7 +4,8 @@ numpy
 peft
 Pillow
 scipy
-timm
-torch
-torchvision
-transformers
+timm==0.9.10
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.40.1
+tokenizers==0.19.1

@@ -141,11 +141,13 @@ def register_openvla(repo_id: str = "openvla/openvla-7b") -> Tuple[Path, Type[Pr
 
 if __name__ == "__main__":
     repo_path, mdl_cls = register_openvla()
+    device_kwargs = {"device_map": "auto"} if torch.cuda.is_available() else {}
     try:
         model = AutoModel.from_pretrained(
             "openvla/openvla-7b",
             torch_dtype=torch.float16,
             trust_remote_code=True,
+            **device_kwargs,
         )
     except ValueError as exc:
         if "Unrecognized configuration class" not in str(exc):
@@ -154,5 +156,6 @@ if __name__ == "__main__":
             "openvla/openvla-7b",
             torch_dtype=torch.float16,
             trust_remote_code=True,
+            **device_kwargs,
         )
     print("Model device:", next(model.parameters()).device)
