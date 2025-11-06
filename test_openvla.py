@@ -1,11 +1,15 @@
 import sys
+from types import ModuleType
 from importlib import import_module
 from pathlib import Path
+import torch
 
 from huggingface_hub import model_info, snapshot_download
 from huggingface_hub.utils import GatedRepoError, HfHubHTTPError
+from typing import Tuple, Type
+
 from transformers import AutoConfig, AutoModel
-from transformers import PreTrainedModel, PretrainedConfig
+from transformers import PreTrainedModel
 
 
 def _download_remote_code(repo_id: str, destination: Path) -> Path:
@@ -28,7 +32,7 @@ def _download_remote_code(repo_id: str, destination: Path) -> Path:
     return Path(snapshot_path)
 
 
-def register_openvla(repo_id: str = "openvla/openvla-7b") -> Path:
+def register_openvla(repo_id: str = "openvla/openvla-7b") -> Tuple[Path, Type[PreTrainedModel]]:
     local_dir = Path.home() / "models" / "openvla"
     local_dir.mkdir(parents=True, exist_ok=True)
 
@@ -41,63 +45,114 @@ def register_openvla(repo_id: str = "openvla/openvla-7b") -> Path:
             "Otherwise, verify that the repository still exposes remote code."
         )
 
-    py_paths = {}
     snapshot_path = _download_remote_code(repo_id, local_dir)
 
+    if str(snapshot_path) not in sys.path:
+        sys.path.insert(0, str(snapshot_path))
+
+    has_package_root = any(Path(p).parts and Path(p).parts[0] == "openvla" for p in py_members)
+    if not has_package_root and "openvla" not in sys.modules:
+        pkg = ModuleType("openvla")
+        pkg.__path__ = [str(snapshot_path)]
+        pkg.__file__ = str(snapshot_path / "__init__.py")
+        sys.modules["openvla"] = pkg
+
+    module_names = []
     for rel_path in py_members:
         candidate = snapshot_path / rel_path
-        if candidate.is_file():
-            py_paths[candidate.stem.lower()] = candidate
+        if not candidate.is_file():
+            continue
+        module_parts = Path(rel_path).with_suffix("").parts
+        if any(not part.isidentifier() for part in module_parts):
+            continue
+        if has_package_root:
+            if module_parts[0] != "openvla":
+                continue
+            module_name = ".".join(module_parts)
+        else:
+            module_name = ".".join(("openvla",) + module_parts)
+        module_names.append(module_name)
 
-    py_files = list(py_paths.values())
-    if not py_files:
+    if not module_names:
         raise RuntimeError(
             "No Python files were downloaded for OpenVLA. "
             "Verify your Hugging Face credentials or the repository permissions."
         )
 
-    for path in py_files:
-        directory = str(path.parent.resolve())
-        if directory not in sys.path:
-            sys.path.insert(0, directory)
-
-    cfg_file = next((p for p in py_files if "configuration" in p.stem.lower()), None)
-    mdl_file = next((p for p in py_files if "modeling" in p.stem.lower()), None)
-    if cfg_file is None or mdl_file is None:
+    cfg_module_name = next(
+        (name for name in module_names if "configuration" in name.split(".")[-1].lower()),
+        None,
+    )
+    mdl_module_name = next(
+        (name for name in module_names if "modeling" in name.split(".")[-1].lower()),
+        None,
+    )
+    if cfg_module_name is None or mdl_module_name is None:
         raise RuntimeError("Could not identify configuration/modeling modules for OpenVLA.")
 
-    cfg_module = import_module(cfg_file.stem)
-    mdl_module = import_module(mdl_file.stem)
+    cfg = AutoConfig.from_pretrained(
+        repo_id,
+        revision=info.sha,
+        trust_remote_code=True,
+    )
 
-    cfg_candidates = []
-    for name in dir(cfg_module):
-        attr = getattr(cfg_module, name)
-        if isinstance(attr, type) and issubclass(attr, PretrainedConfig) and attr is not PretrainedConfig:
-            cfg_candidates.append(attr)
+    cfg_cls = cfg.__class__
+    remote_prefix = cfg_cls.__module__.rsplit(".", 1)[0]
+    mdl_suffix = mdl_module_name.split(".", 1)[1] if "." in mdl_module_name else mdl_module_name
 
+    try:
+        remote_mdl_module = import_module(f"{remote_prefix}.{mdl_suffix}")
+    except ModuleNotFoundError:
+        remote_mdl_module = import_module(mdl_module_name)
+
+    mdl_module = remote_mdl_module
     mdl_candidates = []
     for name in dir(mdl_module):
         attr = getattr(mdl_module, name)
         if isinstance(attr, type) and issubclass(attr, PreTrainedModel) and attr is not PreTrainedModel:
             mdl_candidates.append(attr)
 
-    if not cfg_candidates or not mdl_candidates:
-        raise RuntimeError("Could not locate config/model classes in the downloaded OpenVLA code.")
+    if not mdl_candidates:
+        raise RuntimeError("Could not locate model classes in the downloaded OpenVLA code.")
 
-    cfg_cls = cfg_candidates[0]
     mdl_cls = mdl_candidates[0]
 
-    AutoConfig.register("openvla", cfg_cls)
-    AutoModel.register(cfg_cls, mdl_cls)
+    if not hasattr(PreTrainedModel, "_supports_sdpa"):
+        PreTrainedModel._supports_sdpa = False  # Ensure base class exposes the attribute expected by recent Transformers.
+    if not hasattr(mdl_cls, "_supports_sdpa"):
+        mdl_cls._supports_sdpa = False  # Some downstream classes also get checked directly.
 
-    return cfg_file.parent
+    try:
+        AutoConfig.register("openvla", cfg_cls)
+    except ValueError:
+        pass
+    try:
+        AutoConfig.register(cfg.model_type, cfg_cls)
+    except ValueError:
+        pass
+    try:
+        AutoModel.register(cfg_cls, mdl_cls)
+    except ValueError:
+        pass
+
+    cfg_module_path = (snapshot_path / cfg_module_name.replace(".", "/")).with_suffix(".py")
+    return cfg_module_path.parent, mdl_cls
 
 
 if __name__ == "__main__":
-    repo_path = register_openvla()
-    model = AutoModel.from_pretrained(
-        "openvla/openvla-7b",
-        torch_dtype="float16",
-        trust_remote_code=True,
-    )
+    repo_path, mdl_cls = register_openvla()
+    try:
+        model = AutoModel.from_pretrained(
+            "openvla/openvla-7b",
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+        )
+    except ValueError as exc:
+        if "Unrecognized configuration class" not in str(exc):
+            raise
+        model = mdl_cls.from_pretrained(
+            "openvla/openvla-7b",
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+        )
     print("Model device:", next(model.parameters()).device)

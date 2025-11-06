@@ -4,6 +4,7 @@ numpy
 peft
 Pillow
 scipy
+timm
 torch
 torchvision
 transformers
