@@ -118,6 +118,63 @@ class SimulationLoop:
 
         self.random_policy = functools.partial(_default_random_policy, self.env)
 
+    def scripted_policy(self) -> PolicyFn:
+        """Return a simple reach-grasp-lift-place heuristic controller."""
+
+        def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
+            joint_positions = observation.get("joint_positions")
+            if joint_positions is None:
+                return self.random_policy(observation, step)
+
+            joint_positions = np.asarray(joint_positions, dtype=np.float32)
+            target = joint_positions.copy()
+
+            gripper_idx = None
+            try:
+                gripper_idx = self.env.robot.joint_names.index("gripper")
+            except ValueError:
+                gripper_idx = None
+
+            mid_config = np.array([
+                0.0,  # shoulder_pan
+                -0.8,  # shoulder_lift
+                1.2,  # elbow_flex
+                0.2,  # wrist_flex
+                0.0,  # wrist_roll
+                0.04 if gripper_idx is not None else 0.0,  # gripper open
+            ], dtype=np.float32)
+            mid_config = mid_config[: len(target)]
+
+            stage = step // 90
+            stage = min(stage, 3)
+
+            if stage == 0:
+                target[: len(mid_config)] = mid_config
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.04
+            elif stage == 1:
+                target[: len(mid_config)] = mid_config
+                target[1] -= 0.6
+                target[2] += 0.4
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.01
+            elif stage == 2:
+                target[: len(mid_config)] = mid_config
+                target[1] -= 0.4
+                target[2] += 0.8
+                target[3] -= 0.2
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.0
+            else:
+                target[: len(mid_config)] = mid_config
+                target[3] -= 0.5
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.04
+
+            return target
+
+        return _policy
+
     def run_episode(
         self,
         policy: Optional[PolicyFn] = None,

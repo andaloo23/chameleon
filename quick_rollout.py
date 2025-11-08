@@ -10,6 +10,14 @@ import numpy as np
 from simulator_loop import EpisodeResult, SimulationLoop
 
 
+def _json_default(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.generic,)):
+        return obj.item()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 def summarize_episode(idx: int, result: EpisodeResult, verbose: bool = False) -> dict:
     summary = {
         "episode": idx,
@@ -29,12 +37,17 @@ def summarize_episode(idx: int, result: EpisodeResult, verbose: bool = False) ->
     return summary
 
 
-def run(num_episodes: int, max_steps: int, headless: bool, verbose: bool) -> None:
+def run(num_episodes: int, max_steps: int, headless: bool, verbose: bool, policy: str) -> None:
     with SimulationLoop(max_steps=max_steps, headless=headless) as loop:
+        if policy == "heuristic":
+            policy_fn = loop.scripted_policy()
+        else:
+            policy_fn = None
+
         for ep_idx in range(num_episodes):
-            result = loop.run_episode()
+            result = loop.run_episode(policy=policy_fn)
             summary = summarize_episode(ep_idx, result, verbose=verbose)
-            print(json.dumps(summary, indent=2))
+            print(json.dumps(summary, indent=2, default=_json_default), flush=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=360, help="Maximum steps per episode.")
     parser.add_argument("--headless", action="store_true", help="Run Isaac Sim headless.")
     parser.add_argument("--verbose", action="store_true", help="Include reward/stage details in the output.")
+    parser.add_argument("--policy", choices=("random", "heuristic"), default="random", help="Which policy to run.")
     return parser.parse_args()
 
 
@@ -53,4 +67,5 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         headless=args.headless,
         verbose=args.verbose,
+        policy=args.policy,
     )
