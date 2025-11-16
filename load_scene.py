@@ -134,7 +134,8 @@ class IsaacPickPlaceEnv:
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
         self.robot_articulation = self.robot.get_robot()
-        self._ensure_robot_ground_clearance()
+        self._base_fixture_pose: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        self._default_joint_positions = self._compute_default_joint_positions()
 
         cube_xy, cup_xy = self._sample_object_positions()
         cube_position = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
@@ -184,8 +185,8 @@ class IsaacPickPlaceEnv:
         self.world.scene.add(self.side_camera)
 
         self.world.reset()
-        self._ensure_robot_ground_clearance()
-
+        self._apply_default_joint_positions()
+        self._capture_base_fixture_pose()
         top_cam_pos = np.array([0, -0.75, 8.0])
         top_cam_orient = np.array([-np.sqrt(0.25), -np.sqrt(0.25), -np.sqrt(0.25), np.sqrt(0.25)])
         side_cam_pos = np.array([6.0, -0.5, 0.5])
@@ -225,7 +226,8 @@ class IsaacPickPlaceEnv:
         UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(cup_translation)
 
         self.world.reset()
-        self._ensure_robot_ground_clearance()
+        self._apply_default_joint_positions()
+        self._restore_base_fixture_pose()
         self.robot.update_wrist_camera_position(verbose=False)
 
         for _ in range(5):
@@ -246,6 +248,7 @@ class IsaacPickPlaceEnv:
         joint_targets = self._clip_action(action)
         self.robot.set_joint_positions(joint_targets)
 
+        self._restore_base_fixture_pose()
         self.world.step(render=render)
         self._step_counter += 1
 
@@ -407,39 +410,51 @@ class IsaacPickPlaceEnv:
         height, width, _ = self._camera_frame_shapes[key]
         return np.zeros((height, width, 3), dtype=np.float32)
 
-    def _ensure_robot_ground_clearance(self):
-        """Lift the robot only if its geometry intersects the ground plane."""
-        if Gf is None or UsdGeom is None or self.robot is None:
+    def _compute_default_joint_positions(self):
+        defaults = {
+            "shoulder_pan": 0.0,
+            "shoulder_lift": -0.7,
+            "elbow_flex": 1.1,
+            "wrist_flex": 0.3,
+            "wrist_roll": 0.0,
+            "gripper": 0.03,
+        }
+        joint_values = []
+        for name in self.robot.joint_names:
+            lower, upper = self.robot.joint_limits[name]
+            value = defaults.get(name, 0.0)
+            joint_values.append(float(np.clip(value, lower, upper)))
+        return np.asarray(joint_values, dtype=np.float32)
+
+    def _apply_default_joint_positions(self):
+        if self.robot is None or self._default_joint_positions is None:
             return
         try:
-            stage = self.stage_context.get_stage()
-            prim = stage.GetPrimAtPath(self.robot.prim_path)
-        except Exception:
-            prim = None
-        if prim is None or not prim.IsValid():
-            return
-
-        try:
-            bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [])
-            bbox = bbox_cache.ComputeWorldBound(prim).GetBox()
-            min_z = float(bbox.GetMin()[2])
-        except Exception:
-            return
-
-        clearance_margin = 1e-3
-        if min_z >= -clearance_margin:
-            return
-
-        lift = -min_z + clearance_margin
-        try:
-            xform = UsdGeom.XformCommonAPI(prim)
-            current = xform.GetTranslateAttr().Get()
-            if current is None:
-                current = Gf.Vec3d(0.0, 0.0, 0.0)
-            target = Gf.Vec3d(float(current[0]), float(current[1]), float(current[2] + lift))
-            xform.SetTranslate(target)
+            self.robot.set_joint_positions(self._default_joint_positions)
         except Exception:
             pass
+
+    def _capture_base_fixture_pose(self):
+        if self.robot_articulation is None:
+            return
+        try:
+            position, orientation = self.robot_articulation.get_world_pose()
+        except Exception:
+            return
+        self._base_fixture_pose = (
+            np.asarray(position, dtype=float),
+            np.asarray(orientation, dtype=float),
+        )
+
+    def _restore_base_fixture_pose(self):
+        if self.robot_articulation is None or self._base_fixture_pose is None:
+            return
+        try:
+            position, orientation = self._base_fixture_pose
+            self.robot_articulation.set_world_pose(position=position, orientation=orientation)
+        except Exception:
+            pass
+
 
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:

@@ -129,47 +129,49 @@ class SimulationLoop:
             joint_positions = np.asarray(joint_positions, dtype=np.float32)
             target = joint_positions.copy()
 
-            gripper_idx = None
-            try:
-                gripper_idx = self.env.robot.joint_names.index("gripper")
-            except ValueError:
-                gripper_idx = None
+            robot = getattr(self.env, "robot", None)
+            joint_names = getattr(robot, "joint_names", [])
+            joint_limits = getattr(robot, "joint_limits", {})
+            name_to_idx = {name: idx for idx, name in enumerate(joint_names)}
 
-            mid_config = np.array([
-                0.0,  # shoulder_pan
-                -0.8,  # shoulder_lift
-                1.2,  # elbow_flex
-                0.2,  # wrist_flex
-                0.0,  # wrist_roll
-                0.04 if gripper_idx is not None else 0.0,  # gripper open
+            gripper_idx = name_to_idx.get("gripper")
+
+            base_config = np.array([
+                0.0,   # shoulder_pan
+                -0.35,  # shoulder_lift keep arm high
+                0.9,   # elbow_flex
+                0.4,   # wrist_flex pointing slightly down
+                0.0,   # wrist_roll
+                0.035 if gripper_idx is not None else 0.0,
             ], dtype=np.float32)
-            mid_config = mid_config[: len(target)]
+            base_config = base_config[: len(target)]
 
-            stage = step // 90
-            stage = min(stage, 3)
+            def apply_offsets(base: np.ndarray, offsets: Dict[str, float]) -> np.ndarray:
+                updated = base.copy()
+                for name, delta in offsets.items():
+                    idx = name_to_idx.get(name)
+                    if idx is None or idx >= len(updated):
+                        continue
+                    lower, upper = joint_limits.get(name, (-np.pi, np.pi))
+                    margin = 0.05 if name != "gripper" else 0.002
+                    updated[idx] = np.clip(base[idx] + delta, lower + margin, upper - margin)
+                return updated
 
-            if stage == 0:
-                target[: len(mid_config)] = mid_config
-                if gripper_idx is not None:
-                    target[gripper_idx] = 0.04
-            elif stage == 1:
-                target[: len(mid_config)] = mid_config
-                target[1] -= 0.6
-                target[2] += 0.4
-                if gripper_idx is not None:
-                    target[gripper_idx] = 0.01
-            elif stage == 2:
-                target[: len(mid_config)] = mid_config
-                target[1] -= 0.4
-                target[2] += 0.8
-                target[3] -= 0.2
-                if gripper_idx is not None:
-                    target[gripper_idx] = 0.0
-            else:
-                target[: len(mid_config)] = mid_config
-                target[3] -= 0.5
-                if gripper_idx is not None:
-                    target[gripper_idx] = 0.04
+            stage_configs = (
+                (apply_offsets(base_config, {}), 0.04),
+                (apply_offsets(base_config, {"shoulder_lift": -0.05, "elbow_flex": 0.15}), 0.025),
+                (apply_offsets(base_config, {"shoulder_lift": -0.08, "elbow_flex": 0.25, "wrist_flex": -0.05}), 0.0),
+                (apply_offsets(base_config, {"shoulder_lift": 0.02, "wrist_flex": 0.1}), 0.04),
+            )
+
+            stage = min(step // 90, len(stage_configs) - 1)
+            stage_target, gripper_value = stage_configs[stage]
+            target[: len(stage_target)] = stage_target
+            if gripper_idx is not None and gripper_idx < len(target):
+                lower, upper = joint_limits.get("gripper", (0.0, 0.04))
+                margin = 0.001
+                safe_value = np.clip(gripper_value, lower + margin, upper - margin)
+                target[gripper_idx] = safe_value
 
             return target
 
