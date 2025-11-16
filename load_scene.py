@@ -134,6 +134,7 @@ class IsaacPickPlaceEnv:
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
         self.robot_articulation = self.robot.get_robot()
+        self._ensure_robot_ground_clearance()
 
         cube_xy, cup_xy = self._sample_object_positions()
         cube_position = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
@@ -183,6 +184,7 @@ class IsaacPickPlaceEnv:
         self.world.scene.add(self.side_camera)
 
         self.world.reset()
+        self._ensure_robot_ground_clearance()
 
         top_cam_pos = np.array([0, -0.75, 8.0])
         top_cam_orient = np.array([-np.sqrt(0.25), -np.sqrt(0.25), -np.sqrt(0.25), np.sqrt(0.25)])
@@ -223,6 +225,7 @@ class IsaacPickPlaceEnv:
         UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(cup_translation)
 
         self.world.reset()
+        self._ensure_robot_ground_clearance()
         self.robot.update_wrist_camera_position(verbose=False)
 
         for _ in range(5):
@@ -403,6 +406,40 @@ class IsaacPickPlaceEnv:
 
         height, width, _ = self._camera_frame_shapes[key]
         return np.zeros((height, width, 3), dtype=np.float32)
+
+    def _ensure_robot_ground_clearance(self):
+        """Lift the robot only if its geometry intersects the ground plane."""
+        if Gf is None or UsdGeom is None or self.robot is None:
+            return
+        try:
+            stage = self.stage_context.get_stage()
+            prim = stage.GetPrimAtPath(self.robot.prim_path)
+        except Exception:
+            prim = None
+        if prim is None or not prim.IsValid():
+            return
+
+        try:
+            bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [])
+            bbox = bbox_cache.ComputeWorldBound(prim).GetBox()
+            min_z = float(bbox.GetMin()[2])
+        except Exception:
+            return
+
+        clearance_margin = 1e-3
+        if min_z >= -clearance_margin:
+            return
+
+        lift = -min_z + clearance_margin
+        try:
+            xform = UsdGeom.XformCommonAPI(prim)
+            current = xform.GetTranslateAttr().Get()
+            if current is None:
+                current = Gf.Vec3d(0.0, 0.0, 0.0)
+            target = Gf.Vec3d(float(current[0]), float(current[1]), float(current[2] + lift))
+            xform.SetTranslate(target)
+        except Exception:
+            pass
 
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:
