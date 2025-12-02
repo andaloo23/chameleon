@@ -9,9 +9,7 @@ def calibrate():
     env = IsaacPickPlaceEnv(headless=True, capture_images=False)
     env.reset()
 
-    # Define the "Grasp" configuration from simulator_loop.py
-    # Base: [0.0, -0.35, 0.9, 0.4, 0.0, 0.035]
-    # Stage 2 (Grasp):
+    # grasp configuration
     #   shoulder_lift: -0.35 - 0.08 = -0.43
     #   elbow_flex:     0.9 + 0.25  =  1.15
     #   wrist_flex:     0.4 - 0.05  =  0.35
@@ -32,7 +30,6 @@ def calibrate():
     for _ in range(120):
         env.step(grasp_config, render=False)
 
-    # Get the Wrist Camera pose (proxy for gripper)
     if env.robot.wrist_camera:
         cam_pos, cam_orient = env.robot.wrist_camera.get_world_pose()
         print(f"\n[RESULT] Wrist Camera Position (xyz): {cam_pos}")
@@ -40,7 +37,10 @@ def calibrate():
     else:
         print("[error] Wrist camera not found on robot.")
 
-    # Get the Cube pose
+    if env.robot_articulation:
+        base_pos, base_rot = env.robot_articulation.get_world_pose()
+        print(f"[RESULT] Robot Base Position (xyz): {base_pos}")
+    
     if env.cube:
         cube_pos, _ = env.cube.get_world_pose()
         print(f"[RESULT] Current Cube Position (xyz): {cube_pos}")

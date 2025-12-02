@@ -100,7 +100,7 @@ class SO100Robot:
             return None, None
             
         try:
-            local_translation = np.array([0.0, 0.4, -1.0])
+            local_translation = np.array([0.0, 0.05, -0.08])
 
             wrist_rot = R.from_matrix(np.array([
                 [1, 0, 0],           # X-axis: right

@@ -278,12 +278,14 @@ class IsaacPickPlaceEnv:
         if self.simulation_app is not None:
             self.simulation_app.close()
 
-    # ------------------------------------------------------------------
-    # Helpers
-
     def _sample_object_positions(self):
-        cube_xy = sample_workspace_xy(self.rng)
-        cup_xy = sample_workspace_xy(self.rng, existing=[cube_xy], min_separation=CUP_CUBE_MIN_DISTANCE)
+        # HARDCODED for heuristic policy calibration
+        # Tuned based on calibrate_home.py results
+        cube_xy = np.array([0.0, -0.33]) 
+        
+        # Place cup somewhere else for now
+        cup_xy = np.array([0.0, -0.55])
+        
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
@@ -413,7 +415,8 @@ class IsaacPickPlaceEnv:
     def _compute_default_joint_positions(self):
         defaults = {
             "shoulder_pan": 0.0,
-            "shoulder_lift": -0.7,
+            # Lift arm higher to avoid collision with cube at spawn
+            "shoulder_lift": -1.5, 
             "elbow_flex": 1.1,
             "wrist_flex": 0.3,
             "wrist_roll": 0.0,
