@@ -156,6 +156,9 @@ class RewardEngine:
             "reward_components": self.reward_components.copy(),
             "stage_flags": self.stage_flags.copy(),
             "drop_detected": self.drop_detected,
+            # Add debug state
+            "task_state": {k: (v.tolist() if isinstance(v, np.ndarray) else v) 
+                           for k, v in self.task_state.items()},
         }
         validation = getattr(self.env, "last_validation_result", None)
         if validation is not None:

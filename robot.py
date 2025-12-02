@@ -75,7 +75,7 @@ class SO100Robot:
             prim_path=wrist_camera_path,
             name="wrist_camera",
             frequency=30,
-            resolution=(640, 480),
+            resolution=(128, 128),
         )
         
         self.world.scene.add(self.wrist_camera)

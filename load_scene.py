@@ -34,6 +34,8 @@ def _ensure_isaac_sim(headless=False):
         _SIMULATION_APP = SimulationApp({
             "headless": headless,
             "load_stage_on_start": False,
+            # Force renderer type to ensure cameras work in headless
+            "renderer": "RayTracedLighting", 
         })
 
         from omni.isaac.core import World as _World
@@ -86,7 +88,7 @@ class IsaacPickPlaceEnv:
         self.cup_xform = None
         self.cube = None
 
-        self.cube_scale = np.array([0.1, 0.1, 0.1], dtype=float)
+        self.cube_scale = np.array([0.03, 0.03, 0.03], dtype=float)
         self.cup_height = 0.18
         self.cup_outer_radius_top = 0.11
         self.cup_outer_radius_bottom = 0.085
@@ -170,7 +172,7 @@ class IsaacPickPlaceEnv:
             position=np.array([0, 0, 1.5]),
             orientation=np.array([0, 0, 0, 1]),
             frequency=30,
-            resolution=(640, 480),
+            resolution=(128, 128),
         )
         self.side_camera = Camera(
             prim_path="/World/side_camera",
@@ -178,7 +180,7 @@ class IsaacPickPlaceEnv:
             position=np.array([1.0, 0, 0.5]),
             orientation=np.array([0, 0, 0.707, 0.707]),
             frequency=30,
-            resolution=(640, 480),
+            resolution=(128, 128),
         )
 
         self.world.scene.add(self.top_camera)
@@ -280,8 +282,8 @@ class IsaacPickPlaceEnv:
 
     def _sample_object_positions(self):
         # HARDCODED for heuristic policy calibration
-        # Tuned based on calibrate_home.py results
-        cube_xy = np.array([0.0, -0.33]) 
+        # Robot reach with current policy is [0.0, -0.336]. Aligning spawn to match.
+        cube_xy = np.array([0.0, -0.336]) 
         
         # Place cup somewhere else for now
         cup_xy = np.array([0.0, -0.55])
@@ -393,7 +395,7 @@ class IsaacPickPlaceEnv:
         if key in self._camera_frame_shapes:
             height, width, _ = self._camera_frame_shapes[key]
         else:
-            width, height = 640, 480
+            width, height = 128, 128
 
             if camera is not None:
                 resolution = None

@@ -158,10 +158,15 @@ class SimulationLoop:
                 return updated
 
             stage_configs = (
-                (apply_offsets(base_config, {}), 0.04),
-                (apply_offsets(base_config, {"shoulder_lift": -0.05, "elbow_flex": 0.15}), 0.025),
-                (apply_offsets(base_config, {"shoulder_lift": -0.08, "elbow_flex": 0.25, "wrist_flex": -0.05}), 0.0),
-                (apply_offsets(base_config, {"shoulder_lift": 0.02, "wrist_flex": 0.1}), 0.04),
+                # Stage 0: Hover HIGH above the table to avoid kicking the cube
+                (apply_offsets(base_config, {"shoulder_lift": -0.6}), 0.04),
+                # Stage 1: Pre-grasp (lower)
+                (apply_offsets(base_config, {"shoulder_lift": -0.05, "elbow_flex": 0.15}), 0.04),
+                # Stage 2: Grasp - Reach Further (Less elbow flex)
+                # Changed gripper to 0.02 to grasp 3cm cube (tight but fits)
+                (apply_offsets(base_config, {"shoulder_lift": -0.08, "elbow_flex": 0.10, "wrist_flex": -0.05}), 0.02),
+                # Lift but KEEP CLOSED (0.02)
+                (apply_offsets(base_config, {"shoulder_lift": 0.02, "wrist_flex": 0.1}), 0.02),
             )
 
             stage = min(step // 90, len(stage_configs) - 1)
