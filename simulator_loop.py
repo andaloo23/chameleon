@@ -136,12 +136,13 @@ class SimulationLoop:
 
             gripper_idx = name_to_idx.get("gripper")
 
+            # Base config for the robot
             base_config = np.array([
                 0.0,   # shoulder_pan
-                -0.35,  # shoulder_lift keep arm high
-                0.9,   # elbow_flex
-                0.4,   # wrist_flex pointing slightly down
-                0.0,   # wrist_roll
+                -0.35,  # shoulder_lift (start high)
+                1.15,   # elbow_flex (default)
+                0.35,   # wrist_flex
+                0.0,    # wrist_roll
                 0.035 if gripper_idx is not None else 0.0,
             ], dtype=np.float32)
             base_config = base_config[: len(target)]
@@ -157,19 +158,69 @@ class SimulationLoop:
                     updated[idx] = np.clip(base[idx] + delta, lower + margin, upper - margin)
                 return updated
 
+            # Define key poses (offsets from base_config)
+            # Stage 2 Grasp target:
+            # pan: -0.05 (Correct X offset)
+            # lift: 0.0 (Correct Z height to ~0.015)
+            # elbow: 0.0 offset (Keep 1.15 to reach Y ~ -0.336)
+            # gripper: 0.025 (2.5cm for 3cm cube)
+
+            # Stage 3 Lift target:
+            # lift: -0.4 (Lift up)
+            # elbow: -0.1 (Pull back to 1.05)
+
+            # Smooth interpolation for Lift stage (Stage 3, steps 180+)
+            if step >= 180:
+                # Interpolate shoulder_lift and elbow
+                progress = min(1.0, (step - 180) / 50.0)
+                
+                # Start from Grasp pose
+                start_lift = 0.0
+                end_lift = -0.4
+                
+                start_elbow = 0.0 # relative to 1.15 base
+                end_elbow = -0.1  # relative to 1.15 base -> 1.05
+                
+                current_lift = start_lift + (end_lift - start_lift) * progress
+                current_elbow = start_elbow + (end_elbow - start_elbow) * progress
+                
+                target = apply_offsets(base_config, {
+                    "shoulder_pan": -0.05,
+                    "shoulder_lift": current_lift, 
+                    "elbow_flex": current_elbow,
+                    "wrist_flex": 0.0, # default 0.35
+                    "gripper": 0.025   # keep closed
+                })
+                
+                # Explicit gripper override
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.025
+                return target
+
+            # Discrete stages
             stage_configs = (
-                # Stage 0: Hover HIGH above the table to avoid kicking the cube
+                # Stage 0: Hover HIGH above
                 (apply_offsets(base_config, {"shoulder_lift": -0.6}), 0.04),
                 # Stage 1: Pre-grasp (lower)
-                (apply_offsets(base_config, {"shoulder_lift": -0.05, "elbow_flex": 0.15}), 0.04),
-                # Stage 2: Grasp - Reach Further (Less elbow flex)
-                # Changed gripper to 0.02 to grasp 3cm cube (tight but fits)
-                (apply_offsets(base_config, {"shoulder_lift": -0.08, "elbow_flex": 0.10, "wrist_flex": -0.05}), 0.02),
-                # Lift but KEEP CLOSED (0.02)
-                (apply_offsets(base_config, {"shoulder_lift": 0.02, "wrist_flex": 0.1}), 0.02),
+                (apply_offsets(base_config, {"shoulder_lift": -0.2}), 0.04),
+                # Stage 2: Grasp (Action!)
+                # Set absolute targets via offsets
+                (apply_offsets(base_config, {
+                    "shoulder_pan": -0.05, # Turn Right
+                    "shoulder_lift": 0.0,  # Go Low (Z~0.015)
+                    "elbow_flex": 0.0,     # Extend Y (1.15)
+                    "wrist_flex": 0.0      # default
+                }), 0.025), # Gripper 2.5cm
             )
 
-            stage = min(step // 90, len(stage_configs) - 1)
+            # Map steps to stages: 0-60 (Stage 0), 60-100 (Stage 1), 100-180 (Stage 2)
+            if step < 60:
+                stage = 0
+            elif step < 100:
+                stage = 1
+            else:
+                stage = 2
+            
             stage_target, gripper_value = stage_configs[stage]
             target[: len(stage_target)] = stage_target
             if gripper_idx is not None and gripper_idx < len(target):
@@ -206,7 +257,11 @@ class SimulationLoop:
             policy_fn = policy
 
         if reset:
-            observation = self.env.reset()
+            try:
+                observation = self.env.reset(render=render)
+            except TypeError:
+                # Fallback for environments that don't accept render in reset
+                observation = self.env.reset()
         else:
             observation = self.env._get_observation()  # type: ignore[attr-defined]
 

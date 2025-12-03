@@ -34,8 +34,6 @@ def _ensure_isaac_sim(headless=False):
         _SIMULATION_APP = SimulationApp({
             "headless": headless,
             "load_stage_on_start": False,
-            # Force renderer type to ensure cameras work in headless
-            "renderer": "RayTracedLighting", 
         })
 
         from omni.isaac.core import World as _World
@@ -213,9 +211,10 @@ class IsaacPickPlaceEnv:
 
         self._apply_domain_randomization()
 
-    def reset(self):
+    def reset(self, render=None):
         """Reset the scene with new randomized object placements."""
         self._step_counter = 0
+        render = not self.headless if render is None else bool(render)
 
         cube_xy, cup_xy = self._sample_object_positions()
         self._cube_xy = cube_xy
@@ -232,8 +231,10 @@ class IsaacPickPlaceEnv:
         self._restore_base_fixture_pose()
         self.robot.update_wrist_camera_position(verbose=False)
 
-        for _ in range(5):
-            self.world.step(render=not self.headless)
+        for i in range(5):
+            is_last = (i == 4)
+            do_render = render if is_last else False
+            self.world.step(render=do_render)
 
         self._apply_domain_randomization()
         self.reward_engine.reset()
@@ -281,11 +282,8 @@ class IsaacPickPlaceEnv:
             self.simulation_app.close()
 
     def _sample_object_positions(self):
-        # HARDCODED for heuristic policy calibration
-        # Robot reach with current policy is [0.0, -0.336]. Aligning spawn to match.
         cube_xy = np.array([0.0, -0.336]) 
         
-        # Place cup somewhere else for now
         cup_xy = np.array([0.0, -0.55])
         
         return cube_xy, cup_xy
@@ -348,7 +346,7 @@ class IsaacPickPlaceEnv:
                     if processed is not None:
                         self._last_camera_frames[key] = processed
                         self._camera_failure_logged[key] = False
-
+            
             if processed is None:
                 cached_frame = self._last_camera_frames.get(key)
                 if cached_frame is not None:
@@ -417,7 +415,6 @@ class IsaacPickPlaceEnv:
     def _compute_default_joint_positions(self):
         defaults = {
             "shoulder_pan": 0.0,
-            # Lift arm higher to avoid collision with cube at spawn
             "shoulder_lift": -1.5, 
             "elbow_flex": 1.1,
             "wrist_flex": 0.3,

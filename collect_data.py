@@ -1,106 +1,111 @@
-
-import os
-import time
-import json
 import numpy as np
-from simulator_loop import SimulationLoop, EpisodeResult
-from image_utils import write_png
+import os
+import json
+from simulator_loop import SimulationLoop
+from load_scene import IsaacPickPlaceEnv
+import image_utils
+import time
 
-DATA_DIR = "collected_data"
-
-def save_episode(episode_idx: int, result: EpisodeResult):
-    """Save the episode data to disk."""
-    # DEBUG: Save EVERYTHING to diagnose failure
-    is_success = True 
+def save_episode(episode_idx, steps, obs_list, action_list, reward_list, info_list, success):
+    data_dir = "data/rollouts"
+    os.makedirs(data_dir, exist_ok=True)
     
-    if not is_success:
-        print(f"[info] Episode {episode_idx} failed (not lifted), skipping save.")
-        return
-
-    ep_dir = os.path.join(DATA_DIR, f"episode_{episode_idx}")
-    os.makedirs(ep_dir, exist_ok=True)
-
-    traj_data = {
-        "actions": [],
-        "rewards": [],
-        "dones": [],
-        "infos": [],
-        "joint_positions": [],
-        "images": []
-    }
-
-    print(f"[info] Saving episode {episode_idx} with {len(result.transitions)} steps...")
-    if result.termination_reason:
-        print(f"[info] Termination reason: {result.termination_reason}")
-
-    for t_idx, transition in enumerate(result.transitions):
-        traj_data["actions"].append(transition.action.tolist())
-        traj_data["rewards"].append(transition.reward)
-        traj_data["dones"].append(transition.done)
-
-        if transition.info:
-             clean_info = {}
-             for k, v in transition.info.items():
-                 if isinstance(v, dict):
-                     clean_info[k] = v
-                 elif isinstance(v, (bool, int, float, str)):
-                     clean_info[k] = v
-                 elif isinstance(v, (list, tuple)):
-                     clean_info[k] = v
-             traj_data["infos"].append(clean_info)
-        else:
-             traj_data["infos"].append({})
-        
-        obs = transition.observation
-        if "joint_positions" in obs:
-             traj_data["joint_positions"].append(obs["joint_positions"].tolist())
-        
-        traj_data["images"].append({})
-
-    json_path = os.path.join(ep_dir, "trajectory.json")
+    episode_dir = os.path.join(data_dir, f"episode_{episode_idx}")
+    os.makedirs(episode_dir, exist_ok=True)
+    
+    traj_data = []
+    for i in range(len(steps)):
+        info_step = info_list[i]
+        serializable_info = {}
+        for k, v in info_step.items():
+            if isinstance(v, np.ndarray):
+                serializable_info[k] = v.tolist()
+            else:
+                serializable_info[k] = v
+                
+        traj_data.append({
+            "step": steps[i],
+            "action": action_list[i].tolist(),
+            "reward": float(reward_list[i]),
+            "info": serializable_info
+        })
+    
+    json_path = os.path.join(episode_dir, "trajectory.json")
     with open(json_path, "w") as f:
         json.dump(traj_data, f, indent=2)
+    print(f"[info] Saved trajectory to {json_path}")
 
-    for t_idx, transition in enumerate(result.transitions):
-        obs = transition.observation
-        step_image_info = {}
-        
+    images_saved = 0
+    for i, obs in enumerate(obs_list):
+        step_num = steps[i]
         for key, value in obs.items():
-            if key.endswith("_rgb") and value is not None:
+            if "rgb" in key:
                 try:
-                    img_filename = f"step_{t_idx}_{key}.png"
-                    img_path = os.path.join(ep_dir, img_filename)
-                    write_png(img_path, value)
-                    step_image_info[key] = img_filename
+                    img_array = np.array(value)
+                    
+                    if len(img_array.shape) == 3 and img_array.shape[0] > 10 and img_array.shape[1] > 10:
+                        image_name = f"{key}_{step_num:04d}.png"
+                        image_path = os.path.join(episode_dir, image_name)
+                        image_utils.write_png(image_path, img_array)
+                        images_saved += 1
+                    else:
+                        pass
                 except Exception as e:
-                    print(f"[warn] Failed to save image {key} at step {t_idx}: {e}")
+                    pass
 
-        traj_data["images"][t_idx] = step_image_info
+    print(f"[info] Saved episode {episode_idx} with {len(steps)} steps and {images_saved} images.")
 
-    with open(json_path, "w") as f:
-        json.dump(traj_data, f, indent=2)
+def main():
+    print("[info] Initializing SimulationLoop...")
+    loop = SimulationLoop(capture_images=False)
+    
+    target_successes = 1  # Just 1 for debugging
+    success_count = 0
+    episode_count = 0
+    
+    policy = loop.scripted_policy()
+    
+    while success_count < target_successes:
+        print(f"[info] Starting episode {episode_count}...")
+        
+        try:
+            result = loop.run_episode(policy=policy, render=True)
+        except Exception as e:
+            print(f"[error] Episode {episode_count} crashed: {e}")
+            raise
+        
+        print(f"[info] Episode {episode_count} completed. Steps: {len(result.transitions)}")
 
-def collect():
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    with SimulationLoop(max_steps=360, headless=True, capture_images=True, image_interval=1) as loop:
-        policy_fn = loop.scripted_policy()
-
-        success_count = 0
-        target_successes = 1 # Just run 1 for debug
-
-        ep_idx = 0
-        while success_count < target_successes:
-            print(f"--- Starting Episode {ep_idx} ---")
-            # FORCE RENDER=TRUE so cameras update even in headless mode
-            result = loop.run_episode(policy=policy_fn, render=True)
+        is_success = True 
+        
+        if is_success:
+            print(f"[info] Episode {episode_count} considered success (forced)!")
             
-            # ALWAYS SAVE
-            save_episode(ep_idx, result)
+            steps = []
+            obs_list = []
+            action_list = []
+            reward_list = []
+            info_list = []
+            
+            for i, transition in enumerate(result.transitions):
+                steps.append(i)
+                obs_list.append(transition.observation)
+                action_list.append(transition.action)
+                reward_list.append(transition.reward)
+                info = transition.info if transition.info else {}
+                info_list.append(info)
+            
+            save_episode(success_count, steps, obs_list, action_list, reward_list, info_list, is_success)
             success_count += 1
+        else:
+            print(f"[info] Episode {episode_count} failed.")
             
-            ep_idx += 1
+        episode_count += 1
+        if episode_count >= 5: 
+            break
+            
+    print("[info] Closing SimulationLoop...")
+    loop.close()
 
 if __name__ == "__main__":
-    collect()
-
+    main()
