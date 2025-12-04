@@ -5,7 +5,6 @@ from load_scene import IsaacPickPlaceEnv
 
 def calibrate():
     print("[info] Initializing environment...")
-    # minimal image interval since we don't need images
     env = IsaacPickPlaceEnv(headless=True, capture_images=False)
     env.reset()
 
@@ -25,8 +24,6 @@ def calibrate():
 
     print(f"[info] Moving to grasp configuration: {grasp_config}")
     
-    # Move the robot
-    # We run for 120 steps to ensure it settles fully
     for _ in range(120):
         env.step(grasp_config, render=False)
 

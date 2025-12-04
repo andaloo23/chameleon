@@ -135,8 +135,10 @@ class SimulationLoop:
             name_to_idx = {name: idx for idx, name in enumerate(joint_names)}
 
             gripper_idx = name_to_idx.get("gripper")
+            reward_engine = getattr(self.env, "reward_engine", None)
+            stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
+            grasped_flag = bool(stage_flags.get("grasped"))
 
-            # Base config for the robot
             base_config = np.array([
                 0.0,   # shoulder_pan
                 -0.35,  # shoulder_lift (start high)
@@ -159,75 +161,81 @@ class SimulationLoop:
                 return updated
 
             # Define key poses (offsets from base_config)
-            # Stage 2 Grasp target:
-            # pan: -0.05 (Correct X offset)
-            # lift: 0.0 (Correct Z height to ~0.015)
-            # elbow: 0.0 offset (Keep 1.15 to reach Y ~ -0.336)
-            # gripper: 0.025 (2.5cm for 3cm cube)
-
-            # Stage 3 Lift target:
-            # lift: -0.4 (Lift up)
-            # elbow: -0.1 (Pull back to 1.05)
-
-            # Smooth interpolation for Lift stage (Stage 3, steps 180+)
-            if step >= 180:
-                # Interpolate shoulder_lift and elbow
-                progress = min(1.0, (step - 180) / 50.0)
-                
-                # Start from Grasp pose
-                start_lift = 0.0
-                end_lift = -0.4
-                
-                start_elbow = 0.0 # relative to 1.15 base
-                end_elbow = -0.1  # relative to 1.15 base -> 1.05
-                
-                current_lift = start_lift + (end_lift - start_lift) * progress
-                current_elbow = start_elbow + (end_elbow - start_elbow) * progress
-                
-                target = apply_offsets(base_config, {
-                    "shoulder_pan": -0.05,
-                    "shoulder_lift": current_lift, 
-                    "elbow_flex": current_elbow,
-                    "wrist_flex": 0.0, # default 0.35
-                    "gripper": 0.025   # keep closed
-                })
-                
-                # Explicit gripper override
-                if gripper_idx is not None:
-                    target[gripper_idx] = 0.025
-                return target
-
-            # Discrete stages
             stage_configs = (
                 # Stage 0: Hover HIGH above
                 (apply_offsets(base_config, {"shoulder_lift": -0.6}), 0.04),
-                # Stage 1: Pre-grasp (lower)
+                # Stage 1: Pre-grasp (bring arm closer but stay open)
                 (apply_offsets(base_config, {"shoulder_lift": -0.2}), 0.04),
-                # Stage 2: Grasp (Action!)
-                # Set absolute targets via offsets
+                # Stage 2a: Aggressive approach (open gripper)
                 (apply_offsets(base_config, {
-                    "shoulder_pan": -0.05, # Turn Right
-                    "shoulder_lift": 0.0,  # Go Low (Z~0.015)
-                    "elbow_flex": 0.0,     # Extend Y (1.15)
-                    "wrist_flex": 0.0      # default
-                }), 0.025), # Gripper 2.5cm
+                    "shoulder_pan": -0.005,
+                    "shoulder_lift": 0.70,
+                    "elbow_flex": -1.15,
+                    "wrist_flex": -0.55,
+                }), 0.04),
+                # Stage 2b: Close while staying low
+                (apply_offsets(base_config, {
+                    "shoulder_pan": -0.005,
+                    "shoulder_lift": 0.85,
+                    "elbow_flex": -1.25,
+                    "wrist_flex": -0.70,
+                }), 0.004),
+                # Stage 2c: Press down slightly with firm grip
+                (apply_offsets(base_config, {
+                    "shoulder_pan": -0.005,
+                    "shoulder_lift": 0.95,
+                    "elbow_flex": -1.32,
+                    "wrist_flex": -0.78,
+                }), 0.002),
             )
 
-            # Map steps to stages: 0-60 (Stage 0), 60-100 (Stage 1), 100-180 (Stage 2)
-            if step < 60:
-                stage = 0
-            elif step < 100:
-                stage = 1
+            press_pose = stage_configs[-1][0]
+            lift_force_step = 300
+            lift_ready_step = 180
+            ready_to_lift = grasped_flag and step >= lift_ready_step
+            forced_lift = step >= lift_force_step
+
+            if ready_to_lift or forced_lift:
+                lift_anchor_step = lift_ready_step if ready_to_lift else lift_force_step
+                progress = min(1.0, (step - lift_anchor_step) / 80.0)
+                lift_target_pose = apply_offsets(base_config, {
+                    "shoulder_pan": -0.015,
+                    "shoulder_lift": -0.45,
+                    "elbow_flex": -0.15,
+                    "wrist_flex": 0.10,
+                })
+                target = press_pose + (lift_target_pose - press_pose) * progress
+                if gripper_idx is not None:
+                    target[gripper_idx] = 0.002
             else:
-                stage = 2
-            
-            stage_target, gripper_value = stage_configs[stage]
-            target[: len(stage_target)] = stage_target
-            if gripper_idx is not None and gripper_idx < len(target):
-                lower, upper = joint_limits.get("gripper", (0.0, 0.04))
-                margin = 0.001
-                safe_value = np.clip(gripper_value, lower + margin, upper - margin)
-                target[gripper_idx] = safe_value
+                # Map steps to stages:
+                # 0-60: Stage 0
+                # 60-100: Stage 1
+                # 100-140: Stage 2a (Approach)
+                # 140-170: Stage 2b (Close)
+                # >=170: Stage 2c (Press) while waiting for grasp
+                if step < 60:
+                    stage = 0
+                elif step < 100:
+                    stage = 1
+                elif step < 140:
+                    stage = 2
+                elif step < 170:
+                    stage = 3
+                else:
+                    stage = 4
+
+                stage_target, gripper_value = stage_configs[stage]
+                target = stage_target.copy()
+                if gripper_idx is not None and gripper_idx < len(target):
+                    lower, upper = joint_limits.get("gripper", (0.0, 0.04))
+                    margin = 0.001
+                    safe_value = np.clip(gripper_value, lower + margin, upper - margin)
+                    target[gripper_idx] = safe_value
+
+            if step % 60 == 0:
+                 # Print the actual target for shoulder_lift (idx 1) and shoulder_pan (idx 0)
+                 print(f"[DEBUG] Step {step} Target: lift={target[1]:.4f} pan={target[0]:.4f} grip={target[gripper_idx] if gripper_idx else 0:.4f}")
 
             return target
 
@@ -260,10 +268,9 @@ class SimulationLoop:
             try:
                 observation = self.env.reset(render=render)
             except TypeError:
-                # Fallback for environments that don't accept render in reset
                 observation = self.env.reset()
         else:
-            observation = self.env._get_observation()  # type: ignore[attr-defined]
+            observation = self.env._get_observation()
 
         transitions: List[Transition] = []
         cumulative_reward = 0.0

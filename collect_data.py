@@ -1,111 +1,120 @@
-import numpy as np
-import os
-import json
-from simulator_loop import SimulationLoop
-from load_scene import IsaacPickPlaceEnv
-import image_utils
-import time
+from __future__ import annotations
 
-def save_episode(episode_idx, steps, obs_list, action_list, reward_list, info_list, success):
-    data_dir = "data/rollouts"
-    os.makedirs(data_dir, exist_ok=True)
-    
-    episode_dir = os.path.join(data_dir, f"episode_{episode_idx}")
+import argparse
+import json
+import os
+import sys
+from typing import List, Optional
+
+import numpy as np
+from PIL import Image
+
+from load_scene import IsaacPickPlaceEnv
+from simulator_loop import EpisodeResult, SimulationLoop, PolicyFn
+
+def save_episode(
+    result: EpisodeResult,
+    output_dir: str,
+    episode_idx: int,
+    save_images: bool = True
+) -> None:
+    """Save rollout data (JSON trajectory + images) to disk."""
+    episode_dir = os.path.join(output_dir, f"episode_{episode_idx}")
     os.makedirs(episode_dir, exist_ok=True)
+
+    traj = result.to_trajectory()
     
-    traj_data = []
-    for i in range(len(steps)):
-        info_step = info_list[i]
-        serializable_info = {}
-        for k, v in info_step.items():
-            if isinstance(v, np.ndarray):
-                serializable_info[k] = v.tolist()
-            else:
-                serializable_info[k] = v
-                
-        traj_data.append({
-            "step": steps[i],
-            "action": action_list[i].tolist(),
-            "reward": float(reward_list[i]),
-            "info": serializable_info
-        })
+    print(f"[info] Filtering large image arrays from JSON for episode {episode_idx}...")
+    def clean_obs(obs_list):
+        for obs in obs_list:
+            if not isinstance(obs, dict): continue
+            keys_to_remove = [k for k in obs.keys() if "rgb" in k or "image" in k or "depth" in k]
+            for k in keys_to_remove:
+                obs[k] = "<image_data_removed>"
     
+    clean_obs(traj["observations"])
+    clean_obs(traj["next_observations"])
+
+    def default_serializer(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return str(obj)
+
     json_path = os.path.join(episode_dir, "trajectory.json")
+    print(f"[info] Writing JSON to {json_path}...")
     with open(json_path, "w") as f:
-        json.dump(traj_data, f, indent=2)
+        json.dump(traj, f, indent=2, default=default_serializer)
+    
     print(f"[info] Saved trajectory to {json_path}")
 
-    images_saved = 0
-    for i, obs in enumerate(obs_list):
-        step_num = steps[i]
-        for key, value in obs.items():
-            if "rgb" in key:
-                try:
-                    img_array = np.array(value)
-                    
-                    if len(img_array.shape) == 3 and img_array.shape[0] > 10 and img_array.shape[1] > 10:
-                        image_name = f"{key}_{step_num:04d}.png"
-                        image_path = os.path.join(episode_dir, image_name)
-                        image_utils.write_png(image_path, img_array)
-                        images_saved += 1
-                    else:
-                        pass
-                except Exception as e:
-                    pass
+    if not save_images:
+        print(f"[info] Saved episode {episode_idx} with {len(result.transitions)} steps and 0 images.")
+        return
 
-    print(f"[info] Saved episode {episode_idx} with {len(steps)} steps and {images_saved} images.")
+    if save_images:
+         print("[warn] Image data was stripped from observations for JSON safety. Cannot save PNGs.")
+
+    print(f"[info] Saved episode {episode_idx} with {len(result.transitions)} steps.")
+
 
 def main():
-    print("[info] Initializing SimulationLoop...")
-    loop = SimulationLoop(capture_images=False)
-    
-    target_successes = 1  # Just 1 for debugging
-    success_count = 0
-    episode_count = 0
-    
-    policy = loop.scripted_policy()
-    
-    while success_count < target_successes:
-        print(f"[info] Starting episode {episode_count}...")
-        
-        try:
-            result = loop.run_episode(policy=policy, render=True)
-        except Exception as e:
-            print(f"[error] Episode {episode_count} crashed: {e}")
-            raise
-        
-        print(f"[info] Episode {episode_count} completed. Steps: {len(result.transitions)}")
+    parser = argparse.ArgumentParser(description="Collect success data for OpenVLA.")
+    parser.add_argument("--out", type=str, default="data/rollouts", help="Output directory.")
+    parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to collect.")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode.")
+    parser.add_argument("--max_steps", type=int, default=360, help="Max steps per episode.")
+    args = parser.parse_args()
 
-        is_success = True 
+    print(f"[info] Starting data collection for {args.episodes} episodes...")
+    
+    try:
+        loop = SimulationLoop(env=IsaacPickPlaceEnv(), capture_images=False, headless=args.headless, max_steps=args.max_steps)
+
+        policy = loop.scripted_policy()
         
-        if is_success:
-            print(f"[info] Episode {episode_count} considered success (forced)!")
+        success_count = 0
+        target_successes = 1 # FORCE 1 for debug
+        
+        os.makedirs(args.out, exist_ok=True)
+
+        for i in range(args.episodes):
+            print(f"[info] Starting Episode {i}...")
+            result = loop.run_episode(policy=policy, reset=True, render=True)
             
-            steps = []
-            obs_list = []
-            action_list = []
-            reward_list = []
-            info_list = []
-            
-            for i, transition in enumerate(result.transitions):
-                steps.append(i)
-                obs_list.append(transition.observation)
-                action_list.append(transition.action)
-                reward_list.append(transition.reward)
-                info = transition.info if transition.info else {}
-                info_list.append(info)
-            
-            save_episode(success_count, steps, obs_list, action_list, reward_list, info_list, is_success)
-            success_count += 1
-        else:
-            print(f"[info] Episode {episode_count} failed.")
-            
-        episode_count += 1
-        if episode_count >= 5: 
-            break
-            
-    print("[info] Closing SimulationLoop...")
-    loop.close()
+            is_success = True 
+
+            if is_success:
+                print(f"[info] Episode {i} completed. Steps: {len(result.transitions)}")
+                print(f"[info] Episode {i} considered success (forced)!")
+                save_episode(result, args.out, i, save_images=False)
+                success_count += 1
+                if success_count >= target_successes:
+                    print("[info] Reached target success count. Stopping.")
+                    break
+            else:
+                print(f"[info] Episode {i} failed. Reason: {result.termination_reason}")
+
+        print(f"[info] Data collection complete. Saved {success_count} episodes.")
+        
+    except Exception as e:
+        print(f"[error] An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if 'loop' in locals():
+            print("[info] Shutting down SimulationLoop...")
+            try:
+                loop.close()
+            except Exception as e:
+                print(f"[warn] Error closing loop: {e}")
+        print("[info] Exiting script forcefully.")
+        sys.stdout.flush()
+        os._exit(0)
+
 
 if __name__ == "__main__":
     main()

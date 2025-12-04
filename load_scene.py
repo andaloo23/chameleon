@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+from typing import Optional, Tuple
 
 import numpy as np
 from isaacsim import SimulationApp
@@ -135,6 +136,7 @@ class IsaacPickPlaceEnv:
         self.robot = SO100Robot(self.world, urdf_path)
         self.robot_articulation = self.robot.get_robot()
         self._base_fixture_pose: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        self._workspace_origin_xy: Optional[np.ndarray] = None
         self._default_joint_positions = self._compute_default_joint_positions()
 
         cube_xy, cup_xy = self._sample_object_positions()
@@ -443,10 +445,10 @@ class IsaacPickPlaceEnv:
             position, orientation = self.robot_articulation.get_world_pose()
         except Exception:
             return
-        self._base_fixture_pose = (
-            np.asarray(position, dtype=float),
-            np.asarray(orientation, dtype=float),
-        )
+        position_arr = np.asarray(position, dtype=float)
+        orientation_arr = np.asarray(orientation, dtype=float)
+        self._base_fixture_pose = (position_arr, orientation_arr)
+        self._workspace_origin_xy = position_arr[:2].copy()
 
     def _restore_base_fixture_pose(self):
         if self.robot_articulation is None or self._base_fixture_pose is None:
@@ -548,6 +550,11 @@ class IsaacPickPlaceEnv:
             issues.append("Joint velocities contain non-finite values.")
 
         state = getattr(self.reward_engine, "task_state", {})
+        workspace_origin_xy = getattr(self, "_workspace_origin_xy", None)
+        if workspace_origin_xy is None:
+            workspace_origin_xy = np.zeros(2, dtype=float)
+        else:
+            workspace_origin_xy = np.asarray(workspace_origin_xy, dtype=float)
         cube_pos = state.get("cube_pos")
         if cube_pos is None:
             flags["cube_pose_unavailable"] = True
@@ -556,7 +563,8 @@ class IsaacPickPlaceEnv:
             if cube_pos[2] < -0.01:
                 flags["cube_below_ground"] = True
                 issues.append(f"Cube below ground plane: z={cube_pos[2]:.3f}.")
-            xy_radius = float(np.linalg.norm(cube_pos[:2]))
+            relative_xy = cube_pos[:2] - workspace_origin_xy
+            xy_radius = float(np.linalg.norm(relative_xy))
             max_radius = WORKSPACE_RADIUS_RANGE[1] + 0.35
             if xy_radius > max_radius:
                 flags["cube_out_of_workspace"] = True
