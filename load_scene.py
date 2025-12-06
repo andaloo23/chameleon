@@ -341,6 +341,9 @@ class IsaacPickPlaceEnv:
             wrist_cam = getattr(self.robot, "wrist_camera", None)
             if wrist_cam is not None:
                 gripper_pos, _ = wrist_cam.get_world_pose()
+                # NOTE: This is wrist_camera position, not actual gripper finger position
+                # Camera is offset by [0.0, 0.05, -0.08] from gripper link in local frame
+                # Actual offset distance is ~sqrt(0.05^2 + 0.08^2) ≈ 0.094m
                 gripper_pos = np.array(gripper_pos, dtype=np.float32)
         except Exception:
             pass

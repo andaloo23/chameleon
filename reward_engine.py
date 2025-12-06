@@ -71,15 +71,20 @@ class RewardEngine:
         joint_velocities = state.get("joint_velocities")
 
         # Grasp detection: gripper must be closed AND near cube
-        # For 2.5x cube (0.075m), use 2.0x threshold = 0.15m (15cm) 
-        # This is generous to handle imperfect positioning
+        # For 2.5x cube (0.075m), use 4.5x threshold = 0.3375m (~34cm)
+        # This accounts for: cube size (7.5cm) + camera offset from gripper (~9cm) + safety margin
+        # NOTE: gripper_pos comes from wrist_camera which is offset ~0.09m from actual gripper fingers
         if (not self.stage_flags.get("grasped") and gripper_closed and
                 gripper_cube_distance is not None and
-                gripper_cube_distance <= self.env.cube_scale[0] * 2.0):
+                gripper_cube_distance <= self.env.cube_scale[0] * 4.5):
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
+            print(f"[GRASP] Detected grasp! Distance: {gripper_cube_distance:.3f}m, Gripper value: {state.get('gripper_joint', 0):.3f}")
         else:
             components["grasp_bonus"] = 0.0
+            # Debug output when close to grasping
+            if gripper_closed and gripper_cube_distance is not None and gripper_cube_distance < 0.4:
+                print(f"[GRASP DEBUG] Close but no grasp: dist={gripper_cube_distance:.3f}m, gripper={state.get('gripper_joint', 0):.3f}, closed={gripper_closed}")
 
         if (self.stage_flags.get("grasped") and not self.stage_flags.get("lifted") and
                 cube_height is not None and cube_height >= self.env.cup_height + 0.02):
@@ -241,7 +246,8 @@ class RewardEngine:
             gripper_value = None
         state["gripper_joint"] = gripper_value
         # Gripper is "closed" when it's attempting to grasp
-        # For 2.5x cube (0.075m), gripper pinches to ~0.12, so use threshold of 0.25
-        state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.25
+        # For 2.5x cube (0.075m), gripper pinches to ~0.12, so use threshold of 0.35
+        # Increased threshold to detect closing motion earlier
+        state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
 
         self.task_state = state
