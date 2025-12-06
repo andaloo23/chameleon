@@ -87,7 +87,7 @@ class IsaacPickPlaceEnv:
         self.cup_xform = None
         self.cube = None
 
-        self.cube_scale = np.array([0.03, 0.03, 0.03], dtype=float)
+        self.cube_scale = np.array([0.075, 0.075, 0.075], dtype=float)  # 2.5x larger (was 0.03)
         self.cup_height = 0.18
         self.cup_outer_radius_top = 0.11
         self.cup_outer_radius_bottom = 0.085
@@ -148,8 +148,19 @@ class IsaacPickPlaceEnv:
             position=cube_position,
             scale=self.cube_scale,
             color=np.array([0.0, 0.5, 1.0]),
+            mass=0.05,  # Give cube some mass for proper physics
         )
         self.world.scene.add(self.cube)
+        
+        # Ensure cube has collision properties
+        try:
+            cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
+            if cube_prim and cube_prim.IsValid():
+                # Make sure collision is enabled
+                if not cube_prim.HasAPI(UsdPhysics.CollisionAPI):
+                    UsdPhysics.CollisionAPI.Apply(cube_prim)
+        except Exception as e:
+            print(f"[warn] Could not apply collision API to cube: {e}")
 
         cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
         self.cup_xform = create_cup_prim(
@@ -284,9 +295,12 @@ class IsaacPickPlaceEnv:
             self.simulation_app.close()
 
     def _sample_object_positions(self):
-        cube_xy = np.array([0.0, -0.336]) 
+        # Position cube further away from robot base for easier reaching
+        # Y axis: negative = forward from robot
+        cube_xy = np.array([0.0, -0.50])  # Was -0.336, now further forward
         
-        cup_xy = np.array([0.0, -0.55])
+        # Position cup even further away to maintain separation
+        cup_xy = np.array([0.0, -0.75])  # Was -0.55, now further forward
         
         return cube_xy, cup_xy
 
@@ -314,9 +328,28 @@ class IsaacPickPlaceEnv:
 
         self.reward_engine.record_joint_state(joint_positions.copy(), joint_velocities.copy())
 
+        # Add cube position to observation for policy use
+        cube_pos = None
+        gripper_pos = None
+        try:
+            cube_pos, _ = self.cube.get_world_pose()
+            cube_pos = np.array(cube_pos, dtype=np.float32)
+        except Exception:
+            pass
+        
+        try:
+            wrist_cam = getattr(self.robot, "wrist_camera", None)
+            if wrist_cam is not None:
+                gripper_pos, _ = wrist_cam.get_world_pose()
+                gripper_pos = np.array(gripper_pos, dtype=np.float32)
+        except Exception:
+            pass
+
         obs = {
             "joint_positions": joint_positions.copy(),
             "joint_velocities": joint_velocities.copy(),
+            "cube_pos": cube_pos,
+            "gripper_pos": gripper_pos,
         }
         for name, frame in camera_frames.items():
             if frame is not None:

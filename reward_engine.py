@@ -70,9 +70,12 @@ class RewardEngine:
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
 
+        # Grasp detection: gripper must be closed AND near cube
+        # For 2.5x cube (0.075m), use 2.0x threshold = 0.15m (15cm) 
+        # This is generous to handle imperfect positioning
         if (not self.stage_flags.get("grasped") and gripper_closed and
                 gripper_cube_distance is not None and
-                gripper_cube_distance <= self.env.cube_scale[0] * 1.25):
+                gripper_cube_distance <= self.env.cube_scale[0] * 2.0):
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
         else:
@@ -237,6 +240,8 @@ class RewardEngine:
         else:
             gripper_value = None
         state["gripper_joint"] = gripper_value
-        state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.01
+        # Gripper is "closed" when it's attempting to grasp
+        # For 2.5x cube (0.075m), gripper pinches to ~0.12, so use threshold of 0.25
+        state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.25
 
         self.task_state = state

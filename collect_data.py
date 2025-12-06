@@ -77,7 +77,7 @@ def main():
         policy = loop.scripted_policy()
         
         success_count = 0
-        target_successes = 1 # FORCE 1 for debug
+        target_successes = args.episodes
         
         os.makedirs(args.out, exist_ok=True)
 
@@ -85,18 +85,25 @@ def main():
             print(f"[info] Starting Episode {i}...")
             result = loop.run_episode(policy=policy, reset=True, render=True)
             
-            is_success = True 
+            # Check both success flag and that episode wasn't terminated by validation
+            validation = result.final_info.get("validation", {})
+            terminated_early = result.final_info.get("terminated_by_validation", False)
+            is_success = result.success and validation.get("ok", True) and not terminated_early
 
             if is_success:
                 print(f"[info] Episode {i} completed. Steps: {len(result.transitions)}")
-                print(f"[info] Episode {i} considered success (forced)!")
-                save_episode(result, args.out, i, save_images=False)
+                print(f"[info] Episode {i} succeeded!")
+                save_episode(result, args.out, success_count, save_images=False)
                 success_count += 1
                 if success_count >= target_successes:
                     print("[info] Reached target success count. Stopping.")
                     break
             else:
-                print(f"[info] Episode {i} failed. Reason: {result.termination_reason}")
+                reason = result.termination_reason or "unknown"
+                if terminated_early:
+                    issues = validation.get("issues", [])
+                    reason = f"validation failed ({', '.join(issues[:2])})" if issues else "validation failed"
+                print(f"[info] Episode {i} failed. Reason: {reason}. Retrying...")
 
         print(f"[info] Data collection complete. Saved {success_count} episodes.")
         

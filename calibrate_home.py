@@ -9,15 +9,14 @@ def calibrate():
     env.reset()
 
     # grasp configuration
-    #   shoulder_lift: -0.35 - 0.08 = -0.43
-    #   elbow_flex:     0.9 + 0.25  =  1.15
-    #   wrist_flex:     0.4 - 0.05  =  0.35
-    #   gripper:        0.0 (closed)
+    # IMPORTANT: Must respect URDF limits!
+    #   shoulder_lift: 0 to 3.5 (POSITIVE ONLY! 0=high, 3.5=low)
+    #   elbow_flex: -3.14 to 0 (NEGATIVE ONLY! 0=straight, -3.14=bent)
     grasp_config = np.array([
         0.0,    # shoulder_pan
-        -0.43,  # shoulder_lift
-        1.15,   # elbow_flex
-        0.35,   # wrist_flex
+        2.2,    # shoulder_lift (positive! higher value = lower position)
+        -1.2,   # elbow_flex (negative! bent elbow)
+        0.5,    # wrist_flex
         0.0,    # wrist_roll
         0.0,    # gripper
     ], dtype=np.float32)

@@ -25,23 +25,24 @@ class SO100Robot:
         
         self.joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
         
+        # Joint limits from URDF - MUST match hardware constraints
         self.joint_limits = {
-            "shoulder_pan": (-3.14, 3.14),
-            "shoulder_lift": (-2.0, 2.0),
-            "elbow_flex": (-2.0, 2.0),
-            "wrist_flex": (-1.0, 1.0),
-            "wrist_roll": (-3.14, 3.14),
-            "gripper": (0.0, 0.04)
+            "shoulder_pan": (-1.57079, 1.57079),      # -90° to 90°
+            "shoulder_lift": (0.0, 3.5),              # 0° to 200° (POSITIVE ONLY!)
+            "elbow_flex": (-3.14158, 0.0),            # -180° to 0° (NEGATIVE ONLY!)
+            "wrist_flex": (-2.5, 1.2),                # -143° to 69°
+            "wrist_roll": (-3.14158, 3.14158),        # -180° to 180°
+            "gripper": (0.0, 1.5)                     # 0 to 1.5 (URDF allows -0.2 to 2.0, use safe range)
         }
         
         if import_config is None:
             import_config = _urdf.ImportConfig()
-            import_config.convex_decomp = False
+            import_config.convex_decomp = False  # Keep off for speed
             import_config.fix_base = True
             import_config.make_default_prim = True
-            import_config.self_collision = False
+            import_config.self_collision = False  # Keep self-collision off to avoid arm conflicts
             import_config.distance_scale = 2.5
-            import_config.density = 0.0
+            import_config.density = 500.0  # Set some density for collision response
         
         self.import_config = import_config
         
