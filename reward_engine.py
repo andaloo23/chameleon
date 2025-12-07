@@ -1,4 +1,5 @@
 import numpy as np
+from grasp_detector import GraspDetector
 
 REACH_DISTANCE_MAX = 1.0
 REACHING_WEIGHT = 1.0
@@ -23,6 +24,18 @@ class RewardEngine:
         self.task_state = {}
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
+        self.latest_target_gripper = None  # Target gripper position from action
+        
+        # Pressure-based grasp detector
+        # Detects stall: gripper was closing, has stalled, but not at min position
+        self.grasp_detector = GraspDetector(
+            history_length=15,
+            stability_threshold=0.015,       # Max range for "stable" position
+            min_stable_frames=5,             # Frames to confirm grasp
+            min_gripper_position=0.08,       # Below this = fully closed (no object)
+            max_gripper_for_grasp=1.0,       # Above this = too open for grasp
+            closing_velocity_threshold=0.002, # Min velocity to detect "closing"
+        )
 
     def initialize(self):
         robot = getattr(self.env, "robot", None)
@@ -45,10 +58,21 @@ class RewardEngine:
         self.task_state = {}
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
+        self.latest_target_gripper = None
+        self.grasp_detector.reset()
 
-    def record_joint_state(self, joint_positions, joint_velocities):
+    def record_joint_state(self, joint_positions, joint_velocities, target_gripper=None):
+        """
+        Record current joint state and update task state.
+        
+        Args:
+            joint_positions: Current joint positions
+            joint_velocities: Current joint velocities
+            target_gripper: Optional target gripper position from action command
+        """
         self.latest_joint_positions = joint_positions
         self.latest_joint_velocities = joint_velocities
+        self.latest_target_gripper = target_gripper
         self._update_task_state()
 
     def compute_reward_components(self):
@@ -63,40 +87,68 @@ class RewardEngine:
         else:
             components["reaching"] = 0.0
 
-        gripper_closed = state.get("gripper_closed", False)
         cube_height = state.get("cube_height")
         cube_cup_distance = state.get("cube_cup_distance")
         cube_cup_distance_xy = state.get("cube_cup_distance_xy")
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
+        gripper_value = state.get("gripper_joint")
 
-        # Grasp detection: gripper must be closed AND near cube
-        # For 2.5x cube (0.075m), use 5.0x threshold = 0.375m (~38cm)
-        # This accounts for: cube size (7.5cm) + camera offset from gripper (~9cm) + safety margin
-        # NOTE: gripper_pos comes from wrist_camera which is offset ~0.09m from actual gripper fingers
-        distance_threshold = self.env.cube_scale[0] * 5.0  # Loosened from 4.5 to 5.0
+        # Pressure-based grasp detection using GraspDetector
+        # Detects when gripper is trying to close but position is stable (blocked by object)
+        distance_threshold = self.env.cube_scale[0] * 5.0
         
-        if (not self.stage_flags.get("grasped") and gripper_closed and
-                gripper_cube_distance is not None and
-                gripper_cube_distance <= distance_threshold):
+        # Update grasp detector with current gripper state
+        grasp_state = None
+        if gripper_value is not None:
+            grasp_state = self.grasp_detector.update(
+                gripper_position=gripper_value,
+                target_position=self.latest_target_gripper,
+            )
+        
+        # Grasp detection: pressure-based (stable position under closing pressure) AND near cube
+        pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
+        near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
+        
+        if not self.stage_flags.get("grasped") and pressure_grasp_detected and near_cube:
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            print(f"[GRASP] ✓ Detected grasp! Distance: {gripper_cube_distance:.3f}m, Gripper value: {state.get('gripper_joint', 0):.3f}")
+            print(f"[GRASP] ✓ Pressure-based grasp detected!")
+            print(f"[GRASP]   Distance: {gripper_cube_distance:.3f}m, Gripper pos: {gripper_value:.3f}")
+            print(f"[GRASP]   Stable frames: {grasp_state.stable_frames}, Confidence: {grasp_state.confidence:.2f}")
         else:
             components["grasp_bonus"] = 0.0
-            # Debug output - show what's preventing grasp detection
-            gripper_val = state.get('gripper_joint', 0)
-            if gripper_cube_distance is not None and gripper_cube_distance < 0.5:
+            # Debug output - show grasp detection status
+            if gripper_cube_distance is not None and gripper_cube_distance < 0.5 and grasp_state is not None:
                 status_parts = []
-                if not gripper_closed:
-                    status_parts.append(f"gripper NOT closed (val={gripper_val:.3f}, needs ≤0.35)")
-                else:
-                    status_parts.append(f"gripper closed ✓ (val={gripper_val:.3f})")
                 
-                if gripper_cube_distance > distance_threshold:
-                    status_parts.append(f"dist too far ({gripper_cube_distance:.3f}m > {distance_threshold:.3f}m)")
+                if pressure_grasp_detected:
+                    status_parts.append(f"pressure grasp ✓")
                 else:
-                    status_parts.append(f"dist OK ✓ ({gripper_cube_distance:.3f}m)")
+                    status_parts.append(f"stable_frames={grasp_state.stable_frames}/{self.grasp_detector.min_stable_frames}")
+                    
+                    # Show was_closing state
+                    if grasp_state.was_closing:
+                        status_parts.append("was_closing ✓")
+                    else:
+                        status_parts.append("not_closing_yet")
+                    
+                    # Show position stability
+                    if grasp_state.position_stable:
+                        status_parts.append("stalled ✓")
+                    else:
+                        status_parts.append("still_moving")
+                    
+                    # Show blocked state
+                    if grasp_state.position_blocked:
+                        status_parts.append("blocked ✓")
+                    else:
+                        status_parts.append(f"not_blocked(pos={gripper_value:.3f})")
+                
+                if near_cube:
+                    status_parts.append(f"near cube ✓ ({gripper_cube_distance:.3f}m)")
+                else:
+                    status_parts.append(f"far from cube ({gripper_cube_distance:.3f}m > {distance_threshold:.3f}m)")
                 
                 if self.stage_flags.get("grasped"):
                     status_parts.append("already grasped ✓")
@@ -162,7 +214,9 @@ class RewardEngine:
             close_to_gripper = (gripper_cube_distance is not None and
                                 gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
-            if low_height and (not gripper_closed or not close_to_gripper):
+            # Use pressure-based grasp state for drop detection
+            still_grasping = grasp_state is not None and grasp_state.grasped
+            if low_height and (not still_grasping or not close_to_gripper):
                 drop_triggered = True
 
         if drop_triggered and not self.drop_detected:
@@ -262,9 +316,14 @@ class RewardEngine:
         else:
             gripper_value = None
         state["gripper_joint"] = gripper_value
-        # Gripper is "closed" when it's attempting to grasp
-        # For 2.5x cube (0.075m), gripper pinches to ~0.12, so use threshold of 0.35
-        # Increased threshold to detect closing motion earlier
+        state["target_gripper"] = self.latest_target_gripper
+        
+        # Legacy threshold-based closure check (kept for backward compatibility)
         state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
+        
+        # Pressure-based grasp detection state
+        # This is more reliable as it detects stable position under closing pressure
+        state["pressure_grasp"] = self.grasp_detector.is_grasped
+        state["grasp_position"] = self.grasp_detector.grasp_position
 
         self.task_state = state

@@ -114,6 +114,7 @@ class IsaacPickPlaceEnv:
         self._force_terminate = False
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
+        
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -133,14 +134,40 @@ class IsaacPickPlaceEnv:
         self.world = World(stage_units_in_meters=1.0)
         self.world.scene.add_default_ground_plane()
         
-        # Improve physics solver for better grasping
+        # Comprehensive physics configuration for reliable grasping
         try:
             physics_context = self.world.get_physics_context()
-            # Increase solver iterations for better contact resolution
-            physics_context.set_solver_type("TGS")  # Temporal Gauss-Seidel solver
-            physics_context.set_position_iteration_count(32)  # Higher = more accurate (default: 16)
-            physics_context.set_velocity_iteration_count(16)  # Higher = more stable (default: 8)
-            print("[info] Configured physics solver for improved grasping (iterations: 32/16)")
+            
+            # Use TGS solver - better for articulations and contacts
+            physics_context.set_solver_type("TGS")
+            
+            # Significantly increase solver iterations for accurate contact resolution
+            # Default is 4/1, we use much higher for reliable grasping
+            physics_context.set_position_iteration_count(64)   # Very high for accurate contacts
+            physics_context.set_velocity_iteration_count(32)   # High for stable friction
+            
+            # Enable GPU dynamics if available for better performance with high iterations
+            try:
+                physics_context.enable_gpu_dynamics(True)
+            except Exception:
+                pass
+            
+            # Set physics timestep - smaller = more accurate but slower
+            # Default is usually 1/60, we use 1/120 for better contact accuracy
+            try:
+                physics_context.set_physics_dt(1.0 / 120.0)  # 120 Hz physics
+                print("[info] Set physics timestep to 1/120s")
+            except Exception:
+                pass
+            
+            # Enable CCD (Continuous Collision Detection) for fast-moving objects
+            try:
+                physics_context.enable_ccd(True)
+            except Exception:
+                pass
+                
+            print("[info] Configured physics: TGS solver, 64/32 iterations, 120Hz")
+            
         except Exception as e:
             print(f"[warn] Could not configure physics solver: {e}")
 
@@ -243,6 +270,9 @@ class IsaacPickPlaceEnv:
 
         # Apply friction to gripper for proper grasping
         self._apply_gripper_friction()
+        
+        # Configure gripper joint drive for high gripping force
+        self._configure_gripper_drive()
 
         for _ in range(5):
             self.world.step(render=not self.headless)
@@ -283,7 +313,8 @@ class IsaacPickPlaceEnv:
         self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
         self._force_terminate = False
         self._termination_reason = None
-
+        self._latest_target_gripper = None  # Reset target gripper for grasp detection
+        
         return self._get_observation()
 
     def step(self, action, render=None):
@@ -292,6 +323,10 @@ class IsaacPickPlaceEnv:
 
         joint_targets = self._clip_action(action)
         self.robot.set_joint_positions(joint_targets)
+        
+        # Store target gripper position for pressure-based grasp detection
+        # Gripper is the last joint (index 5) in the action array
+        self._latest_target_gripper = float(joint_targets[-1]) if len(joint_targets) > 0 else None
 
         self._restore_base_fixture_pose()
         self.world.step(render=render)
@@ -355,7 +390,9 @@ class IsaacPickPlaceEnv:
         joint_positions = joint_positions.astype(np.float32, copy=True)
         joint_velocities = joint_velocities.astype(np.float32, copy=True)
 
-        self.reward_engine.record_joint_state(joint_positions.copy(), joint_velocities.copy())
+        # Pass target gripper position for pressure-based grasp detection
+        target_gripper = getattr(self, '_latest_target_gripper', None)
+        self.reward_engine.record_joint_state(joint_positions.copy(), joint_velocities.copy(), target_gripper)
 
         # Add cube position to observation for policy use
         cube_pos = None
@@ -542,7 +579,14 @@ class IsaacPickPlaceEnv:
 
 
     def _apply_gripper_friction(self):
-        """Apply high friction to gripper fingers for better grasping."""
+        """Apply high friction and contact properties to gripper fingers."""
+        try:
+            from pxr import PhysxSchema
+        except ImportError:
+            PhysxSchema = None
+        
+        FRICTION = 10.0  # Match cube friction
+            
         try:
             stage = self.world.stage
             robot_prim_path = getattr(self.robot, "prim_path", "/World/Robot")
@@ -557,33 +601,225 @@ class IsaacPickPlaceEnv:
             for gripper_path in gripper_paths:
                 gripper_prim = stage.GetPrimAtPath(gripper_path)
                 if gripper_prim and gripper_prim.IsValid():
-                    # Apply friction material to the link
+                    # Apply extreme friction to the link
                     material_api = UsdPhysics.MaterialAPI.Apply(gripper_prim)
-                    material_api.CreateStaticFrictionAttr().Set(2.0)  # High friction for gripping
-                    material_api.CreateDynamicFrictionAttr().Set(2.0)
+                    material_api.CreateStaticFrictionAttr().Set(FRICTION)
+                    material_api.CreateDynamicFrictionAttr().Set(FRICTION)
                     material_api.CreateRestitutionAttr().Set(0.0)
                     applied_count += 1
-                    print(f"[info] Applied friction to gripper link: {gripper_path}")
+                    print(f"[info] Applied friction={FRICTION} to: {gripper_path}")
                     
-                    # Also try to find collision meshes within the link and apply friction
+                    # PhysX material properties
+                    if PhysxSchema:
+                        try:
+                            physx_material = PhysxSchema.PhysxMaterialAPI.Apply(gripper_prim)
+                            physx_material.CreateFrictionCombineModeAttr().Set("max")
+                            physx_material.CreateRestitutionCombineModeAttr().Set("min")
+                            # Compliant contact for better grip
+                            physx_material.CreateCompliantContactStiffnessAttr().Set(1e6)
+                            physx_material.CreateCompliantContactDampingAttr().Set(1e4)
+                        except Exception:
+                            pass
+                        
+                        # Rigid body contact properties
+                        try:
+                            rigid_body = PhysxSchema.PhysxRigidBodyAPI.Apply(gripper_prim)
+                            rigid_body.CreateContactOffsetAttr().Set(0.02)
+                            rigid_body.CreateRestOffsetAttr().Set(0.001)
+                        except Exception:
+                            pass
+                    
+                    # Also apply to collision meshes within the link
                     for child_prim in gripper_prim.GetChildren():
-                        if "collision" in str(child_prim.GetPath()).lower() or "collisions" in str(child_prim.GetPath()).lower():
+                        child_path_str = str(child_prim.GetPath()).lower()
+                        if "collision" in child_path_str or "collisions" in child_path_str:
                             try:
                                 child_material_api = UsdPhysics.MaterialAPI.Apply(child_prim)
-                                child_material_api.CreateStaticFrictionAttr().Set(2.0)
-                                child_material_api.CreateDynamicFrictionAttr().Set(2.0)
+                                child_material_api.CreateStaticFrictionAttr().Set(FRICTION)
+                                child_material_api.CreateDynamicFrictionAttr().Set(FRICTION)
                                 child_material_api.CreateRestitutionAttr().Set(0.0)
-                                print(f"[info] Applied friction to collision geometry: {child_prim.GetPath()}")
-                            except Exception as e:
+                                
+                                if PhysxSchema:
+                                    child_physx = PhysxSchema.PhysxMaterialAPI.Apply(child_prim)
+                                    child_physx.CreateFrictionCombineModeAttr().Set("max")
+                                    child_physx.CreateCompliantContactStiffnessAttr().Set(1e6)
+                                    child_physx.CreateCompliantContactDampingAttr().Set(1e4)
+                            except Exception:
                                 pass
             
             if applied_count == 0:
                 print("[warn] Could not find gripper finger prims to apply friction")
             else:
-                print(f"[info] Successfully applied friction to {applied_count} gripper components")
+                print(f"[info] Applied friction={FRICTION} + compliant contact to {applied_count} gripper parts")
                 
         except Exception as e:
             print(f"[warn] Could not apply gripper friction: {e}")
+
+    def _configure_gripper_drive(self):
+        """Configure gripper joint drive for high gripping force.
+        
+        This increases the stiffness (position gain) and max force of the gripper
+        joint so it applies significant pressure when trying to close past an object.
+        """
+        try:
+            from pxr import PhysxSchema
+            
+            stage = self.world.stage
+            robot_prim_path = getattr(self.robot, "prim_path", "/World/Robot")
+            
+            # Try multiple possible joint paths (depends on URDF import)
+            possible_paths = [
+                f"{robot_prim_path}/gripper/gripper",      # Joint inside parent link
+                f"{robot_prim_path}/gripper_joint",        # Joint at robot root
+                f"{robot_prim_path}/joints/gripper",       # Joint in joints folder
+            ]
+            
+            gripper_joint_prim = None
+            used_path = None
+            for path in possible_paths:
+                prim = stage.GetPrimAtPath(path)
+                if prim and prim.IsValid():
+                    gripper_joint_prim = prim
+                    used_path = path
+                    break
+            
+            if not gripper_joint_prim:
+                # Try to find it by traversing the stage
+                print(f"[warn] Gripper joint not found at expected paths, searching...")
+                for prim in stage.Traverse():
+                    prim_path = str(prim.GetPath())
+                    if "gripper" in prim_path.lower() and prim.IsA(UsdPhysics.RevoluteJoint):
+                        gripper_joint_prim = prim
+                        used_path = prim_path
+                        print(f"[info] Found gripper joint at: {used_path}")
+                        break
+            
+            if not gripper_joint_prim:
+                print(f"[warn] Could not find gripper joint prim")
+                # Still try to increase cube friction
+                self._increase_cube_friction()
+                return
+            
+            # Apply PhysxJointAPI if not already applied
+            if not gripper_joint_prim.HasAPI(PhysxSchema.PhysxJointAPI):
+                PhysxSchema.PhysxJointAPI.Apply(gripper_joint_prim)
+            
+            # Get or create the drive API for angular (revolute) joint
+            drive_api = UsdPhysics.DriveAPI.Get(gripper_joint_prim, "angular")
+            if not drive_api:
+                drive_api = UsdPhysics.DriveAPI.Apply(gripper_joint_prim, "angular")
+            
+            # Configure very high stiffness and force for strong gripping
+            # These values create significant normal force between gripper and object
+            STIFFNESS = 50000.0   # Extremely high position gain
+            DAMPING = 1000.0      # High damping to prevent oscillation
+            MAX_FORCE = 5000.0    # Very high max force (50x normal)
+            
+            drive_api.CreateStiffnessAttr().Set(STIFFNESS)
+            drive_api.CreateDampingAttr().Set(DAMPING)
+            drive_api.CreateMaxForceAttr().Set(MAX_FORCE)
+            
+            print(f"[info] Configured gripper drive at {used_path}: stiffness={STIFFNESS}, damping={DAMPING}, maxForce={MAX_FORCE}")
+            
+            # Also increase friction on cube for better grip
+            self._increase_cube_friction()
+            
+        except ImportError as e:
+            print(f"[warn] PhysxSchema not available ({e}), trying alternative approach...")
+            self._configure_gripper_via_articulation()
+        except Exception as e:
+            print(f"[warn] Could not configure gripper drive: {e}")
+            import traceback
+            traceback.print_exc()
+            # Still try articulation approach
+            self._configure_gripper_via_articulation()
+
+    def _configure_gripper_via_articulation(self):
+        """Alternative method to configure gripper using ArticulationController."""
+        try:
+            if self.robot_articulation is None:
+                return
+            
+            controller = self.robot_articulation.get_articulation_controller()
+            if controller is not None:
+                joint_count = len(self.robot.joint_names)
+                
+                # High gains for arm joints
+                stiffnesses = [5000.0] * joint_count
+                dampings = [500.0] * joint_count
+                
+                # Extremely high for gripper (last joint)
+                stiffnesses[-1] = 50000.0  # Gripper stiffness - very high
+                dampings[-1] = 1000.0      # Gripper damping
+                
+                try:
+                    controller.set_gains(kps=stiffnesses, kds=dampings)
+                    print(f"[info] Set articulation gains - gripper stiffness=50000, damping=1000")
+                except Exception as e:
+                    print(f"[warn] Could not set articulation gains: {e}")
+            
+            # Always increase cube friction
+            self._increase_cube_friction()
+            
+        except Exception as e:
+            print(f"[warn] Could not configure gripper via articulation: {e}")
+
+    def _increase_cube_friction(self):
+        """Increase cube friction and contact properties for reliable grasping."""
+        try:
+            from pxr import PhysxSchema
+        except ImportError:
+            PhysxSchema = None
+            
+        try:
+            stage = self.world.stage
+            cube_prim = stage.GetPrimAtPath("/World/Cube")
+            if cube_prim and cube_prim.IsValid():
+                # Apply extremely high friction
+                material_api = UsdPhysics.MaterialAPI.Get(cube_prim)
+                if not material_api:
+                    material_api = UsdPhysics.MaterialAPI.Apply(cube_prim)
+                
+                # Extreme friction values for reliable grasping
+                FRICTION = 10.0  # Very high friction coefficient
+                material_api.CreateStaticFrictionAttr().Set(FRICTION)
+                material_api.CreateDynamicFrictionAttr().Set(FRICTION)
+                material_api.CreateRestitutionAttr().Set(0.0)
+                print(f"[info] Set cube friction to {FRICTION}")
+                
+                # PhysX-specific contact properties
+                if PhysxSchema:
+                    try:
+                        # Material combine mode
+                        physx_material = PhysxSchema.PhysxMaterialAPI.Apply(cube_prim)
+                        physx_material.CreateFrictionCombineModeAttr().Set("max")
+                        physx_material.CreateRestitutionCombineModeAttr().Set("min")
+                        
+                        # Compliant contact for better grip (adds softness to contact)
+                        physx_material.CreateCompliantContactStiffnessAttr().Set(1e6)  # High stiffness
+                        physx_material.CreateCompliantContactDampingAttr().Set(1e4)    # Some damping
+                        
+                        print("[info] Set cube PhysX material: max friction, compliant contact")
+                    except Exception as e:
+                        print(f"[warn] Could not set PhysX material: {e}")
+                    
+                    # Configure rigid body contact properties
+                    try:
+                        rigid_body = PhysxSchema.PhysxRigidBodyAPI.Apply(cube_prim)
+                        # Contact offset - how close objects need to be to generate contacts
+                        rigid_body.CreateContactOffsetAttr().Set(0.02)  # 2cm contact offset
+                        # Rest offset - minimum maintained separation 
+                        rigid_body.CreateRestOffsetAttr().Set(0.001)    # 1mm rest offset
+                        # Enable CCD for this body
+                        rigid_body.CreateEnableCCDAttr().Set(True)
+                        
+                        print("[info] Set cube rigid body: contact offset=0.02, CCD enabled")
+                    except Exception as e:
+                        print(f"[warn] Could not set rigid body properties: {e}")
+                    
+        except Exception as e:
+            print(f"[warn] Could not increase cube friction: {e}")
+
     
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:
