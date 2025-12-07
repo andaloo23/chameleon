@@ -71,20 +71,37 @@ class RewardEngine:
         joint_velocities = state.get("joint_velocities")
 
         # Grasp detection: gripper must be closed AND near cube
-        # For 2.5x cube (0.075m), use 4.5x threshold = 0.3375m (~34cm)
+        # For 2.5x cube (0.075m), use 5.0x threshold = 0.375m (~38cm)
         # This accounts for: cube size (7.5cm) + camera offset from gripper (~9cm) + safety margin
         # NOTE: gripper_pos comes from wrist_camera which is offset ~0.09m from actual gripper fingers
+        distance_threshold = self.env.cube_scale[0] * 5.0  # Loosened from 4.5 to 5.0
+        
         if (not self.stage_flags.get("grasped") and gripper_closed and
                 gripper_cube_distance is not None and
-                gripper_cube_distance <= self.env.cube_scale[0] * 4.5):
+                gripper_cube_distance <= distance_threshold):
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            print(f"[GRASP] Detected grasp! Distance: {gripper_cube_distance:.3f}m, Gripper value: {state.get('gripper_joint', 0):.3f}")
+            print(f"[GRASP] ✓ Detected grasp! Distance: {gripper_cube_distance:.3f}m, Gripper value: {state.get('gripper_joint', 0):.3f}")
         else:
             components["grasp_bonus"] = 0.0
-            # Debug output when close to grasping
-            if gripper_closed and gripper_cube_distance is not None and gripper_cube_distance < 0.4:
-                print(f"[GRASP DEBUG] Close but no grasp: dist={gripper_cube_distance:.3f}m, gripper={state.get('gripper_joint', 0):.3f}, closed={gripper_closed}")
+            # Debug output - show what's preventing grasp detection
+            gripper_val = state.get('gripper_joint', 0)
+            if gripper_cube_distance is not None and gripper_cube_distance < 0.5:
+                status_parts = []
+                if not gripper_closed:
+                    status_parts.append(f"gripper NOT closed (val={gripper_val:.3f}, needs ≤0.35)")
+                else:
+                    status_parts.append(f"gripper closed ✓ (val={gripper_val:.3f})")
+                
+                if gripper_cube_distance > distance_threshold:
+                    status_parts.append(f"dist too far ({gripper_cube_distance:.3f}m > {distance_threshold:.3f}m)")
+                else:
+                    status_parts.append(f"dist OK ✓ ({gripper_cube_distance:.3f}m)")
+                
+                if self.stage_flags.get("grasped"):
+                    status_parts.append("already grasped ✓")
+                
+                print(f"[GRASP DEBUG] {' | '.join(status_parts)}")
 
         if (self.stage_flags.get("grasped") and not self.stage_flags.get("lifted") and
                 cube_height is not None and cube_height >= self.env.cup_height + 0.02):

@@ -106,6 +106,7 @@ class IsaacPickPlaceEnv:
         self._last_camera_frames = {key: None for key in self._camera_keys}
         self._camera_failure_logged = {key: False for key in self._camera_keys}
         self._camera_frame_shapes = {}
+        self._fixed_camera_poses = {}  # Store fixed camera positions to restore after reset
 
         self.reward_engine = RewardEngine(self)
         self.domain_randomizer = DomainRandomizer(self)
@@ -131,6 +132,17 @@ class IsaacPickPlaceEnv:
 
         self.world = World(stage_units_in_meters=1.0)
         self.world.scene.add_default_ground_plane()
+        
+        # Improve physics solver for better grasping
+        try:
+            physics_context = self.world.get_physics_context()
+            # Increase solver iterations for better contact resolution
+            physics_context.set_solver_type("TGS")  # Temporal Gauss-Seidel solver
+            physics_context.set_position_iteration_count(32)  # Higher = more accurate (default: 16)
+            physics_context.set_velocity_iteration_count(16)  # Higher = more stable (default: 8)
+            print("[info] Configured physics solver for improved grasping (iterations: 32/16)")
+        except Exception as e:
+            print(f"[warn] Could not configure physics solver: {e}")
 
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
@@ -152,15 +164,22 @@ class IsaacPickPlaceEnv:
         )
         self.world.scene.add(self.cube)
         
-        # Ensure cube has collision properties
+        # Ensure cube has collision and friction properties
         try:
             cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
             if cube_prim and cube_prim.IsValid():
                 # Make sure collision is enabled
                 if not cube_prim.HasAPI(UsdPhysics.CollisionAPI):
                     UsdPhysics.CollisionAPI.Apply(cube_prim)
+                
+                # Add friction material for graspability
+                material_api = UsdPhysics.MaterialAPI.Apply(cube_prim)
+                material_api.CreateStaticFrictionAttr().Set(1.0)
+                material_api.CreateDynamicFrictionAttr().Set(1.0)
+                material_api.CreateRestitutionAttr().Set(0.0)
+                print("[info] Applied friction properties to cube (static=1.0, dynamic=1.0)")
         except Exception as e:
-            print(f"[warn] Could not apply collision API to cube: {e}")
+            print(f"[warn] Could not apply collision/friction to cube: {e}")
 
         cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
         self.cup_xform = create_cup_prim(
@@ -207,6 +226,12 @@ class IsaacPickPlaceEnv:
 
         self.top_camera.set_world_pose(position=top_cam_pos, orientation=top_cam_orient)
         self.side_camera.set_world_pose(position=side_cam_pos, orientation=side_cam_orient)
+        
+        # Store fixed camera poses for restoration after reset
+        self._fixed_camera_poses = {
+            "top": (top_cam_pos.copy(), top_cam_orient.copy()),
+            "side": (side_cam_pos.copy(), side_cam_orient.copy()),
+        }
 
         self.robot.create_wrist_camera()
         self.robot.update_wrist_camera_position(verbose=False)
@@ -215,6 +240,9 @@ class IsaacPickPlaceEnv:
         self.side_camera.initialize()
         if getattr(self.robot, "wrist_camera", None) is not None:
             self.robot.wrist_camera.initialize()
+
+        # Apply friction to gripper for proper grasping
+        self._apply_gripper_friction()
 
         for _ in range(5):
             self.world.step(render=not self.headless)
@@ -242,6 +270,7 @@ class IsaacPickPlaceEnv:
         self.world.reset()
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
+        self._restore_fixed_camera_poses()  # Restore camera positions after world reset
         self.robot.update_wrist_camera_position(verbose=False)
 
         for i in range(5):
@@ -494,8 +523,68 @@ class IsaacPickPlaceEnv:
             self.robot_articulation.set_world_pose(position=position, orientation=orientation)
         except Exception:
             pass
+    
+    def _restore_fixed_camera_poses(self):
+        """Restore top and side camera positions after world reset."""
+        if not self._fixed_camera_poses:
+            return
+        
+        try:
+            if "top" in self._fixed_camera_poses and self.top_camera is not None:
+                top_pos, top_orient = self._fixed_camera_poses["top"]
+                self.top_camera.set_world_pose(position=top_pos, orientation=top_orient)
+            
+            if "side" in self._fixed_camera_poses and self.side_camera is not None:
+                side_pos, side_orient = self._fixed_camera_poses["side"]
+                self.side_camera.set_world_pose(position=side_pos, orientation=side_orient)
+        except Exception as e:
+            print(f"[warn] Could not restore camera poses: {e}")
 
 
+    def _apply_gripper_friction(self):
+        """Apply high friction to gripper fingers for better grasping."""
+        try:
+            stage = self.world.stage
+            robot_prim_path = getattr(self.robot, "prim_path", "/World/Robot")
+            
+            # Based on URDF structure: gripper (fixed jaw) and jaw (moving jaw)
+            gripper_paths = [
+                f"{robot_prim_path}/gripper",
+                f"{robot_prim_path}/jaw",
+            ]
+            
+            applied_count = 0
+            for gripper_path in gripper_paths:
+                gripper_prim = stage.GetPrimAtPath(gripper_path)
+                if gripper_prim and gripper_prim.IsValid():
+                    # Apply friction material to the link
+                    material_api = UsdPhysics.MaterialAPI.Apply(gripper_prim)
+                    material_api.CreateStaticFrictionAttr().Set(2.0)  # High friction for gripping
+                    material_api.CreateDynamicFrictionAttr().Set(2.0)
+                    material_api.CreateRestitutionAttr().Set(0.0)
+                    applied_count += 1
+                    print(f"[info] Applied friction to gripper link: {gripper_path}")
+                    
+                    # Also try to find collision meshes within the link and apply friction
+                    for child_prim in gripper_prim.GetChildren():
+                        if "collision" in str(child_prim.GetPath()).lower() or "collisions" in str(child_prim.GetPath()).lower():
+                            try:
+                                child_material_api = UsdPhysics.MaterialAPI.Apply(child_prim)
+                                child_material_api.CreateStaticFrictionAttr().Set(2.0)
+                                child_material_api.CreateDynamicFrictionAttr().Set(2.0)
+                                child_material_api.CreateRestitutionAttr().Set(0.0)
+                                print(f"[info] Applied friction to collision geometry: {child_prim.GetPath()}")
+                            except Exception as e:
+                                pass
+            
+            if applied_count == 0:
+                print("[warn] Could not find gripper finger prims to apply friction")
+            else:
+                print(f"[info] Successfully applied friction to {applied_count} gripper components")
+                
+        except Exception as e:
+            print(f"[warn] Could not apply gripper friction: {e}")
+    
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:
             self.domain_randomizer.randomize()

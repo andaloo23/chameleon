@@ -162,6 +162,11 @@
       </geometry>
       <material name="sts3215"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="assets/Fixed_Jaw.stl"/>
+      </geometry>
+    </collision>
   </link>
 
   <!-- Link jaw -->
@@ -177,6 +182,11 @@
       </geometry>
       <material name="3d_printed"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="assets/Moving_Jaw.stl"/>
+      </geometry>
+    </collision>
   </link>
 
 

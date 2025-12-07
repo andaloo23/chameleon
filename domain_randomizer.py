@@ -37,11 +37,13 @@ class DomainRandomizer:
         self.env = env
 
     def randomize(self):
-        self._randomize_lighting()
-        self._randomize_ground()
-        self._randomize_objects()
-        self._randomize_cameras()
-        self._randomize_physics()
+        # COMPLETELY DISABLED FOR DEBUGGING
+        pass
+        # self._randomize_lighting()
+        # self._randomize_ground()
+        # self._randomize_objects()
+        # self._randomize_cameras()
+        # self._randomize_physics()
 
     def _randomize_lighting(self):
         stage = self.env.stage_context.get_stage()

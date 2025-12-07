@@ -94,7 +94,7 @@ class SimulationLoop:
         self,
         env: Optional[IsaacPickPlaceEnv] = None,
         *,
-        max_steps: int = 360,
+        max_steps: int = 500,
         headless: bool = True,
         capture_images: bool = False,
         image_interval: int = 3,
@@ -147,33 +147,46 @@ class SimulationLoop:
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
 
-            # Calculate cube-relative adjustments if cube position is available
-            cube_offset_pan = 0.0
-            cube_adapted_lift = 1.8  # Default grasp height (HIGHER - pinch from above, not wrap around)
-            cube_adapted_elbow = -1.0  # Default elbow bend (less bent, stay higher)
+            # Calculate cube-relative adjustments for ONE-PRONGED gripper
+            # Strategy: Dynamically calculate approach angle based on cube position
+            # For one-pronged gripper: approach at slight offset angle to avoid fixed jaw collision
             
-            if cube_pos is not None and gripper_pos is not None:
+            cube_offset_pan = 0.0
+            cube_adapted_lift = 1.8
+            cube_adapted_elbow = -1.0
+            cube_adapted_wrist_roll = 0.0
+            
+            if cube_pos is not None:
                 cube_pos = np.asarray(cube_pos, dtype=np.float32)
-                gripper_pos = np.asarray(gripper_pos, dtype=np.float32)
                 
-                # Adjust shoulder_pan based on cube X position (left/right)
-                cube_offset_pan = cube_pos[0] * 1.2
-                
-                # Adjust shoulder_lift and elbow based on cube Y position (forward/back)
-                # Cube Y is typically around -0.5 (now positioned further forward)
-                # More negative Y = cube is further forward
-                # shoulder_lift controls reach: HIGHER value = ARM GOES DOWN/FORWARD
+                cube_x = cube_pos[0]
                 cube_y = cube_pos[1]
                 
-                # Mapping: cube at -0.5 should use lift~1.8 (STAY HIGH - pinch from above)
-                # If cube is MORE negative (further): INCREASE lift slightly
-                # If cube is LESS negative (closer): DECREASE lift  
-                # Strategy: Approach from ABOVE and pinch, don't try to wrap around
+                # Calculate angle from robot base (at origin) to cube
+                # atan2 gives angle in radians from -pi to pi
+                direct_angle_to_cube = np.arctan2(cube_x, -cube_y)  # Note: Y is negative in front
+                
+                # Add small offset to approach from side (not head-on) for one-pronged gripper
+                # Negative offset = approach from right side
+                side_offset = -0.15  # radians (~8.6 degrees) - small offset to clear fixed jaw
+                
+                # Final approach angle
+                cube_offset_pan = direct_angle_to_cube + side_offset
+                cube_offset_pan = np.clip(cube_offset_pan, -1.4, 1.4)
+                
+                # Adjust height/reach based on cube distance (Y position)
                 cube_adapted_lift = np.clip(1.8 + (cube_y + 0.5) * 1.5, 1.5, 2.2)
                 cube_adapted_elbow = np.clip(-1.0 + (cube_y + 0.5) * 1.0, -1.4, -0.8)
                 
+                # Keep wrist neutral for now
+                cube_adapted_wrist_roll = 0.0
+                
                 if step == 0:
-                    print(f"[DEBUG] Cube at Y={cube_y:.3f} Z={cube_pos[2]:.3f}, adapted: lift={cube_adapted_lift:.3f}, elbow={cube_adapted_elbow:.3f}")
+                    print(f"[DEBUG] Cube at X={cube_x:.3f} Y={cube_y:.3f} Z={cube_pos[2]:.3f}")
+                    print(f"[DEBUG] Direct angle to cube: {direct_angle_to_cube:.3f} rad ({np.degrees(direct_angle_to_cube):.1f} deg)")
+                    print(f"[DEBUG] Side offset: {side_offset:.3f} rad ({np.degrees(side_offset):.1f} deg)")
+                    print(f"[DEBUG] Final pan angle: {cube_offset_pan:.3f} rad ({np.degrees(cube_offset_pan):.1f} deg)")
+                    print(f"[DEBUG] Adapted: lift={cube_adapted_lift:.3f}, elbow={cube_adapted_elbow:.3f}")
 
             def safe_clip(value, joint_name):
                 """Clip joint value to safe limits with margin."""
@@ -185,16 +198,16 @@ class SimulationLoop:
             # shoulder_lift: 0 (highest) to 3.5 (lowest) - POSITIVE ONLY!
             # elbow_flex: -3.14 (bent) to 0 (straight) - NEGATIVE ONLY!
             
-            # Grasp configuration - adapted to cube position
+            # Grasp configuration - adapted for one-pronged gripper
             # Note: shoulder_lift values are POSITIVE (0=high, 3.5=low)
-            # Strategy: PINCH from above with minimal gripper closure
+            # Strategy: Approach from ANGLE with wrist rotation
             grasp_config = np.array([
-                cube_offset_pan,      # shoulder_pan (track cube X)
-                cube_adapted_lift,    # shoulder_lift (adapted to cube Y - STAYS HIGH)
-                cube_adapted_elbow,   # elbow_flex (adapted to cube Y)
-                0.5,                  # wrist_flex
-                0.0,                  # wrist_roll
-                0.12,                 # gripper (PINCH - just enough to hold, cube is 0.075m)
+                cube_offset_pan,          # shoulder_pan (angled approach)
+                cube_adapted_lift,        # shoulder_lift (adapted height)
+                cube_adapted_elbow,       # elbow_flex (adapted reach)
+                0.5,                      # wrist_flex
+                cube_adapted_wrist_roll,  # wrist_roll (orient gripper for angle)
+                0.05,                     # gripper (CLOSE TIGHT - was 0.12, now much tighter)
             ], dtype=np.float32)
             
             # High starting position (arm up and back)
@@ -204,25 +217,25 @@ class SimulationLoop:
                 -1.0,   # elbow_flex (MUST BE NEGATIVE!)
                 0.3,    # wrist_flex
                 0.0,    # wrist_roll
-                0.3,    # gripper (WIDE OPEN for 2.5x cube - was 0.039)
+                1.2,    # gripper (WIDE OPEN - 80% of max 1.5, plenty of clearance for 0.075m cube)
             ], dtype=np.float32)
             
             # Lift configuration (arm high with cube)
             lift_config = np.array([
-                0.0,    # shoulder_pan
-                0.5,    # shoulder_lift (very high - LOW VALUE)
-                -0.8,   # elbow_flex (MUST BE NEGATIVE! less bent)
-                0.4,    # wrist_flex
-                0.0,    # wrist_roll
-                0.12,   # gripper (PINCHING - minimal closure)
+                cube_offset_pan,          # shoulder_pan (maintain angle)
+                0.5,                      # shoulder_lift (very high - LOW VALUE)
+                -0.8,                     # elbow_flex (MUST BE NEGATIVE! less bent)
+                0.4,                      # wrist_flex
+                cube_adapted_wrist_roll,  # wrist_roll (maintain orientation)
+                0.05,                     # gripper (CLOSED TIGHT - was 0.12)
             ], dtype=np.float32)
 
-            # Policy stages - FASTER pace to complete within 360 steps
+            # Policy stages - designed for 500 steps max
             # Steps 0-100: Move toward cube XY while staying very high (gripper open)
             # Steps 100-130: Hover and stabilize
             # Steps 130-230: Descend carefully to grasp position
             # Steps 230-250: Close gripper
-            # Steps 250+: Lift if grasped (110 steps remaining!)
+            # Steps 250+: Lift if grasped (250 steps remaining for lift!)
             
             # Use current joint position to compute smooth incremental changes
             current_pos = joint_positions.copy()
@@ -231,7 +244,9 @@ class SimulationLoop:
                 # Stage 1: Move toward cube XY while staying very high (FASTER)
                 progress = step / 100.0
                 target_config = home_config.copy()
+                # Gradually rotate base and wrist toward grasp angle
                 target_config[0] = safe_clip(cube_offset_pan * progress, "shoulder_pan")
+                target_config[4] = safe_clip(cube_adapted_wrist_roll * progress, "wrist_roll")
                 # home_config already has shoulder_lift=0.8 (high position)
                 
                 # Smooth blend: slightly faster
@@ -242,6 +257,7 @@ class SimulationLoop:
                 # Stage 2: Hover and stabilize (ensure proper XY alignment) - SHORTER
                 target_config = home_config.copy()
                 target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")
+                target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
                 # home_config already has shoulder_lift=0.8 (high position)
                 
                 # Smooth blend
@@ -253,6 +269,7 @@ class SimulationLoop:
                 progress = (step - 130) / 100.0  # 100 steps for descent (was 120)
                 target_config = home_config.copy()
                 target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")
+                target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
                 # Interpolate from high (0.8) to cube-adapted grasp position
                 # Note: shoulder_lift increases as arm descends (0=highest, 3.5=lowest)
                 target_config[1] = safe_clip(
@@ -263,7 +280,7 @@ class SimulationLoop:
                     -1.0 * (1 - progress) + cube_adapted_elbow * progress,
                     "elbow_flex"
                 )
-                target_config[5] = safe_clip(0.3, "gripper")  # Keep WIDE OPEN
+                target_config[5] = safe_clip(1.2, "gripper")  # Keep WIDE OPEN
                 
                 # Smooth motion but slightly faster
                 alpha = 0.03  # Move 3% toward target each step (was 0.02)
@@ -273,61 +290,85 @@ class SimulationLoop:
                 # Stage 4: Close gripper at grasp position (FASTER)
                 progress = (step - 230) / 20.0
                 target_config = grasp_config.copy()
+                # Maintain angled approach orientation
                 target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")
-                # Gradually close gripper from wide open (0.3) to PINCH (0.12)
-                # PINCH strategy: barely close around cube (0.075m), don't fully wrap
-                target_config[5] = safe_clip(
-                    0.3 * (1 - progress) + 0.12 * progress,
-                    "gripper"
-                )
+                target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
+                # Gradually close gripper from wide open (1.2) to TIGHT CLOSE (0.05)
+                # Close firmly to ensure grasp detection
+                gripper_close_value = 1.2 * (1 - progress) + 0.05 * progress
+                target_config[5] = safe_clip(gripper_close_value, "gripper")
                 
                 # Smooth blend (slightly faster)
                 alpha = 0.05
                 target = current_pos * (1 - alpha) + target_config[:len(current_pos)] * alpha
                 
+                if step % 5 == 0:  # Print every 5 steps during closure
+                    print(f"[CLOSING] Step {step} | Progress: {progress*100:.0f}% | Target gripper: {gripper_close_value:.3f} → {target_config[5]:.3f} | Actual: {current_pos[gripper_idx]:.3f}")
+                
             else:
-                # Stage 5: Lift if grasped (starts at step 250, 110 steps to complete!)
+                # Stage 5: Lift if grasped (starts at step 250, 250 steps remaining!)
                 if grasped_flag:
-                    # Lift up with cube
-                    progress = min(1.0, (step - 250) / 80.0)
+                    # GRASP DETECTED! Lift arm up with cube
+                    progress = min(1.0, (step - 250) / 120.0)  # 120 steps for smooth lift
+                    
+                    # Start from current grasp position, lift to high position
                     target_config = grasp_config.copy()
-                    target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")
-                    # Interpolate from cube-adapted grasp position to lift position (0.5)
-                    # Note: shoulder_lift decreases as arm lifts up
+                    target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")  # Maintain angle
+                    target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
+                    
+                    # Lift: shoulder_lift goes from grasp height (~1.8) to high position (0.3)
+                    # Lower value = higher arm position
+                    high_lift_position = 0.3  # Very high up
                     target_config[1] = safe_clip(
-                        cube_adapted_lift * (1 - progress) + 0.5 * progress,
+                        cube_adapted_lift * (1 - progress) + high_lift_position * progress,
                         "shoulder_lift"
                     )
+                    
+                    # Straighten elbow as we lift
                     target_config[2] = safe_clip(
-                        cube_adapted_elbow * (1 - progress) + -0.8 * progress,
+                        cube_adapted_elbow * (1 - progress) + -0.6 * progress,
                         "elbow_flex"
                     )
+                    
+                    # Adjust wrist
                     target_config[3] = safe_clip(
-                        0.5 * (1 - progress) + 0.4 * progress,
+                        0.5 * (1 - progress) + 0.2 * progress,
                         "wrist_flex"
                     )
-                    target_config[5] = safe_clip(0.12, "gripper")  # Keep PINCHING
                     
-                    # Smooth blend (slightly faster for lifting)
-                    alpha = 0.04
+                    target_config[5] = safe_clip(0.05, "gripper")  # Keep CLOSED tight!
+                    
+                    # Faster blend for clear lifting motion
+                    alpha = 0.06
                     target = current_pos * (1 - alpha) + target_config[:len(current_pos)] * alpha
+                    
+                    if step % 30 == 0:
+                        print(f"[INFO] LIFTING! Progress: {progress*100:.1f}% | Target lift: {target_config[1]:.3f}")
+                        
                 else:
-                    # Stay at grasp position, wait for grasp detection
+                    # Wait at grasp position for grasp detection
                     target_config = grasp_config.copy()
                     target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")
-                    target_config[5] = safe_clip(0.12, "gripper")  # Keep PINCHING
+                    target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
+                    target_config[5] = safe_clip(0.05, "gripper")  # Keep CLOSED
                     
-                    # Smooth blend
+                    # Hold position
                     alpha = 0.04
                     target = current_pos * (1 - alpha) + target_config[:len(current_pos)] * alpha
+                    
+                    if step % 30 == 0:
+                        print(f"[INFO] Waiting for grasp detection at step {step}...")
 
-            if step % 60 == 0 and gripper_idx is not None:
+            if step % 30 == 0 and gripper_idx is not None and step < 250:  # Only show detailed debug before grasp
                 cube_str = f"Cube=[{cube_pos[0]:.3f}, {cube_pos[1]:.3f}, {cube_pos[2]:.3f}]" if cube_pos is not None else "Cube=N/A"
                 grip_str = f"Grip=[{gripper_pos[0]:.3f}, {gripper_pos[1]:.3f}, {gripper_pos[2]:.3f}]" if gripper_pos is not None else "Grip=N/A"
                 dist = np.linalg.norm(cube_pos - gripper_pos) if (cube_pos is not None and gripper_pos is not None) else 0.0
+                pan_idx = name_to_idx.get("shoulder_pan", 0)
+                wrist_roll_idx = name_to_idx.get("wrist_roll", 4)
                 print(f"[DEBUG] Step {step} | {cube_str} | {grip_str} | Dist={dist:.3f}")
-                print(f"[DEBUG] Step {step} Target: lift={target[1]:.4f} pan={target[0]:.4f} elbow={target[2]:.4f} grip={target[gripper_idx]:.4f}")
-                print(f"[DEBUG] Step {step} Adapted: cube_lift={cube_adapted_lift:.3f} cube_elbow={cube_adapted_elbow:.3f} cube_pan={cube_offset_pan:.3f} | Grasped={grasped_flag}")
+                print(f"[DEBUG] Step {step} Current: pan={current_pos[pan_idx]:.4f} lift={current_pos[1]:.4f} elbow={current_pos[2]:.4f} wrist_roll={current_pos[wrist_roll_idx]:.4f} grip={current_pos[gripper_idx]:.4f}")
+                print(f"[DEBUG] Step {step} Target:  pan={target[pan_idx]:.4f} lift={target[1]:.4f} elbow={target[2]:.4f} wrist_roll={target[wrist_roll_idx]:.4f} grip={target[gripper_idx]:.4f}")
+                print(f"[DEBUG] Step {step} Adapted: pan={cube_offset_pan:.3f} lift={cube_adapted_lift:.3f} elbow={cube_adapted_elbow:.3f}")
 
             return target
 
