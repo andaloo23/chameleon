@@ -227,7 +227,7 @@ class SimulationLoop:
                 -0.8,                     # elbow_flex (MUST BE NEGATIVE! less bent)
                 0.4,                      # wrist_flex
                 cube_adapted_wrist_roll,  # wrist_roll (maintain orientation)
-                0.05,                     # gripper (CLOSED TIGHT - was 0.12)
+                0.12,                     # gripper (PINCHING - minimal closure)
             ], dtype=np.float32)
 
             # Policy stages - designed for 500 steps max
@@ -295,15 +295,14 @@ class SimulationLoop:
                 target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
                 # Gradually close gripper from wide open (1.2) to TIGHT CLOSE (0.05)
                 # Close firmly to ensure grasp detection
-                gripper_close_value = 1.2 * (1 - progress) + 0.05 * progress
-                target_config[5] = safe_clip(gripper_close_value, "gripper")
+                target_config[5] = safe_clip(
+                    1.2 * (1 - progress) + 0.05 * progress,
+                    "gripper"
+                )
                 
                 # Smooth blend (slightly faster)
                 alpha = 0.05
                 target = current_pos * (1 - alpha) + target_config[:len(current_pos)] * alpha
-                
-                if step % 5 == 0:  # Print every 5 steps during closure
-                    print(f"[CLOSING] Step {step} | Progress: {progress*100:.0f}% | Target gripper: {gripper_close_value:.3f} → {target_config[5]:.3f} | Actual: {current_pos[gripper_idx]:.3f}")
                 
             else:
                 # Stage 5: Lift if grasped (starts at step 250, 250 steps remaining!)
