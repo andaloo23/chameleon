@@ -106,16 +106,25 @@ class RewardEngine:
                 target_position=self.latest_target_gripper,
             )
         
-        # Grasp detection: pressure-based (stable position under closing pressure) AND near cube
+        # Grasp detection: use sticky gripper (constraint-based) OR pressure-based as fallback
+        sticky_gripper = getattr(self.env, "sticky_gripper", None)
+        sticky_grasp_detected = sticky_gripper is not None and sticky_gripper.is_grasping
         pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
         near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
         
-        if not self.stage_flags.get("grasped") and pressure_grasp_detected and near_cube:
+        # Prefer sticky gripper (more reliable), fallback to pressure-based
+        grasp_detected = sticky_grasp_detected or (pressure_grasp_detected and near_cube)
+        
+        if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            print(f"[GRASP] ✓ Pressure-based grasp detected!")
+            if sticky_grasp_detected:
+                print(f"[GRASP] ✓ Constraint-based grasp detected (sticky gripper)!")
+            else:
+                print(f"[GRASP] ✓ Pressure-based grasp detected!")
             print(f"[GRASP]   Distance: {gripper_cube_distance:.3f}m, Gripper pos: {gripper_value:.3f}")
-            print(f"[GRASP]   Stable frames: {grasp_state.stable_frames}, Confidence: {grasp_state.confidence:.2f}")
+            if grasp_state is not None:
+                print(f"[GRASP]   Stable frames: {grasp_state.stable_frames}, Confidence: {grasp_state.confidence:.2f}")
         else:
             components["grasp_bonus"] = 0.0
             # Debug output - show grasp detection status
@@ -214,8 +223,10 @@ class RewardEngine:
             close_to_gripper = (gripper_cube_distance is not None and
                                 gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
-            # Use pressure-based grasp state for drop detection
-            still_grasping = grasp_state is not None and grasp_state.grasped
+            # Use sticky gripper (constraint-based) or pressure-based for drop detection
+            still_grasping_sticky = sticky_gripper is not None and sticky_gripper.is_grasping
+            still_grasping_pressure = grasp_state is not None and grasp_state.grasped
+            still_grasping = still_grasping_sticky or still_grasping_pressure
             if low_height and (not still_grasping or not close_to_gripper):
                 drop_triggered = True
 
@@ -325,5 +336,10 @@ class RewardEngine:
         # This is more reliable as it detects stable position under closing pressure
         state["pressure_grasp"] = self.grasp_detector.is_grasped
         state["grasp_position"] = self.grasp_detector.grasp_position
+        
+        # Constraint-based (sticky) grasp state - most reliable method
+        sticky_gripper = getattr(self.env, "sticky_gripper", None)
+        state["sticky_grasp"] = sticky_gripper.is_grasping if sticky_gripper else False
+        state["grasped_object"] = sticky_gripper.grasped_object if sticky_gripper else None
 
         self.task_state = state

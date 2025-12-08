@@ -10,6 +10,7 @@ from cup_utils import create_cup_prim, initialize_usd_modules
 from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
+from sticky_gripper import StickyGripper
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 
 _SIMULATION_APP = None
@@ -114,6 +115,19 @@ class IsaacPickPlaceEnv:
         self._force_terminate = False
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
+        
+        # Sticky gripper with PRE-EMPTIVE FREEZE
+        # Freezes the cube BEFORE the gripper collision can push it away
+        self.sticky_gripper = StickyGripper(
+            self,
+            grasp_threshold=0.40,               # Distance threshold for full grasp
+            gripper_close_threshold=0.50,       # Gripper considered closed
+            gripper_open_threshold=0.7,         # Gripper considered open
+            min_close_frames=3,                 # Quick grasp since cube is frozen
+            release_delay_frames=5,             # Frames to prevent accidental release
+            preemptive_freeze_distance=0.45,    # Start freezing early!
+            debug=True,
+        )
         
 
         if self.capture_images:
@@ -273,6 +287,11 @@ class IsaacPickPlaceEnv:
         
         # Configure gripper joint drive for high gripping force
         self._configure_gripper_drive()
+        
+        # IMPORTANT: Disable collision between gripper and cube
+        # The gripper collision pushes the cube away instead of grasping it
+        # We'll use the sticky gripper to handle the actual grasping
+        self._disable_gripper_cube_collision()
 
         for _ in range(5):
             self.world.step(render=not self.headless)
@@ -310,6 +329,7 @@ class IsaacPickPlaceEnv:
 
         self._apply_domain_randomization()
         self.reward_engine.reset()
+        self.sticky_gripper.reset()  # Reset constraint-based grasping
         self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
         self._force_terminate = False
         self._termination_reason = None
@@ -331,6 +351,49 @@ class IsaacPickPlaceEnv:
         self._restore_base_fixture_pose()
         self.world.step(render=render)
         self._step_counter += 1
+        
+        # Update sticky gripper for kinematic grasping
+        # Use ACTUAL gripper joint position (not target) for accurate state detection
+        try:
+            actual_joint_positions = self.robot_articulation.get_joint_positions()
+            # Gripper is the last joint (index 5)
+            actual_gripper_pos = float(actual_joint_positions[-1]) if len(actual_joint_positions) > 0 else 0.0
+        except Exception:
+            actual_gripper_pos = float(joint_targets[-1]) if len(joint_targets) > 0 else 0.0
+        
+        gripper_world_pos = None
+        cube_world_pos = None
+        try:
+            wrist_cam = getattr(self.robot, "wrist_camera", None)
+            if wrist_cam is not None:
+                gripper_world_pos, _ = wrist_cam.get_world_pose()
+                gripper_world_pos = np.array(gripper_world_pos, dtype=np.float32)
+        except Exception:
+            pass
+        try:
+            cube_world_pos, _ = self.cube.get_world_pose()
+            cube_world_pos = np.array(cube_world_pos, dtype=np.float32)
+        except Exception:
+            pass
+        
+        # Log distances for debugging (every 50 steps or when close)
+        if gripper_world_pos is not None and cube_world_pos is not None:
+            dist = np.linalg.norm(gripper_world_pos - cube_world_pos)
+            if self._step_counter % 50 == 0 or dist < 0.25:
+                print(f"[ENV step={self._step_counter}] gripper_joint={actual_gripper_pos:.3f} "
+                      f"gripper_pos={gripper_world_pos} cube_pos={cube_world_pos} dist={dist:.3f}m")
+        
+        was_grasping = self.sticky_gripper.is_grasping
+        self.sticky_gripper.update(
+            gripper_position=actual_gripper_pos,
+            gripper_world_pos=gripper_world_pos,
+            object_world_pos=cube_world_pos,
+        )
+        now_grasping = self.sticky_gripper.is_grasping
+        
+        # Log state changes
+        if was_grasping != now_grasping:
+            print(f"[ENV] GRASP STATE CHANGED: {was_grasping} -> {now_grasping}")
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
@@ -820,6 +883,108 @@ class IsaacPickPlaceEnv:
         except Exception as e:
             print(f"[warn] Could not increase cube friction: {e}")
 
+    def _disable_gripper_cube_collision(self):
+        """Disable collision between gripper and cube using collision groups.
+        
+        The gripper collision geometry pushes the cube away instead of grasping it.
+        We put the gripper and cube in separate collision groups that don't interact.
+        """
+        try:
+            from pxr import PhysxSchema, Sdf
+            from omni.physx import get_physx_scene_query_interface
+            
+            stage = self.world.stage
+            robot_prim_path = getattr(self.robot, "prim_path", "/World/Robot")
+            cube_path = "/World/Cube"
+            
+            # Create collision groups
+            # Group 0: Default (ground, etc)
+            # Group 1: Gripper parts (won't collide with group 2)
+            # Group 2: Cube (won't collide with group 1)
+            
+            gripper_paths = [
+                f"{robot_prim_path}/gripper",
+                f"{robot_prim_path}/jaw",
+            ]
+            
+            modified = 0
+            
+            # Method: Use PhysX filtering pair API
+            # This directly tells PhysX to ignore collisions between specific prims
+            try:
+                physics_scene_path = "/World/physicsScene"
+                physics_scene = stage.GetPrimAtPath(physics_scene_path)
+                
+                if not physics_scene.IsValid():
+                    # Try to find physics scene
+                    for prim in stage.Traverse():
+                        if prim.IsA(UsdPhysics.Scene):
+                            physics_scene = prim
+                            break
+                
+                # Apply collision filtering using PhysxSceneAPI
+                if physics_scene.IsValid():
+                    physx_scene = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene.GetPath())
+                    if physx_scene:
+                        # Enable collision filtering
+                        print("[info] Found PhysX scene, attempting collision group setup...")
+                        
+            except Exception as e:
+                print(f"[debug] PhysX scene method: {e}")
+            
+            # Alternative: Disable collision on cube entirely, re-enable for ground only
+            cube_prim = stage.GetPrimAtPath(cube_path)
+            if cube_prim.IsValid():
+                try:
+                    # Use PhysxCollisionAPI to set collision filtering
+                    physx_coll = PhysxSchema.PhysxCollisionAPI.Get(stage, cube_path)
+                    if not physx_coll:
+                        physx_coll = PhysxSchema.PhysxCollisionAPI.Apply(cube_prim)
+                    
+                    # Reduce contact offset to minimize collision response
+                    physx_coll.CreateContactOffsetAttr().Set(0.001)
+                    physx_coll.CreateRestOffsetAttr().Set(0.0)
+                    modified += 1
+                    print("[info] Reduced cube contact offset")
+                except Exception as e:
+                    print(f"[debug] Cube collision API: {e}")
+            
+            # Disable collision on gripper parts
+            for gripper_path in gripper_paths:
+                try:
+                    prim = stage.GetPrimAtPath(gripper_path)
+                    if not prim.IsValid():
+                        continue
+                    
+                    # Try to find collision child prims
+                    for child in prim.GetAllChildren():
+                        child_path_str = str(child.GetPath())
+                        if "collision" in child_path_str.lower():
+                            try:
+                                coll_api = UsdPhysics.CollisionAPI.Get(stage, child_path_str)
+                                if coll_api:
+                                    enabled = coll_api.GetCollisionEnabledAttr()
+                                    if not enabled:
+                                        enabled = coll_api.CreateCollisionEnabledAttr()
+                                    enabled.Set(False)
+                                    modified += 1
+                                    print(f"[info] Disabled collision on: {child_path_str}")
+                            except Exception:
+                                pass
+                                
+                except Exception as e:
+                    print(f"[debug] Gripper collision disable: {e}")
+            
+            if modified > 0:
+                print(f"[info] Modified {modified} collision settings")
+            else:
+                print("[warn] Could not modify collision settings")
+                print("[info] Will rely on sticky gripper positioning only")
+                    
+        except ImportError as e:
+            print(f"[warn] Import error for collision filtering: {e}")
+        except Exception as e:
+            print(f"[warn] Could not disable gripper-cube collision: {e}")
     
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:

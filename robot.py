@@ -37,7 +37,7 @@ class SO100Robot:
         
         if import_config is None:
             import_config = _urdf.ImportConfig()
-            import_config.convex_decomp = False  # Keep off for speed
+            import_config.convex_decomp = True   # Enable convex decomposition for proper collision
             import_config.fix_base = True
             import_config.make_default_prim = True
             import_config.self_collision = False  # Keep self-collision off to avoid arm conflicts
