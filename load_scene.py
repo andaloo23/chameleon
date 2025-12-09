@@ -116,16 +116,19 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
         
-        # Sticky gripper with PRE-EMPTIVE FREEZE
-        # Freezes the cube BEFORE the gripper collision can push it away
+        # Surface-gripper-style attachment (Isaac Lab approach)
+        # Key improvement: Object position is computed RELATIVE to gripper frame,
+        # not frozen in world space. This prevents teleportation issues.
+        #
+        # Now includes position validation: only triggers grasp when cube is
+        # actually BETWEEN the gripper fingers (not just within distance).
         self.sticky_gripper = StickyGripper(
             self,
-            grasp_threshold=0.40,               # Distance threshold for full grasp
-            gripper_close_threshold=0.50,       # Gripper considered closed
-            gripper_open_threshold=0.7,         # Gripper considered open
-            min_close_frames=3,                 # Quick grasp since cube is frozen
-            release_delay_frames=5,             # Frames to prevent accidental release
-            preemptive_freeze_distance=0.45,    # Start freezing early!
+            grasp_threshold=0.20,               # Distance from gripper link to cube center
+            gripper_close_threshold=0.50,       # Gripper joint value considered "closed" (0=fully closed, 1.5=fully open)
+            gripper_open_threshold=0.7,         # Gripper joint value considered "open"
+            min_close_frames=5,                 # More frames to ensure stable grasp position
+            release_delay_frames=5,             # Frames gripper must be open to release
             debug=True,
         )
         
@@ -361,25 +364,50 @@ class IsaacPickPlaceEnv:
         except Exception:
             actual_gripper_pos = float(joint_targets[-1]) if len(joint_targets) > 0 else 0.0
         
-        gripper_world_pos = None
+        # Get cube world position
         cube_world_pos = None
-        try:
-            wrist_cam = getattr(self.robot, "wrist_camera", None)
-            if wrist_cam is not None:
-                gripper_world_pos, _ = wrist_cam.get_world_pose()
-                gripper_world_pos = np.array(gripper_world_pos, dtype=np.float32)
-        except Exception:
-            pass
         try:
             cube_world_pos, _ = self.cube.get_world_pose()
             cube_world_pos = np.array(cube_world_pos, dtype=np.float32)
         except Exception:
             pass
         
+        # Get gripper link world position (not wrist camera - that's offset!)
+        # The sticky gripper will compute this from USD, but we also try here for logging
+        gripper_world_pos = None
+        try:
+            # Try to get actual gripper link position from USD stage
+            robot_prim_path = getattr(self.robot, "prim_path", None)
+            if robot_prim_path is not None:
+                stage = self.world.stage
+                # Try direct path first
+                gripper_path = f"{robot_prim_path}/gripper"
+                gripper_prim = stage.GetPrimAtPath(gripper_path)
+                if gripper_prim and gripper_prim.IsValid():
+                    xformable = UsdGeom.Xformable(gripper_prim)
+                    matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                    translation = matrix.ExtractTranslation()
+                    gripper_world_pos = np.array([translation[0], translation[1], translation[2]], dtype=np.float32)
+        except Exception as e:
+            if self._step_counter % 100 == 0:
+                print(f"[ENV] Could not get gripper link pos: {e}")
+        
+        # Fallback to wrist camera position (offset from actual gripper, but better than nothing)
+        if gripper_world_pos is None:
+            try:
+                wrist_cam = getattr(self.robot, "wrist_camera", None)
+                if wrist_cam is not None:
+                    gripper_world_pos, _ = wrist_cam.get_world_pose()
+                    gripper_world_pos = np.array(gripper_world_pos, dtype=np.float32)
+                    if self._step_counter % 100 == 0:
+                        print(f"[ENV] Using wrist camera pos as gripper fallback")
+            except Exception:
+                pass
+        
         # Log distances for debugging (every 50 steps or when close)
         if gripper_world_pos is not None and cube_world_pos is not None:
             dist = np.linalg.norm(gripper_world_pos - cube_world_pos)
-            if self._step_counter % 50 == 0 or dist < 0.25:
+            if self._step_counter % 50 == 0 or dist < 0.30:
                 print(f"[ENV step={self._step_counter}] gripper_joint={actual_gripper_pos:.3f} "
                       f"gripper_pos={gripper_world_pos} cube_pos={cube_world_pos} dist={dist:.3f}m")
         
