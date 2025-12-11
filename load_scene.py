@@ -124,7 +124,7 @@ class IsaacPickPlaceEnv:
         # actually BETWEEN the gripper fingers (not just within distance).
         self.sticky_gripper = StickyGripper(
             self,
-            grasp_threshold=0.20,               # Distance from gripper link to cube center
+            grasp_threshold=0.25,               # Distance from gripper link to cube center (moderate)
             gripper_close_threshold=0.50,       # Gripper joint value considered "closed" (0=fully closed, 1.5=fully open)
             gripper_open_threshold=0.7,         # Gripper joint value considered "open"
             min_close_frames=5,                 # More frames to ensure stable grasp position
