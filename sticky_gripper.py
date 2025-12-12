@@ -90,12 +90,16 @@ class StickyGripper:
         gripper_open_threshold: float = 0.7,     # Gripper joint value to consider "open"
         min_close_frames: int = 3,               # Frames gripper must be closed to grasp
         release_delay_frames: int = 5,           # Frames gripper must be open to release
+        grasp_start_distance: float = 0.30,      # Distance gate for starting a grasp
+        pre_grasp_close_limit: float = 0.35,     # Gripper must be this closed before sticking
         min_standoff: float = 0.015,             # Keep object slightly offset from finger plane to avoid clipping
         detach_distance: float = 0.35,           # Drop the grasp if pose computation explodes
         debug: bool = True,
     ):
         self.env = env
         self.grasp_threshold = grasp_threshold
+        self.grasp_start_distance = grasp_start_distance
+        self.pre_grasp_close_limit = pre_grasp_close_limit
         self.gripper_close_threshold = gripper_close_threshold
         self.gripper_open_threshold = gripper_open_threshold
         self.min_close_frames = min_close_frames
@@ -119,6 +123,9 @@ class StickyGripper:
         self._update_count = 0
         self._gripper_prim_path: Optional[str] = None
         self._jaw_prim_path: Optional[str] = None
+        self._last_good_gripper_pos: Optional[np.ndarray] = None
+        self._last_good_gripper_orient: Optional[np.ndarray] = None
+        self._smoothed_cube_pos: Optional[np.ndarray] = None
         
     def reset(self):
         """Reset for a new episode."""
@@ -132,6 +139,9 @@ class StickyGripper:
         self._primary_axis = None
         self._update_count = 0
         self._jaw_prim_path = None
+        self._last_good_gripper_pos = None
+        self._last_good_gripper_orient = None
+        self._smoothed_cube_pos = None
         
     def _find_gripper_prim_path(self, stage, robot_prim_path: str) -> Optional[str]:
         """Find the actual gripper prim path in the USD stage."""
@@ -404,19 +414,29 @@ class StickyGripper:
             gripper_pos = gripper_world_pos
             gripper_orient = np.array([0, 0, 0, 1], dtype=np.float32)
             used_fallback_pose = True  # orientation is a guess; skip strict validity checks
+        # Reuse last known good pose to avoid identity-orientation glitches near lift apex
+        if gripper_pos is None and self._last_good_gripper_pos is not None:
+            gripper_pos = self._last_good_gripper_pos
+            gripper_orient = self._last_good_gripper_orient
+            used_fallback_pose = True
         if cube_pos is None and object_world_pos is not None:
             cube_pos = object_world_pos
             cube_orient = np.array([0, 0, 0, 1], dtype=np.float32)
+        
+        # Persist last good pose when we have a proper USD-derived gripper pose
+        if gripper_pos is not None and gripper_orient is not None and not used_fallback_pose:
+            self._last_good_gripper_pos = gripper_pos.copy()
+            self._last_good_gripper_orient = gripper_orient.copy()
         
         # Calculate distance
         distance = None
         if gripper_pos is not None and cube_pos is not None:
             distance = float(np.linalg.norm(gripper_pos - cube_pos))
         
-        # Use a tighter threshold when we only have a fallback pose (wrist camera)
-        effective_grasp_threshold = self.grasp_threshold
+        # Threshold for initiating grasp; fallback pose uses a slightly tighter cap
+        effective_grasp_threshold = min(self.grasp_threshold, self.grasp_start_distance)
         if used_fallback_pose:
-            effective_grasp_threshold = min(self.grasp_threshold, 0.25)
+            effective_grasp_threshold = min(effective_grasp_threshold, 0.24)
         
         # Check if cube is in valid grasp position
         grasp_position_valid = False
@@ -458,6 +478,7 @@ class StickyGripper:
                 self._close_frame_count >= self.min_close_frames and
                 distance is not None and
                 distance <= effective_grasp_threshold and
+                gripper_position <= self.pre_grasp_close_limit and  # Require additional closure before sticking
                 grasp_position_valid  # NEW: Must be in valid position!
             )
             
@@ -503,6 +524,7 @@ class StickyGripper:
         self._local_grasp_orientation = cube_orient.copy()
         # Store cube orientation relative to gripper so rotations follow along
         self._local_grasp_rotation = self._compute_local_orientation(gripper_orient, cube_orient)
+        self._smoothed_cube_pos = None  # reset smoothing state
         
         if self.debug:
             print(f"[StickyGripper] ★★★ GRASP STARTED!")
@@ -529,6 +551,14 @@ class StickyGripper:
                 self._release_grasp()
                 return
 
+            # Smooth target to reduce jitter near the top of the lift
+            if self._smoothed_cube_pos is None:
+                self._smoothed_cube_pos = new_cube_pos
+            else:
+                alpha = 0.15  # heavier smoothing for stability
+                self._smoothed_cube_pos = alpha * new_cube_pos + (1 - alpha) * self._smoothed_cube_pos
+            smoothed_pos = self._smoothed_cube_pos
+
             # Rotate cube with the gripper using the stored local rotation
             if self._local_grasp_rotation is not None:
                 gripper_rot = quaternion_to_rotation_matrix(gripper_orient)
@@ -539,7 +569,7 @@ class StickyGripper:
                 new_cube_orient = self._local_grasp_orientation
             
             cube.set_world_pose(
-                position=new_cube_pos,
+                position=smoothed_pos,
                 orientation=new_cube_orient
             )
             
