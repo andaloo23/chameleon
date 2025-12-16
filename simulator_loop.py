@@ -94,7 +94,7 @@ class SimulationLoop:
         self,
         env: Optional[IsaacPickPlaceEnv] = None,
         *,
-        max_steps: int = 500,
+        max_steps: int = 1500,
         headless: bool = True,
         capture_images: bool = False,
         image_interval: int = 3,
@@ -140,6 +140,9 @@ class SimulationLoop:
             joint_positions = observation.get("joint_positions")
             cube_pos = observation.get("cube_pos")
             gripper_pos = observation.get("gripper_pos")
+            # Remember pan at grasp to lift straight up without sweeping sideways
+            if not hasattr(_policy, "_grasp_pan"):
+                _policy._grasp_pan = None
             
             if joint_positions is None:
                 return self.random_policy(observation, step)
@@ -309,6 +312,9 @@ class SimulationLoop:
                     1.2 * (1 - progress) + 0.05 * progress,
                     "gripper"
                 )
+                # Record pan at the moment we're about to grasp
+                if _policy._grasp_pan is None:
+                    _policy._grasp_pan = float(current_pos[name_to_idx.get("shoulder_pan", 0)])
                 
                 # Smooth blend (slightly faster)
                 alpha = 0.05
@@ -318,24 +324,26 @@ class SimulationLoop:
                 # Stage 5: Lift if grasped (starts at step 250, 250 steps remaining!)
                 if grasped_flag:
                     # GRASP DETECTED! Lift arm up with cube
-                    progress = min(1.0, (step - 250) / 120.0)  # 120 steps for smooth lift
+                    progress = min(1.0, (step - 250) / 60.0)  # Even faster lift
                     
                     # Start from current grasp position, lift to high position
                     target_config = grasp_config.copy()
-                    target_config[0] = safe_clip(cube_offset_pan, "shoulder_pan")  # Maintain angle
+                    # Keep the pan fixed to the grasp pan to avoid sweeping sideways
+                    hold_pan = _policy._grasp_pan if _policy._grasp_pan is not None else cube_offset_pan
+                    target_config[0] = safe_clip(hold_pan, "shoulder_pan")
                     target_config[4] = safe_clip(cube_adapted_wrist_roll, "wrist_roll")
                     
                     # Lift: shoulder_lift goes from grasp height (~1.8) to high position (0.3)
                     # Lower value = higher arm position
-                    high_lift_position = 0.3  # Very high up
+                    high_lift_position = 0.2  # Lift higher sooner
                     target_config[1] = safe_clip(
                         cube_adapted_lift * (1 - progress) + high_lift_position * progress,
                         "shoulder_lift"
                     )
                     
-                    # Straighten elbow as we lift
+                    # Straighten elbow as we lift, but keep modest bend to minimize lateral motion
                     target_config[2] = safe_clip(
-                        cube_adapted_elbow * (1 - progress) + -0.6 * progress,
+                        cube_adapted_elbow * (1 - progress) + -0.8 * progress,
                         "elbow_flex"
                     )
                     
@@ -348,7 +356,7 @@ class SimulationLoop:
                     target_config[5] = safe_clip(0.05, "gripper")  # Keep CLOSED tight!
                     
                     # Faster blend for clear lifting motion
-                    alpha = 0.06
+                    alpha = 0.1
                     target = current_pos * (1 - alpha) + target_config[:len(current_pos)] * alpha
                     
                     if step % 30 == 0:

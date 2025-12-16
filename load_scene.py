@@ -169,6 +169,10 @@ class IsaacPickPlaceEnv:
         # grasp is detected, so the cube stays welded to the fingers during lift.
         self._physics_grasp_joint_path = "/World/PhysicsGrasp"
         self._physics_grasp_active = False
+        self._gripper_pose_fallback_warned = False
+        self._physics_local_offset = None
+        self._physics_local_rot = None
+        self._last_contact_step = -1
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -456,17 +460,22 @@ class IsaacPickPlaceEnv:
             try:
                 wrist_cam = getattr(self.robot, "wrist_camera", None)
                 if wrist_cam is not None:
-                    cam_pos, cam_orient = wrist_cam.get_world_pose()
-                    cam_pos = np.array(cam_pos, dtype=np.float32)
-                    cam_orient = np.array(cam_orient, dtype=np.float32)
-                    # Approximate gripper pose by inverting the known camera offset
-                    offset_local = np.array([0.0, 0.05, -0.08], dtype=np.float32)
-                    cam_rot = quaternion_to_rotation_matrix(cam_orient)
-                    gripper_world_pos = cam_pos - cam_rot @ offset_local
-                    gripper_world_orient = cam_orient
-                    gripper_pose_from_fallback = True
-                    if self._step_counter % 100 == 0:
-                        print(f"[ENV] Using wrist camera pos as gripper fallback")
+                    pose = self._compute_gripper_pose_from_camera()
+                    if pose is not None:
+                        gripper_world_pos, gripper_world_orient = pose
+                        gripper_pose_from_fallback = False  # pose derived from local transform, reliable
+                    else:
+                        cam_pos, _ = wrist_cam.get_world_pose()
+                        cam_pos = np.array(cam_pos, dtype=np.float32)
+                        offset_local = np.array([0.0, 0.05, -0.08], dtype=np.float32)
+                        gripper_world_pos = cam_pos - offset_local  # rough guess
+                        gripper_world_orient = None
+                        gripper_pose_from_fallback = True
+                        if not self._gripper_pose_fallback_warned:
+                            print("[ENV] Using wrist camera pos fallback without orientation (gripper pose unavailable)")
+                            self._gripper_pose_fallback_warned = True
+                        if self._step_counter % 100 == 0:
+                            print(f"[ENV] Using wrist camera pos as gripper fallback")
             except Exception:
                 pass
         
@@ -685,6 +694,28 @@ class IsaacPickPlaceEnv:
 
         height, width, _ = self._camera_frame_shapes[key]
         return np.zeros((height, width, 3), dtype=np.float32)
+
+    def _compute_gripper_pose_from_camera(self):
+        """Infer gripper pose from the wrist camera using its local transform."""
+        wrist_cam = getattr(self.robot, "wrist_camera", None)
+        if wrist_cam is None:
+            return None
+        try:
+            cam_world_pos, cam_world_orient = wrist_cam.get_world_pose()
+            cam_local_pos, cam_local_orient = wrist_cam.get_local_pose()
+            cam_world_pos = np.array(cam_world_pos, dtype=np.float32)
+            cam_world_orient = np.array(cam_world_orient, dtype=np.float32)
+            cam_local_pos = np.array(cam_local_pos, dtype=np.float32)
+            cam_local_orient = np.array(cam_local_orient, dtype=np.float32)
+
+            R_cam = quaternion_to_rotation_matrix(cam_world_orient)
+            R_local = quaternion_to_rotation_matrix(cam_local_orient)
+            R_gripper = R_cam @ R_local.T
+            gripper_orient = rotation_matrix_to_quaternion(R_gripper)
+            gripper_pos = cam_world_pos - R_gripper @ cam_local_pos
+            return gripper_pos, gripper_orient
+        except Exception:
+            return None
 
     def _compute_default_joint_positions(self):
         defaults = {
@@ -1122,12 +1153,19 @@ class IsaacPickPlaceEnv:
             try:
                 self.cube.set_linear_velocity(np.zeros(3))
                 self.cube.set_angular_velocity(np.zeros(3))
+                # Actively follow the gripper to prevent any residual sliding
+                if (self._physics_local_offset is not None and self._physics_local_rot is not None and
+                        gripper_world_pos is not None and gripper_world_orient is not None):
+                    Rg = quaternion_to_rotation_matrix(np.asarray(gripper_world_orient, dtype=float))
+                    target_pos = gripper_world_pos + Rg @ self._physics_local_offset
+                    target_rot = rotation_matrix_to_quaternion(Rg @ self._physics_local_rot)
+                    self.cube.set_world_pose(position=target_pos, orientation=target_rot)
             except Exception:
                 pass
             # If the cube somehow drifted far away, drop the joint to avoid snapping
             try:
                 if gripper_world_pos is not None and cube_world_pos is not None:
-                    if np.linalg.norm(gripper_world_pos - cube_world_pos) > 0.25:
+                    if np.linalg.norm(gripper_world_pos - cube_world_pos) > 0.1:
                         self._release_physics_grasp_joint()
                         return
             except Exception:
@@ -1139,18 +1177,43 @@ class IsaacPickPlaceEnv:
         if gripper_world_pos is not None and cube_world_pos is not None:
             distance = float(np.linalg.norm(gripper_world_pos - cube_world_pos))
         
-        near_enough = distance is not None and distance < 0.06
-        closing = gripper_value is not None and gripper_value < 0.22
-        should_attach = (grasped_flag or pressure_grasp) or (near_enough and closing)
+        attach_distance = 0.06  # 6 cm: allow attach when close
+        # Require either contact report or very close approach while closing
+        cube_path = getattr(self.cube, "prim_path", "/World/Cube")
+        gripper_paths = [
+            f"{getattr(self.robot, 'prim_path', '/World/Robot')}/gripper",
+            f"{getattr(self.robot, 'prim_path', '/World/Robot')}/jaw",
+        ]
+        in_contact = self._gripper_cube_in_contact(cube_path, gripper_paths)
+        if in_contact:
+            self._last_contact_step = self._step_counter
+        # Allow a short grace window after contact (3 frames) to attach
+        recent_contact = (self._step_counter - self._last_contact_step) <= 3 if self._last_contact_step >= 0 else False
+
+        near_enough = distance is not None and distance < attach_distance
+        closing = gripper_value is not None and gripper_value < 0.18
+        pose_reliable = (gripper_world_pos is not None and gripper_world_orient is not None and not used_gripper_fallback)
+        should_attach = False
+        if pose_reliable:
+            if in_contact or recent_contact:
+                should_attach = closing or grasped_flag or pressure_grasp
+            elif near_enough and closing:
+                # Fallback: close proximity even without explicit contact report
+                should_attach = True
         
         # Need reliable poses to create the weld
         if not should_attach:
+            if near_enough and pose_reliable and self._step_counter % 50 == 0:
+                print(f"[GRASP-WELD] Near cube (dist={distance:.3f}m) but not attaching: "
+                      f"contact={in_contact} recent_contact={recent_contact} closing={closing}")
             return
         if (gripper_world_pos is None or gripper_world_orient is None or
                 cube_world_pos is None or cube_world_orient is None):
             return
-        # Skip attaching when only fallback pose is available and cube is still far
-        if used_gripper_fallback and (distance is None or distance > 0.05):
+        # Skip attaching when only fallback pose is available; orientation is not trustworthy
+        if used_gripper_fallback:
+            if self._step_counter % 50 == 0:
+                print("[GRASP-WELD] Skipping weld due to fallback gripper pose")
             return
         
         anchor_world = gripper_world_pos if jaw_world_pos is None else 0.5 * (gripper_world_pos + jaw_world_pos)
@@ -1171,6 +1234,8 @@ class IsaacPickPlaceEnv:
             attach_reason = "reward grasp" if grasped_flag else ("pressure grasp" if pressure_grasp else "proximity+closing")
             dist_str = f"{distance:.3f}m" if distance is not None else "N/A"
             print(f"[info] Locked cube to gripper with physics weld joint ({attach_reason}, dist={dist_str})")
+            if in_contact or recent_contact:
+                print(f"[info] Weld triggered by contact (contact={in_contact}, recent={recent_contact})")
         except Exception as e:
             print(f"[warn] Could not lock physics grasp: {e}")
             self._physics_grasp_active = False
@@ -1207,6 +1272,8 @@ class IsaacPickPlaceEnv:
         anchor_local_cube = Rc.T @ (anchor_world - cube_world_pos)
         rel_rot = Rc.T @ Rg
         rel_quat = rotation_matrix_to_quaternion(rel_rot)
+        self._physics_local_offset = anchor_local_cube.copy()
+        self._physics_local_rot = rel_rot.copy()
         
         joint = UsdPhysics.FixedJoint.Define(stage, self._physics_grasp_joint_path)
         joint.CreateBody0Rel().SetTargets([gripper_path])
@@ -1223,7 +1290,6 @@ class IsaacPickPlaceEnv:
         joint.CreateLocalRot1Attr().Set(Gf.Quatf(
             float(rel_quat[3]), float(rel_quat[0]), float(rel_quat[1]), float(rel_quat[2])
         ))
-        
         try:
             joint.CreateBreakForceAttr().Set(750.0)
             joint.CreateBreakTorqueAttr().Set(750.0)
@@ -1246,6 +1312,8 @@ class IsaacPickPlaceEnv:
             print(f"[warn] Could not release physics grasp joint: {e}")
         finally:
             self._physics_grasp_active = False
+            self._physics_local_offset = None
+            self._physics_local_rot = None
     
     def _apply_domain_randomization(self):
         if self.domain_randomizer is not None:
@@ -1295,6 +1363,20 @@ class IsaacPickPlaceEnv:
             })
 
         return collisions
+
+    def _gripper_cube_in_contact(self, cube_path: str, gripper_paths):
+        """Check recent contacts for gripper-cube interaction."""
+        collisions = self._get_recent_collisions()
+        if not collisions:
+            return False
+        for entry in collisions:
+            prim0 = str(entry.get("prim0", ""))
+            prim1 = str(entry.get("prim1", ""))
+            if cube_path in prim0 or cube_path in prim1:
+                for gpath in gripper_paths:
+                    if gpath and (gpath in prim0 or gpath in prim1):
+                        return True
+        return False
 
     def _validate_state(self, _obs):
         flags = {

@@ -96,7 +96,7 @@ class RewardEngine:
 
         # Pressure-based grasp detection using GraspDetector
         # Detects when gripper is trying to close but position is stable (blocked by object)
-        distance_threshold = self.env.cube_scale[0] * 5.0
+        distance_threshold = self.env.cube_scale[0] * 2.0
         
         # Update grasp detector with current gripper state
         grasp_state = None
