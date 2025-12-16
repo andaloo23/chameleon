@@ -37,8 +37,8 @@ def summarize_episode(idx: int, result: EpisodeResult, verbose: bool = False) ->
     return summary
 
 
-def run(num_episodes: int, max_steps: int, headless: bool, verbose: bool, policy: str) -> None:
-    with SimulationLoop(max_steps=max_steps, headless=headless) as loop:
+def run(num_episodes: int, max_steps: int, headless: bool, verbose: bool, policy: str, grasp_mode: str) -> None:
+    with SimulationLoop(max_steps=max_steps, headless=headless, grasp_mode=grasp_mode) as loop:
         if policy == "heuristic":
             policy_fn = loop.scripted_policy()
         else:
@@ -57,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--headless", action="store_true", help="Run Isaac Sim headless.")
     parser.add_argument("--verbose", action="store_true", help="Include reward/stage details in the output.")
     parser.add_argument("--policy", choices=("random", "heuristic"), default="random", help="Which policy to run.")
+    parser.add_argument(
+        "--grasp-mode",
+        choices=("sticky", "physics"),
+        default="sticky",
+        help="Choose sticky attachment or physics-based grasping.",
+    )
     return parser.parse_args()
 
 
@@ -68,4 +74,5 @@ if __name__ == "__main__":
         headless=args.headless,
         verbose=args.verbose,
         policy=args.policy,
+        grasp_mode=args.grasp_mode,
     )
