@@ -173,6 +173,7 @@ class IsaacPickPlaceEnv:
         self._physics_local_offset = None
         self._physics_local_rot = None
         self._last_contact_step = -1
+        self._prev_gripper_value: Optional[float] = None
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -380,6 +381,7 @@ class IsaacPickPlaceEnv:
         self._force_terminate = False
         self._termination_reason = None
         self._latest_target_gripper = None  # Reset target gripper for grasp detection
+        self._prev_gripper_value = None  # Reset closing trend tracking
         
         return self._get_observation()
 
@@ -406,6 +408,7 @@ class IsaacPickPlaceEnv:
             actual_gripper_pos = float(actual_joint_positions[-1]) if len(actual_joint_positions) > 0 else 0.0
         except Exception:
             actual_gripper_pos = float(joint_targets[-1]) if len(joint_targets) > 0 else 0.0
+        prev_gripper_value = self._prev_gripper_value
         
         # Get cube world position
         cube_world_pos = None
@@ -512,7 +515,9 @@ class IsaacPickPlaceEnv:
                 jaw_world_pos=jaw_world_pos,
                 gripper_value=actual_gripper_pos,
                 used_gripper_fallback=gripper_pose_from_fallback,
+                prev_gripper_value=prev_gripper_value,
             )
+        self._prev_gripper_value = actual_gripper_pos
         reward, done, info = self.reward_engine.summarize_reward()
 
         if self._force_terminate:
@@ -1133,6 +1138,7 @@ class IsaacPickPlaceEnv:
         jaw_world_pos: Optional[np.ndarray],
         gripper_value: Optional[float],
         used_gripper_fallback: bool = False,
+        prev_gripper_value: Optional[float] = None,
     ):
         """When using physics gripper, weld the cube to the fingers after a confirmed grasp."""
         if not self.use_physics_gripper:
@@ -1191,14 +1197,23 @@ class IsaacPickPlaceEnv:
         recent_contact = (self._step_counter - self._last_contact_step) <= 3 if self._last_contact_step >= 0 else False
 
         near_enough = distance is not None and distance < attach_distance
-        closing = gripper_value is not None and gripper_value < 0.18
+        closing_hard = gripper_value is not None and gripper_value < 0.35  # latch earlier to prevent sliding
+        closing_trend = (
+            gripper_value is not None and prev_gripper_value is not None and
+            gripper_value < prev_gripper_value - 1e-3
+        )
+        commanded_close = (
+            gripper_value is not None and self._latest_target_gripper is not None and
+            self._latest_target_gripper < gripper_value - 1e-3
+        )
+        contact_attach = in_contact or recent_contact
+        closing = closing_hard or closing_trend or commanded_close or grasped_flag or pressure_grasp or contact_attach
         pose_reliable = (gripper_world_pos is not None and gripper_world_orient is not None and not used_gripper_fallback)
         should_attach = False
         if pose_reliable:
-            if in_contact or recent_contact:
-                should_attach = closing or grasped_flag or pressure_grasp
-            elif near_enough and closing:
-                # Fallback: close proximity even without explicit contact report
+            contact_grasp = contact_attach and closing  # any contact immediately triggers weld
+            near_grasp = near_enough and closing
+            if contact_grasp or near_grasp:
                 should_attach = True
         
         # Need reliable poses to create the weld
