@@ -99,14 +99,14 @@ class SimulationLoop:
         capture_images: bool = False,
         image_interval: int = 3,
         random_seed: Optional[int] = None,
-        grasp_mode: str = "sticky",
+        grasp_mode: str = "weld",
     ) -> None:
         self.max_steps = int(max_steps)
         if self.max_steps <= 0:
             raise ValueError("`max_steps` must be greater than zero.")
         grasp_mode = (grasp_mode or "sticky").strip().lower()
-        if grasp_mode not in {"sticky", "physics"}:
-            raise ValueError("grasp_mode must be 'sticky' or 'physics'")
+        if grasp_mode not in {"sticky", "physics", "weld"}:
+            raise ValueError("grasp_mode must be 'sticky', 'physics', or 'weld'")
         self.grasp_mode = grasp_mode
 
         if env is None:

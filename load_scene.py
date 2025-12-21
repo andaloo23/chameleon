@@ -10,7 +10,8 @@ from cup_utils import create_cup_prim, initialize_usd_modules
 from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
-from sticky_gripper import StickyGripper, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
+from sticky_gripper import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
+from gripper_weld import IntelligentGripperWeld
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 
 _SIMULATION_APP = None
@@ -66,22 +67,27 @@ def _ensure_isaac_sim(headless=False):
 class IsaacPickPlaceEnv:
     """Isaac Sim environment wrapper for the pick-and-place task."""
 
-    def __init__(self, headless=False, capture_images=False, image_interval=3, random_seed=None, grasp_mode: str = "sticky"):
+    def __init__(self, headless=False, capture_images=False, image_interval=3, random_seed=None, grasp_mode: str = "weld"):
         self.headless = headless
         self.capture_images = capture_images
         self.image_interval = max(1, int(image_interval))
         self.random_seed = random_seed
         self.rng = np.random.default_rng(random_seed)
 
-        grasp_mode = (grasp_mode or "sticky").strip().lower()
-        if grasp_mode not in {"sticky", "physics"}:
-            raise ValueError("grasp_mode must be 'sticky' or 'physics'")
+        grasp_mode = (grasp_mode or "weld").strip().lower()
+        if grasp_mode not in {"sticky", "physics", "weld"}:
+            raise ValueError("grasp_mode must be 'sticky', 'physics', or 'weld'")
         self.grasp_mode = grasp_mode
-        self.use_sticky_gripper = grasp_mode == "sticky"
-        self.use_physics_gripper = grasp_mode == "physics"
+        # Modes:
+        # - sticky: legacy kinematic attachment (not recommended)
+        # - physics: contact-driven (no weld)
+        # - weld: intelligent contact + stall -> FixedJoint weld (recommended)
+        self.use_sticky_gripper = (grasp_mode == "sticky")
+        self.use_physics_gripper = (grasp_mode == "physics")
+        self.use_weld_gripper = (grasp_mode == "weld")
 
         # Physics parameters tunable per grasp mode
-        if self.use_physics_gripper:
+        if self.use_physics_gripper or self.use_weld_gripper:
             # Realistic-ish friction + mass so we can test true contacts
             self.cube_mass = 0.08  # 80g block keeps inertia manageable but non-trivial
             self._cube_friction = 2.2
@@ -147,32 +153,22 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
         
-        # Surface-gripper-style attachment (Isaac Lab approach)
-        # Key improvement: Object position is computed RELATIVE to gripper frame,
-        # not frozen in world space. This prevents teleportation issues.
-        #
-        # Now includes position validation: only triggers grasp when cube is
-        # actually BETWEEN the gripper fingers (not just within distance).
-        self.sticky_gripper = None
-        if self.use_sticky_gripper:
-            self.sticky_gripper = StickyGripper(
-                self,
-                grasp_threshold=0.25,               # Distance from gripper link to cube center (moderate)
-                gripper_close_threshold=0.50,       # Gripper joint value considered "closed" (0=fully closed, 1.5=fully open)
-                gripper_open_threshold=0.7,         # Gripper joint value considered "open"
-                min_close_frames=5,                 # More frames to ensure stable grasp position
-                release_delay_frames=5,             # Frames gripper must be open to release
+        # Intelligent physics weld grasping:
+        # Create a FixedJoint only after ~1s of closing with stalled finger separation.
+        # This is object-agnostic and does NOT kinematically overwrite the cube pose.
+        self.gripper_weld = None
+        if self.use_weld_gripper:
+            self.gripper_weld = IntelligentGripperWeld(
+                env=self,
+                joint_path="/World/GripperWeldJoint",
+                seconds_required=1.0,
+                finger_delta_epsilon=1e-4,
+                near_scale=3.0,
+                open_threshold=0.65,
+                close_command_margin=1e-3,
                 debug=True,
             )
-        
-        # Physics grasp stabilizer: small fixed joint created once pressure-based
-        # grasp is detected, so the cube stays welded to the fingers during lift.
-        self._physics_grasp_joint_path = "/World/PhysicsGrasp"
-        self._physics_grasp_active = False
         self._gripper_pose_fallback_warned = False
-        self._physics_local_offset = None
-        self._physics_local_rot = None
-        self._last_contact_step = -1
         self._prev_gripper_value: Optional[float] = None
 
         if self.capture_images:
@@ -350,7 +346,9 @@ class IsaacPickPlaceEnv:
         """Reset the scene with new randomized object placements."""
         self._step_counter = 0
         render = not self.headless if render is None else bool(render)
-        self._release_physics_grasp_joint()
+        # Ensure any grasp weld is removed on reset.
+        if self.gripper_weld is not None:
+            self.gripper_weld.release()
 
         cube_xy, cup_xy = self._sample_object_positions()
         self._cube_xy = cube_xy
@@ -375,8 +373,8 @@ class IsaacPickPlaceEnv:
 
         self._apply_domain_randomization()
         self.reward_engine.reset()
-        if self.sticky_gripper is not None:
-            self.sticky_gripper.reset()  # Reset constraint-based grasping
+        if self.gripper_weld is not None:
+            self.gripper_weld.reset()
         self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
         self._force_terminate = False
         self._termination_reason = None
@@ -489,34 +487,27 @@ class IsaacPickPlaceEnv:
                 print(f"[ENV step={self._step_counter}] gripper_joint={actual_gripper_pos:.3f} "
                       f"gripper_pos={gripper_world_pos} cube_pos={cube_world_pos} dist={dist:.3f}m")
         
-        was_grasping = False
-        now_grasping = False
-        if self.sticky_gripper is not None:
-            was_grasping = self.sticky_gripper.is_grasping
-            self.sticky_gripper.update(
-                gripper_position=actual_gripper_pos,
+        # Intelligent weld grasp update (object-agnostic):
+        # - monitors finger separation stall while closing
+        # - creates a FixedJoint without teleporting the cube
+        if self.gripper_weld is not None:
+            was_grasping = self.gripper_weld.is_grasping
+            self.gripper_weld.update(
+                gripper_value=actual_gripper_pos,
+                target_gripper_value=self._latest_target_gripper,
                 gripper_world_pos=gripper_world_pos,
-                object_world_pos=cube_world_pos,
+                gripper_world_orient=gripper_world_orient,
+                jaw_world_pos=jaw_world_pos,
+                cube_world_pos=cube_world_pos,
+                cube_world_orient=cube_world_orient,
             )
-            now_grasping = self.sticky_gripper.is_grasping
-            # Log state changes
+            now_grasping = self.gripper_weld.is_grasping
             if was_grasping != now_grasping:
-                print(f"[ENV] GRASP STATE CHANGED: {was_grasping} -> {now_grasping}")
+                print(f"[ENV] GRASP WELD STATE CHANGED: {was_grasping} -> {now_grasping}")
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
         self._validate_state(obs)
-        if self.use_physics_gripper:
-            self._update_physics_grasp_constraint(
-                gripper_world_pos=gripper_world_pos,
-                gripper_world_orient=gripper_world_orient,
-                cube_world_pos=cube_world_pos,
-                cube_world_orient=cube_world_orient,
-                jaw_world_pos=jaw_world_pos,
-                gripper_value=actual_gripper_pos,
-                used_gripper_fallback=gripper_pose_from_fallback,
-                prev_gripper_value=prev_gripper_value,
-            )
         self._prev_gripper_value = actual_gripper_pos
         reward, done, info = self.reward_engine.summarize_reward()
 
@@ -531,7 +522,8 @@ class IsaacPickPlaceEnv:
         return obs, reward, done, info
 
     def close(self):
-        self._release_physics_grasp_joint()
+        if self.gripper_weld is not None:
+            self.gripper_weld.release()
         if self.world is not None:
             self.world.clear()
         if self.capture_images:

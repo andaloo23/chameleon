@@ -106,20 +106,22 @@ class RewardEngine:
                 target_position=self.latest_target_gripper,
             )
         
-        # Grasp detection: use sticky gripper (constraint-based) OR pressure-based as fallback
-        sticky_gripper = getattr(self.env, "sticky_gripper", None)
-        sticky_grasp_detected = sticky_gripper is not None and sticky_gripper.is_grasping
+        # Grasp detection:
+        # - Prefer an explicit physics weld (IntelligentGripperWeld) if present.
+        # - Fall back to pressure-based stall detection if we're near the object.
+        weld_gripper = getattr(self.env, "gripper_weld", None)
+        weld_grasp_detected = bool(weld_gripper is not None and getattr(weld_gripper, "is_grasping", False))
         pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
         near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
         
-        # Prefer sticky gripper (more reliable), fallback to pressure-based
-        grasp_detected = sticky_grasp_detected or (pressure_grasp_detected and near_cube)
+        # Prefer explicit weld (most reliable), fallback to pressure-based.
+        grasp_detected = weld_grasp_detected or (pressure_grasp_detected and near_cube)
         
         if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            if sticky_grasp_detected:
-                print(f"[GRASP] ✓ Constraint-based grasp detected (sticky gripper)!")
+            if weld_grasp_detected:
+                print(f"[GRASP] ✓ Weld-based grasp detected!")
             else:
                 print(f"[GRASP] ✓ Pressure-based grasp detected!")
             print(f"[GRASP]   Distance: {gripper_cube_distance:.3f}m, Gripper pos: {gripper_value:.3f}")

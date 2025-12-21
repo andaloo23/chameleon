@@ -78,8 +78,8 @@ def main():
     print(f"[info] Starting data collection for {args.episodes} episodes...")
     
     try:
-        env = IsaacPickPlaceEnv(headless=args.headless, capture_images=False, grasp_mode=args.grasp_mode)
-        loop = SimulationLoop(env=env, headless=args.headless, max_steps=args.max_steps, grasp_mode=args.grasp_mode)
+        env = IsaacPickPlaceEnv(headless=args.headless, capture_images=False, grasp_mode="weld")
+        loop = SimulationLoop(env=env, headless=args.headless, max_steps=args.max_steps, grasp_mode="weld")
 
         policy = loop.scripted_policy()
         
