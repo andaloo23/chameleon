@@ -161,6 +161,9 @@ class IntelligentGripperWeld:
 
         # Need jaw/gripper/world poses.
         if gripper_world_pos is None or jaw_world_pos is None or object_world_pos is None:
+            if self.debug and self._step % 30 == 0:
+                print("[WELD] Missing pose(s): "
+                      f"gripper={gripper_world_pos is not None} jaw={jaw_world_pos is not None} obj={object_world_pos is not None}")
             self._stall_accum_s = 0.0
             self._gap_history.clear()
             return WeldDebug(False, False, None, None, False, None)

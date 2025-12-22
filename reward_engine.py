@@ -93,10 +93,12 @@ class RewardEngine:
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
         gripper_value = state.get("gripper_joint")
+        sticky_gripper = getattr(self.env, "sticky_gripper", None)
 
         # Pressure-based grasp detection using GraspDetector
         # Detects when gripper is trying to close but position is stable (blocked by object)
-        distance_threshold = self.env.cube_scale[0] * 2.0
+        # Require the gripper to be very close before pressure-only grasp counts (otherwise we lift without a weld).
+        distance_threshold = self.env.cube_scale[0] * 1.2
         
         # Update grasp detector with current gripper state
         grasp_state = None
@@ -108,10 +110,12 @@ class RewardEngine:
         
         # Grasp detection:
         # - Prefer an explicit physics weld (IntelligentGripperWeld) if present.
-        # - Fall back to pressure-based stall detection if we're near the object.
+        # - When using weld mode, ignore pressure-only grasps to avoid lifting without a joint.
         weld_gripper = getattr(self.env, "gripper_weld", None)
         weld_grasp_detected = bool(weld_gripper is not None and getattr(weld_gripper, "is_grasping", False))
         pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
+        if getattr(self.env, "use_weld_gripper", False):
+            pressure_grasp_detected = False
         near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
         
         # Prefer explicit weld (most reliable), fallback to pressure-based.
@@ -274,12 +278,18 @@ class RewardEngine:
 
         gripper_pos = None
         gripper_quat = None
-        wrist_cam = getattr(env.robot, "wrist_camera", None)
-        if wrist_cam is not None:
-            try:
-                gripper_pos, gripper_quat = wrist_cam.get_world_pose()
-            except Exception:
-                gripper_pos, gripper_quat = None, None
+        # Prefer the actual gripper link pose captured in the env step.
+        if hasattr(env, "_last_gripper_pose"):
+            gp, go = env._last_gripper_pose
+            gripper_pos = gp
+            gripper_quat = go
+        if gripper_pos is None:
+            wrist_cam = getattr(env.robot, "wrist_camera", None)
+            if wrist_cam is not None:
+                try:
+                    gripper_pos, gripper_quat = wrist_cam.get_world_pose()
+                except Exception:
+                    gripper_pos, gripper_quat = None, None
 
         if cube_pos is not None:
             cube_pos = np.array(cube_pos, dtype=np.float32)

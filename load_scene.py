@@ -145,6 +145,10 @@ class IsaacPickPlaceEnv:
         self._camera_failure_logged = {key: False for key in self._camera_keys}
         self._camera_frame_shapes = {}
         self._fixed_camera_poses = {}  # Store fixed camera positions to restore after reset
+        self._last_gripper_pose = (None, None)  # (pos, orient) pulled from USD each step
+        self._last_jaw_pos = None
+        self._gripper_prim_path = None
+        self._jaw_prim_path = None
 
         self.reward_engine = RewardEngine(self)
         self.domain_randomizer = DomainRandomizer(self)
@@ -158,15 +162,19 @@ class IsaacPickPlaceEnv:
         # This is object-agnostic and does NOT kinematically overwrite the cube pose.
         self.gripper_weld = None
         if self.use_weld_gripper:
+            # Tune stall detection around the cube size so we only weld when actually holding something.
+            # Use a slightly larger radius to account for pose noise between jaw/gripper links.
+            weld_near_distance = float(np.clip(self.cube_scale[0] * 3.0, 0.10, 0.22))
             self.gripper_weld = IntelligentGripperWeld(
                 env=self,
-                joint_path="/World/GripperWeldJoint",
-                seconds_required=1.0,
-                finger_delta_epsilon=1e-4,
-                near_scale=3.0,
-                open_threshold=0.65,
+                dt=1.0 / 120.0,
+                stall_time_s=0.5,
+                stall_gap_range_m=2e-3,
+                near_distance_m=weld_near_distance,
                 close_command_margin=1e-3,
+                open_release_threshold=0.65,
                 debug=True,
+                joint_path="/World/GripperWeldJoint",
             )
         self._gripper_pose_fallback_warned = False
         self._prev_gripper_value: Optional[float] = None
@@ -301,6 +309,7 @@ class IsaacPickPlaceEnv:
         self.world.reset()
         self._apply_default_joint_positions()
         self._capture_base_fixture_pose()
+        self._resolve_link_paths()  # Cache gripper/jaw prim paths for weld logic
         top_cam_pos = np.array([0, -0.75, 8.0])
         top_cam_orient = np.array([-np.sqrt(0.25), -np.sqrt(0.25), -np.sqrt(0.25), np.sqrt(0.25)])
         side_cam_pos = np.array([6.0, -0.5, 0.5])
@@ -365,6 +374,7 @@ class IsaacPickPlaceEnv:
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()  # Restore camera positions after world reset
         self.robot.update_wrist_camera_position(verbose=False)
+        self._resolve_link_paths()
 
         for i in range(5):
             is_last = (i == 4)
@@ -380,6 +390,8 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._latest_target_gripper = None  # Reset target gripper for grasp detection
         self._prev_gripper_value = None  # Reset closing trend tracking
+        self._last_gripper_pose = (None, None)
+        self._last_jaw_pos = None
         
         return self._get_observation()
 
@@ -425,33 +437,44 @@ class IsaacPickPlaceEnv:
         jaw_world_pos = None
         gripper_pose_from_fallback = False
         try:
-            # Try to get actual gripper link position from USD stage
-            robot_prim_path = getattr(self.robot, "prim_path", None)
-            if robot_prim_path is not None and Usd is not None:
+            # Try to get actual gripper/jaw link positions from USD stage
+            if Usd is not None:
+                if self._gripper_prim_path is None or self._jaw_prim_path is None:
+                    self._resolve_link_paths()
+
                 stage = self.world.stage
-                # Try direct path first
-                gripper_path = f"{robot_prim_path}/gripper"
-                gripper_prim = stage.GetPrimAtPath(gripper_path)
-                if gripper_prim and gripper_prim.IsValid():
-                    xformable = UsdGeom.Xformable(gripper_prim)
-                    matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                    translation = matrix.ExtractTranslation()
-                    gripper_world_pos = np.array([translation[0], translation[1], translation[2]], dtype=np.float32)
-                    rot_matrix = np.array([
-                        [matrix[0][0], matrix[0][1], matrix[0][2]],
-                        [matrix[1][0], matrix[1][1], matrix[1][2]],
-                        [matrix[2][0], matrix[2][1], matrix[2][2]],
-                    ], dtype=np.float32)
-                    gripper_world_orient = rotation_matrix_to_quaternion(rot_matrix)
-                
-                # Also fetch jaw position so we can anchor constraints at the finger midpoint
-                jaw_path = f"{robot_prim_path}/jaw"
-                jaw_prim = stage.GetPrimAtPath(jaw_path)
-                if jaw_prim and jaw_prim.IsValid():
-                    jaw_xformable = UsdGeom.Xformable(jaw_prim)
-                    jaw_matrix = jaw_xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                    jaw_translation = jaw_matrix.ExtractTranslation()
-                    jaw_world_pos = np.array([jaw_translation[0], jaw_translation[1], jaw_translation[2]], dtype=np.float32)
+                gripper_path = self._gripper_prim_path
+                jaw_path = self._jaw_prim_path
+
+                if gripper_path:
+                    gripper_prim = stage.GetPrimAtPath(gripper_path)
+                    if gripper_prim and gripper_prim.IsValid():
+                        xformable = UsdGeom.Xformable(gripper_prim)
+                        matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                        translation = matrix.ExtractTranslation()
+                        gripper_world_pos = np.array([translation[0], translation[1], translation[2]], dtype=np.float32)
+                        rot_matrix = np.array([
+                            [matrix[0][0], matrix[0][1], matrix[0][2]],
+                            [matrix[1][0], matrix[1][1], matrix[1][2]],
+                            [matrix[2][0], matrix[2][1], matrix[2][2]],
+                        ], dtype=np.float32)
+                        gripper_world_orient = rotation_matrix_to_quaternion(rot_matrix)
+                    elif self._step_counter % 100 == 0:
+                        print(f"[ENV] Gripper prim not valid at {gripper_path}")
+
+                if jaw_path:
+                    jaw_prim = stage.GetPrimAtPath(jaw_path)
+                    if jaw_prim and jaw_prim.IsValid():
+                        jaw_xformable = UsdGeom.Xformable(jaw_prim)
+                        jaw_matrix = jaw_xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                        jaw_translation = jaw_matrix.ExtractTranslation()
+                        jaw_world_pos = np.array([jaw_translation[0], jaw_translation[1], jaw_translation[2]], dtype=np.float32)
+                    elif self._step_counter % 100 == 0:
+                        print(f"[ENV] Jaw prim not valid at {jaw_path}")
+
+            # Persist the freshest link poses so reward/obs use real gripper instead of wrist camera.
+            self._last_gripper_pose = (gripper_world_pos, gripper_world_orient)
+            self._last_jaw_pos = jaw_world_pos
         except Exception as e:
             if self._step_counter % 100 == 0:
                 print(f"[ENV] Could not get gripper link pos: {e}")
@@ -465,6 +488,7 @@ class IsaacPickPlaceEnv:
                     if pose is not None:
                         gripper_world_pos, gripper_world_orient = pose
                         gripper_pose_from_fallback = False  # pose derived from local transform, reliable
+                        self._last_gripper_pose = (gripper_world_pos, gripper_world_orient)
                     else:
                         cam_pos, _ = wrist_cam.get_world_pose()
                         cam_pos = np.array(cam_pos, dtype=np.float32)
@@ -472,6 +496,7 @@ class IsaacPickPlaceEnv:
                         gripper_world_pos = cam_pos - offset_local  # rough guess
                         gripper_world_orient = None
                         gripper_pose_from_fallback = True
+                        self._last_gripper_pose = (gripper_world_pos, gripper_world_orient)
                         if not self._gripper_pose_fallback_warned:
                             print("[ENV] Using wrist camera pos fallback without orientation (gripper pose unavailable)")
                             self._gripper_pose_fallback_warned = True
@@ -479,6 +504,15 @@ class IsaacPickPlaceEnv:
                             print(f"[ENV] Using wrist camera pos as gripper fallback")
             except Exception:
                 pass
+        
+        # If jaw pose is unavailable, re-use the last known jaw or approximate with gripper pose.
+        if jaw_world_pos is None:
+            if self._last_jaw_pos is not None:
+                jaw_world_pos = self._last_jaw_pos
+            elif gripper_world_pos is not None:
+                jaw_world_pos = gripper_world_pos.copy()
+                if self._step_counter % 50 == 0:
+                    print("[ENV] Approximating jaw pose with gripper pose (jaw missing)")
         
         # Log distances for debugging (every 50 steps or when close)
         if gripper_world_pos is not None and cube_world_pos is not None:
@@ -492,14 +526,24 @@ class IsaacPickPlaceEnv:
         # - creates a FixedJoint without teleporting the cube
         if self.gripper_weld is not None:
             was_grasping = self.gripper_weld.is_grasping
+            # Ensure we have cached paths; resolve again if missing
+            if self._gripper_prim_path is None or self._jaw_prim_path is None:
+                self._resolve_link_paths()
+
+            gripper_path = self._gripper_prim_path or f"{getattr(self.robot, 'prim_path', '/World/Robot')}/gripper"
+            jaw_path = self._jaw_prim_path or f"{getattr(self.robot, 'prim_path', '/World/Robot')}/jaw"
+            cube_prim_path = getattr(self.cube, "prim_path", "/World/Cube")
             self.gripper_weld.update(
                 gripper_value=actual_gripper_pos,
-                target_gripper_value=self._latest_target_gripper,
+                target_gripper=self._latest_target_gripper,
                 gripper_world_pos=gripper_world_pos,
                 gripper_world_orient=gripper_world_orient,
                 jaw_world_pos=jaw_world_pos,
-                cube_world_pos=cube_world_pos,
-                cube_world_orient=cube_world_orient,
+                object_world_pos=cube_world_pos,
+                object_world_orient=cube_world_orient,
+                object_prim_path=cube_prim_path,
+                gripper_body_path=gripper_path,
+                jaw_body_path=jaw_path,
             )
             now_grasping = self.gripper_weld.is_grasping
             if was_grasping != now_grasping:
@@ -573,28 +617,34 @@ class IsaacPickPlaceEnv:
         # Add cube position to observation for policy use
         cube_pos = None
         gripper_pos = None
+        gripper_orient = None
         try:
             cube_pos, _ = self.cube.get_world_pose()
             cube_pos = np.array(cube_pos, dtype=np.float32)
         except Exception:
             pass
         
-        try:
-            wrist_cam = getattr(self.robot, "wrist_camera", None)
-            if wrist_cam is not None:
-                gripper_pos, _ = wrist_cam.get_world_pose()
-                # NOTE: This is wrist_camera position, not actual gripper finger position
-                # Camera is offset by [0.0, 0.05, -0.08] from gripper link in local frame
-                # Actual offset distance is ~sqrt(0.05^2 + 0.08^2) ≈ 0.094m
-                gripper_pos = np.array(gripper_pos, dtype=np.float32)
-        except Exception:
-            pass
+        # Prefer the actual gripper link pose captured during step; fall back to wrist camera.
+        if getattr(self, "_last_gripper_pose", None):
+            gp, go = self._last_gripper_pose
+            if gp is not None:
+                gripper_pos = np.array(gp, dtype=np.float32)
+                gripper_orient = go
+        if gripper_pos is None:
+            try:
+                wrist_cam = getattr(self.robot, "wrist_camera", None)
+                if wrist_cam is not None:
+                    gripper_pos, _ = wrist_cam.get_world_pose()
+                    gripper_pos = np.array(gripper_pos, dtype=np.float32)
+            except Exception:
+                pass
 
         obs = {
             "joint_positions": joint_positions.copy(),
             "joint_velocities": joint_velocities.copy(),
             "cube_pos": cube_pos,
             "gripper_pos": gripper_pos,
+            "gripper_orient": gripper_orient,
         }
         for name, frame in camera_frames.items():
             if frame is not None:
@@ -774,6 +824,35 @@ class IsaacPickPlaceEnv:
                 self.side_camera.set_world_pose(position=side_pos, orientation=side_orient)
         except Exception as e:
             print(f"[warn] Could not restore camera poses: {e}")
+
+    def _resolve_link_paths(self):
+        """Locate gripper and jaw prim paths in the USD stage."""
+        stage = getattr(self, "world", None)
+        stage = getattr(stage, "stage", None)
+        robot_prim_path = getattr(self.robot, "prim_path", None)
+        if stage is None or robot_prim_path is None:
+            return
+
+        def _find_link(name: str):
+            # First try the straightforward path.
+            direct = f"{robot_prim_path}/{name}"
+            prim = stage.GetPrimAtPath(direct)
+            if prim and prim.IsValid():
+                return direct
+            # Search within the robot subtree.
+            for prim in stage.Traverse():
+                path_str = str(prim.GetPath())
+                if not path_str.startswith(robot_prim_path):
+                    continue
+                leaf = path_str.split("/")[-1].lower()
+                if leaf == name.lower():
+                    return path_str
+            return None
+
+        self._gripper_prim_path = _find_link("gripper") or self._gripper_prim_path
+        self._jaw_prim_path = _find_link("jaw") or self._jaw_prim_path
+        if self._step_counter % 200 == 0:
+            print(f"[ENV] Link paths: gripper={self._gripper_prim_path} jaw={self._jaw_prim_path}")
 
 
     def _apply_gripper_friction(self):
