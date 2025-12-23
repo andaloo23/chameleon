@@ -1,7 +1,7 @@
 import os
 import shutil
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 import numpy as np
 from isaacsim import SimulationApp
@@ -72,13 +72,13 @@ class IsaacPickPlaceEnv:
         self.random_seed = random_seed
         self.rng = np.random.default_rng(random_seed)
 
-        # Unified Intelligent Weld Gripper (Standardized)
+        # Standardized Intelligent Weld system
         self.grasp_mode = "weld"
         self.use_sticky_gripper = False
         self.use_physics_gripper = False
         self.use_weld_gripper = True
 
-        # Physics parameters for reliable grasping
+        # Physics parameters
         self.cube_mass = 0.08
         self._cube_friction = 2.2
         self._gripper_friction = 2.2
@@ -123,10 +123,13 @@ class IsaacPickPlaceEnv:
         self._camera_failure_logged = {key: False for key in self._camera_keys}
         self._camera_frame_shapes = {}
         self._fixed_camera_poses = {}
+        
         self._last_gripper_pose = (None, None)
         self._last_jaw_pos = None
         self._gripper_prim_path = None
         self._jaw_prim_path = None
+        self._gripper_link_idx = None
+        self._jaw_link_idx = None
 
         self.reward_engine = RewardEngine(self)
         self.domain_randomizer = DomainRandomizer(self)
@@ -135,7 +138,7 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
         
-        # Intelligent physics weld grasping
+        # Intelligent physics weld
         self.gripper_weld = IntelligentGripperWeld(
             env=self,
             dt=1.0 / 120.0,
@@ -164,43 +167,30 @@ class IsaacPickPlaceEnv:
 
     def _build_scene(self):
         self.stage_context.new_stage()
-
         self.world = World(stage_units_in_meters=1.0)
         self.world.scene.add_default_ground_plane()
         
         try:
             physics_context = self.world.get_physics_context()
             physics_context.set_solver_type("TGS")
-            
             stage = self.world.stage
             scene_prim = None
             for prim in stage.Traverse():
                 if prim.IsA(UsdPhysics.Scene):
                     scene_prim = prim
                     break
-            
             if scene_prim:
                 from pxr import PhysxSchema
                 physx_scene = PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
                 physx_scene.CreateTimeStepsPerSecondAttr().Set(120.0)
-
-            try:
-                physics_context.enable_gpu_dynamics(True)
-            except Exception:
-                pass
-            
-            try:
-                physics_context.set_physics_dt(1.0 / 120.0)
-            except Exception:
-                pass
-            
-            try:
-                physics_context.enable_ccd(True)
-            except Exception:
-                pass
-                
+            try: physics_context.enable_gpu_dynamics(True)
+            except Exception: pass
+            try: physics_context.set_physics_dt(1.0 / 120.0)
+            except Exception: pass
+            try: physics_context.enable_ccd(True)
+            except Exception: pass
         except Exception as e:
-            print(f"[warn] Could not configure physics solver: {e}")
+            print(f"[warn] Could not configure physics: {e}")
 
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
@@ -225,48 +215,23 @@ class IsaacPickPlaceEnv:
         try:
             cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
             if cube_prim and cube_prim.IsValid():
-                if not cube_prim.HasAPI(UsdPhysics.CollisionAPI):
-                    UsdPhysics.CollisionAPI.Apply(cube_prim)
-                
+                UsdPhysics.CollisionAPI.Apply(cube_prim)
                 material_api = UsdPhysics.MaterialAPI.Apply(cube_prim)
                 material_api.CreateStaticFrictionAttr().Set(float(self._cube_friction))
                 material_api.CreateDynamicFrictionAttr().Set(float(self._cube_friction))
                 material_api.CreateRestitutionAttr().Set(0.0)
-        except Exception as e:
-            print(f"[warn] Could not apply collision/friction to cube: {e}")
+        except Exception: pass
 
-        cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
-        self.cup_xform = create_cup_prim(
-            self.stage_context.get_stage(),
-            prim_path="/World/Cup",
-            position=cup_translation,
-            outer_radius_top=self.cup_outer_radius_top,
-            outer_radius_bottom=self.cup_outer_radius_bottom,
-            inner_radius_top=self.cup_inner_radius_top,
-            inner_radius_bottom=self.cup_inner_radius_bottom,
-            height=self.cup_height,
-            bottom_thickness=self.cup_bottom_thickness,
-            color=self.cup_color,
-            mass=self.cup_mass,
-        )
+        # cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
+        # self.cup_xform = create_cup_prim(
+        #     self.stage_context.get_stage(), prim_path="/World/Cup", position=cup_translation,
+        #     outer_radius_top=self.cup_outer_radius_top, outer_radius_bottom=self.cup_outer_radius_bottom,
+        #     inner_radius_top=self.cup_inner_radius_top, inner_radius_bottom=self.cup_inner_radius_bottom,
+        #     height=self.cup_height, bottom_thickness=self.cup_bottom_thickness, color=self.cup_color, mass=self.cup_mass
+        # )
 
-        self.top_camera = Camera(
-            prim_path="/World/top_camera",
-            name="top_camera",
-            position=np.array([0, 0, 1.5]),
-            orientation=np.array([0, 0, 0, 1]),
-            frequency=30,
-            resolution=(128, 128),
-        )
-        self.side_camera = Camera(
-            prim_path="/World/side_camera",
-            name="side_camera",
-            position=np.array([1.0, 0, 0.5]),
-            orientation=np.array([0, 0, 0.707, 0.707]),
-            frequency=30,
-            resolution=(128, 128),
-        )
-
+        self.top_camera = Camera(prim_path="/World/top_camera", name="top_camera", position=np.array([0, 0, 1.5]))
+        self.side_camera = Camera(prim_path="/World/side_camera", name="side_camera", position=np.array([1.0, 0, 0.5]))
         self.world.scene.add(self.top_camera)
         self.world.scene.add(self.side_camera)
 
@@ -274,332 +239,351 @@ class IsaacPickPlaceEnv:
         self._apply_default_joint_positions()
         self._capture_base_fixture_pose()
         self._resolve_link_paths()
-        top_cam_pos = np.array([0, -0.75, 8.0])
-        top_cam_orient = np.array([-np.sqrt(0.25), -np.sqrt(0.25), -np.sqrt(0.25), np.sqrt(0.25)])
-        side_cam_pos = np.array([6.0, -0.5, 0.5])
-        side_cam_orient = np.array([0, 0, 0, 1])
-
-        self.top_camera.set_world_pose(position=top_cam_pos, orientation=top_cam_orient)
-        self.side_camera.set_world_pose(position=side_cam_pos, orientation=side_cam_orient)
         
-        self._fixed_camera_poses = {
-            "top": (top_cam_pos.copy(), top_cam_orient.copy()),
-            "side": (side_cam_pos.copy(), side_cam_orient.copy()),
-        }
+        tp, to = np.array([0, -0.75, 8.0]), np.array([-0.5, -0.5, -0.5, 0.5])
+        sp, so = np.array([6.0, -0.5, 0.5]), np.array([0, 0, 0, 1])
+        self.top_camera.set_world_pose(position=tp, orientation=to)
+        self.side_camera.set_world_pose(position=sp, orientation=so)
+        self._fixed_camera_poses = {"top": (tp, to), "side": (sp, so)}
 
         self.robot.create_wrist_camera()
         self.robot.update_wrist_camera_position(verbose=False)
-
         self.top_camera.initialize()
         self.side_camera.initialize()
-        if getattr(self.robot, "wrist_camera", None) is not None:
-            self.robot.wrist_camera.initialize()
+        if getattr(self.robot, "wrist_camera", None): self.robot.wrist_camera.initialize()
 
         self._apply_gripper_friction()
         self._configure_gripper_drive()
-
-        for _ in range(5):
-            self.world.step(render=not self.headless)
-
-        self._cube_xy = cube_xy
-        self._cup_xy = cup_xy
+        for _ in range(5): self.world.step(render=not self.headless)
+        self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
 
     def reset(self, render=None):
         self._step_counter = 0
         render = not self.headless if render is None else bool(render)
-        if self.gripper_weld is not None:
-            self.gripper_weld.release()
-
+        if self.gripper_weld: self.gripper_weld.release()
         cube_xy, cup_xy = self._sample_object_positions()
-        self._cube_xy = cube_xy
-        self._cup_xy = cup_xy
-
-        cube_position = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
-        self.cube.set_world_pose(position=cube_position, orientation=np.array([0, 0, 0, 1]))
-
-        cup_translation = Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0)
-        UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(cup_translation)
-
+        self._cube_xy, self._cup_xy = cube_xy, cup_xy
+        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
+        if self.cup_xform:
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         self.world.reset()
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
-
-        for i in range(5):
-            do_render = (render if i == 4 else False)
-            self.world.step(render=do_render)
-
+        for i in range(5): self.world.step(render=(render if i == 4 else False))
         self._apply_domain_randomization()
         self.reward_engine.reset()
-        if self.gripper_weld is not None:
-            self.gripper_weld.reset()
-        self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
-        self._force_terminate = False
-        self._termination_reason = None
-        self._latest_target_gripper = None
-        self._prev_gripper_value = None
-        self._last_gripper_pose = (None, None)
-        self._last_jaw_pos = None
-        
+        if self.gripper_weld: self.gripper_weld.reset()
+        self._force_terminate, self._termination_reason = False, None
+        self._latest_target_gripper, self._prev_gripper_value = None, None
+        self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         return self._get_observation()
+
+    def _get_link_poses(self):
+        """Helper to get link poses reliably across versions."""
+        if not self.robot_articulation: return None, None
+        
+        # 1. Try ArticulationView if available
+        view = getattr(self.robot_articulation, "_articulation_view", None)
+        if view is not None:
+            # Try different method names across Isaac Sim versions
+            for method_name in ["get_link_poses", "get_world_poses"]:
+                method = getattr(view, method_name, None)
+                if method:
+                    try:
+                        lp, lo = method()
+                        return lp[0], lo[0]
+                    except Exception: pass
+            
+        # 2. Try direct Articulation method
+        try:
+            return self.robot_articulation.get_link_poses()
+        except Exception: pass
+        
+        # 3. Fallback to USD prims (might be 1 frame behind but works)
+        try:
+            # If we have the prim paths, we can query them directly
+            if self._gripper_prim_path and self._jaw_prim_path:
+                stage = self.world.stage
+                lp = [None] * (max(self._gripper_link_idx or 0, self._jaw_link_idx or 0) + 1)
+                lo = [None] * (max(self._gripper_link_idx or 0, self._jaw_link_idx or 0) + 1)
+                
+                for path, idx in [(self._gripper_prim_path, self._gripper_link_idx), 
+                                 (self._jaw_prim_path, self._jaw_link_idx)]:
+                    if idx is not None:
+                        prim = stage.GetPrimAtPath(path)
+                        if prim.IsValid():
+                            mat = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                            lp[idx] = np.array(mat.ExtractTranslation(), dtype=np.float32)
+                            # Simple rotation extraction
+                            rm = np.array([[mat[0][0], mat[0][1], mat[0][2]], 
+                                         [mat[1][0], mat[1][1], mat[1][2]], 
+                                         [mat[2][0], mat[2][1], mat[2][2]]], dtype=np.float32)
+                            lo[idx] = rotation_matrix_to_quaternion(rm.T)
+                return lp, lo
+        except Exception: pass
+        
+        return None, None
 
     def step(self, action, render=None):
         render = not self.headless if render is None else bool(render)
-        joint_targets = self._clip_action(action)
-        self.robot.set_joint_positions(joint_targets)
-        self._latest_target_gripper = float(joint_targets[-1]) if len(joint_targets) > 0 else None
-
+        jt = self._clip_action(action)
+        self.robot.set_joint_positions(jt)
+        self._latest_target_gripper = float(jt[-1])
         self._restore_base_fixture_pose()
         self.world.step(render=render)
         self._step_counter += 1
         
         try:
-            actual_joint_positions = self.robot_articulation.get_joint_positions()
-            actual_gripper_pos = float(actual_joint_positions[-1]) if len(actual_joint_positions) > 0 else 0.0
-        except Exception:
-            actual_gripper_pos = float(joint_targets[-1]) if len(joint_targets) > 0 else 0.0
+            ap = self.robot_articulation.get_joint_positions()
+            agp = float(ap[-1])
+        except Exception: agp = float(jt[-1])
         
-        cube_world_pos = None
-        cube_world_orient = None
+        cp, co = None, None
         try:
-            cube_world_pos, cube_world_orient = self.cube.get_world_pose()
-            cube_world_pos = np.array(cube_world_pos, dtype=np.float32)
-            cube_world_orient = np.array(cube_world_orient, dtype=np.float32)
-        except Exception:
-            pass
+            cp, co = self.cube.get_world_pose()
+            cp, co = np.array(cp, dtype=np.float32), np.array(co, dtype=np.float32)
+        except Exception: pass
         
-        gripper_world_pos = None
-        gripper_world_orient = None
-        jaw_world_pos = None
+        gwp, gwo, jwp = None, None, None
         try:
-            if Usd is not None:
-                if self._gripper_prim_path is None or self._jaw_prim_path is None:
-                    self._resolve_link_paths()
-
-                stage = self.world.stage
-                gripper_path = self._gripper_prim_path
-                jaw_path = self._jaw_prim_path
-
-                if gripper_path:
-                    gripper_prim = stage.GetPrimAtPath(gripper_path)
-                    if not (gripper_prim and gripper_prim.IsValid()):
-                        self._resolve_link_paths()
-                        gripper_path = self._gripper_prim_path
-                        gripper_prim = stage.GetPrimAtPath(gripper_path) if gripper_path else None
-
-                    if gripper_prim and gripper_prim.IsValid():
-                        xformable = UsdGeom.Xformable(gripper_prim)
-                        matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                        translation = matrix.ExtractTranslation()
-                        gripper_world_pos = np.array([translation[0], translation[1], translation[2]], dtype=np.float32)
-                        rot_matrix = np.array([
-                            [matrix[0][0], matrix[0][1], matrix[0][2]],
-                            [matrix[1][0], matrix[1][1], matrix[1][2]],
-                            [matrix[2][0], matrix[2][1], matrix[2][2]]
-                        ], dtype=np.float32)
-                        # USD matrices are row-major; transpose to get R such that v_world = R * v_local
-                        gripper_world_orient = rotation_matrix_to_quaternion(rot_matrix.T)
-
-                if jaw_path:
-                    jaw_prim = stage.GetPrimAtPath(jaw_path)
-                    if not (jaw_prim and jaw_prim.IsValid()):
-                        jaw_path = self._jaw_prim_path
-                        jaw_prim = stage.GetPrimAtPath(jaw_path) if jaw_path else None
-
-                    if jaw_prim and jaw_prim.IsValid():
-                        jaw_xformable = UsdGeom.Xformable(jaw_prim)
-                        jaw_matrix = jaw_xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                        jaw_translation = jaw_matrix.ExtractTranslation()
-                        jaw_world_pos = np.array([jaw_translation[0], jaw_translation[1], jaw_translation[2]], dtype=np.float32)
-
-            self._last_gripper_pose = (gripper_world_pos, gripper_world_orient)
-            self._last_jaw_pos = jaw_world_pos
-        except Exception:
-            pass
-        
-        if gripper_world_pos is None:
-            try:
-                wrist_cam = getattr(self.robot, "wrist_camera", None)
-                if wrist_cam is not None:
-                    pose = self._compute_gripper_pose_from_camera()
-                    if pose is not None:
-                        gripper_world_pos, gripper_world_orient = pose
-                        self._last_gripper_pose = (gripper_world_pos, gripper_world_orient)
-            except Exception:
-                pass
-        
-        if jaw_world_pos is None and gripper_world_pos is not None:
-            if self._step_counter % 100 == 0:
-                print(f"[ENV] Approximating jaw with gripper (jaw_path={self._jaw_prim_path})")
-            jaw_world_pos = gripper_world_pos.copy()
-        
-        if gripper_world_pos is not None and jaw_world_pos is not None:
-            gap = np.linalg.norm(gripper_world_pos - jaw_world_pos)
-            if gap < 1e-5 and self._step_counter % 100 == 0:
-                print(f"[ENV] WARNING: Zero gap between links. Gripper={gripper_world_pos} Jaw={jaw_world_pos}")
-                print(f"      Check if {self._gripper_prim_path} and {self._jaw_prim_path} are the same body.")
-        
-        if self.gripper_weld is not None:
-            was_grasping = self.gripper_weld.is_grasping
-            gripper_path = self._gripper_prim_path or f"{getattr(self.robot, 'prim_path', '/World/Robot')}/gripper"
-            jaw_path = self._jaw_prim_path or f"{getattr(self.robot, 'prim_path', '/World/Robot')}/jaw"
-            cube_prim_path = getattr(self.cube, "prim_path", "/World/Cube")
+            if self.robot_articulation and self._gripper_link_idx is not None and self._jaw_link_idx is not None:
+                lp, lo = self._get_link_poses()
+                if lp is not None:
+                    gwp, gwo = np.array(lp[self._gripper_link_idx], dtype=np.float32), np.array(lo[self._gripper_link_idx], dtype=np.float32)
+                    jwp = np.array(lp[self._jaw_link_idx], dtype=np.float32)
             
+            if gwp is None and Usd is not None:
+                stage = self.world.stage
+                if not self._gripper_prim_path or not self._jaw_prim_path: self._resolve_link_paths()
+                if self._gripper_prim_path:
+                    gp = stage.GetPrimAtPath(self._gripper_prim_path)
+                    if gp.IsValid():
+                        mat = UsdGeom.Xformable(gp).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                        gwp = np.array(mat.ExtractTranslation(), dtype=np.float32)
+                        rm = np.array([[mat[0][0], mat[0][1], mat[0][2]], [mat[1][0], mat[1][1], mat[1][2]], [mat[2][0], mat[2][1], mat[2][2]]], dtype=np.float32)
+                        gwo = rotation_matrix_to_quaternion(rm.T)
+                if self._jaw_prim_path:
+                    jp = stage.GetPrimAtPath(self._jaw_prim_path)
+                    if jp.IsValid():
+                        jwp = np.array(UsdGeom.Xformable(jp).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).ExtractTranslation(), dtype=np.float32)
+            self._last_gripper_pose, self._last_jaw_pos = (gwp, gwo), jwp
+        except Exception: pass
+        
+        if gwp is None:
+            res = self._compute_gripper_pose_from_camera()
+            if res: gwp, gwo = res; self._last_gripper_pose = (gwp, gwo)
+        if jwp is None and gwp is not None:
+            if self._step_counter % 100 == 0: print(f"[ENV] Approx jaw with gripper")
+            jwp = gwp.copy()
+        
+        if self.gripper_weld:
             self.gripper_weld.update(
-                gripper_value=actual_gripper_pos,
-                target_gripper=self._latest_target_gripper,
-                gripper_world_pos=gripper_world_pos,
-                gripper_world_orient=gripper_world_orient,
-                jaw_world_pos=jaw_world_pos,
-                object_world_pos=cube_world_pos,
-                object_world_orient=cube_world_orient,
-                object_prim_path=cube_prim_path,
-                gripper_body_path=gripper_path,
-                jaw_body_path=jaw_path,
+                gripper_value=agp, target_gripper=self._latest_target_gripper,
+                gripper_world_pos=gwp, gripper_world_orient=gwo, jaw_world_pos=jwp,
+                object_world_pos=cp, object_world_orient=co,
+                object_prim_path=getattr(self.cube, "prim_path", "/World/Cube"),
+                gripper_body_path=self._gripper_prim_path or "/World/Robot/gripper",
+                jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
-            now_grasping = self.gripper_weld.is_grasping
-            if was_grasping != now_grasping:
-                print(f"[ENV] GRASP WELD STATE: {was_grasping} -> {now_grasping}")
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
         self._validate_state(obs)
-        self._prev_gripper_value = actual_gripper_pos
+        self._prev_gripper_value = agp
         reward, done, info = self.reward_engine.summarize_reward()
-
         if self._force_terminate:
-            done = True
-            info.setdefault("termination_reason", self._termination_reason or "validation_failure")
-            info["terminated_by_validation"] = True
-
-        if self.capture_images and (self._step_counter % self.image_interval == 0):
-            self._capture_images()
-
+            done, info["termination_reason"] = True, self._termination_reason or "validation_failure"
+        if self.capture_images and (self._step_counter % self.image_interval == 0): self._capture_images()
         return obs, reward, done, info
 
     def close(self):
-        if self.gripper_weld is not None:
-            self.gripper_weld.release()
-        if self.world is not None:
-            self.world.clear()
-        if self.capture_images:
-            print(f"[info] saved images to {self.temp_dir}")
+        if self.gripper_weld: self.gripper_weld.release()
+        if self.world: self.world.clear()
 
     def shutdown(self):
         self.close()
-        if self.simulation_app is not None:
-            self.simulation_app.close()
+        if self.simulation_app: self.simulation_app.close()
+
+    def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:
+        """Geometric IK for SO-100 arm, corrected for URDF joint conventions.
+        
+        Key insight from testing:
+        - LOWER shoulder_lift value = arm reaches DOWN
+        - HIGHER shoulder_lift value = arm goes UP
+        - Uses elbow-down configuration (alpha - beta) for reaching down
+        """
+        if initial_q is None:
+            initial_q = self.robot_articulation.get_joint_positions()
+        
+        best_q = np.array(initial_q, dtype=np.float32)
+        
+        # Get robot base position
+        base_pos, _ = self.robot_articulation.get_world_pose()
+        
+        # Link lengths for SO-100 with distance_scale=2.5 (from URDF measurements)
+        L1 = 0.28   # Shoulder to Elbow
+        L2 = 0.34   # Elbow to Wrist  
+        L3 = 0.15   # Wrist to Gripper tip
+        
+        # Shoulder pivot height above base
+        SHOULDER_HEIGHT = 0.38  # Approximate height of shoulder joint
+        
+        # Calculate Pan (Joint 0)
+        dx = target_pos[0] - base_pos[0]
+        dy = target_pos[1] - base_pos[1]
+        pan = np.arctan2(dx, -dy)  # 0 is forward (-Y)
+        
+        # 2D Planar IK in the (Radial, Vertical) plane
+        r_total = np.sqrt(dx**2 + dy**2)
+        z_total = target_pos[2] - base_pos[2] - SHOULDER_HEIGHT
+        
+        # Target wrist position (gripper pointing down, so wrist is L3 above gripper tip)
+        wr = r_total  # Radial distance to wrist (same as gripper when pointing down)
+        wz = z_total + L3  # Wrist is L3 above the gripper tip target
+        
+        # Distance from shoulder to wrist
+        dist_sq = wr**2 + wz**2
+        dist = np.sqrt(dist_sq)
+        
+        # Check reachability
+        max_reach = L1 + L2
+        if dist > max_reach * 0.98:
+            print(f"[IK WARN] Target near limit: dist={dist:.3f}m, max={max_reach:.3f}m")
+            dist = max_reach * 0.95
+            scale = dist / np.sqrt(wr**2 + wz**2)
+            wr *= scale
+            wz *= scale
+            dist_sq = dist**2
+        
+        # Law of Cosines for elbow angle
+        cos_elbow = (dist_sq - L1**2 - L2**2) / (2 * L1 * L2)
+        cos_elbow = np.clip(cos_elbow, -1.0, 1.0)
+        # Elbow angle (negative for elbow bending "inward")
+        elbow_angle = -np.arccos(cos_elbow)
+        
+        # Shoulder angle calculation
+        alpha = np.arctan2(wz, wr)  # Angle from horizontal to wrist
+        cos_beta = (L1**2 + dist_sq - L2**2) / (2 * L1 * dist)
+        cos_beta = np.clip(cos_beta, -1.0, 1.0)
+        beta = np.arccos(cos_beta)
+        
+        # ELBOW-DOWN configuration: shoulder angle = alpha - beta
+        # This gives negative angles when reaching down below shoulder level
+        geom_shoulder = alpha - beta
+        
+        # Convert to SO-100 joint angle
+        # Empirically determined from testing: HIGHER lift = arm DOWN, LOWER lift = arm UP
+        # With elbow-down, geom_shoulder is negative when reaching down (e.g., -1.0)
+        # We want: more negative geom_shoulder -> HIGHER lift value (to reach down)
+        # Formula: shoulder_lift = offset - geom_shoulder
+        # Example: geom=-1.1 (reaching down) -> lift = 2.0 - (-1.1) = 3.1 (high, arm down)
+        #          geom=-0.8 (arm higher) -> lift = 2.0 - (-0.8) = 2.8 (lower, arm up)
+        
+        shoulder_lift = 2.0 - geom_shoulder
+        
+        # Elbow flex: directly use the elbow angle (negative for bent elbow)
+        elbow_flex = elbow_angle
+        
+        # Wrist flex to keep gripper pointing down
+        # The gripper should point at target_pitch = -π/2 (straight down)
+        # wrist_flex compensates for shoulder and elbow rotations
+        target_pitch = -np.pi / 2
+        wrist_flex = target_pitch - geom_shoulder - elbow_angle - 0.5
+        
+        # Apply and clip to joint limits
+        best_q[0] = np.clip(pan, *self.robot.joint_limits["shoulder_pan"])
+        best_q[1] = np.clip(shoulder_lift, *self.robot.joint_limits["shoulder_lift"])
+        best_q[2] = np.clip(elbow_flex, *self.robot.joint_limits["elbow_flex"])
+        best_q[3] = np.clip(wrist_flex, *self.robot.joint_limits["wrist_flex"])
+        best_q[4] = np.clip(pan, *self.robot.joint_limits["wrist_roll"])
+        
+        print(f"[IK] Target R={r_total:.3f} Z={target_pos[2]:.3f} | "
+              f"wrist_pos=({wr:.3f}, {wz:.3f}) | "
+              f"alpha={alpha:.2f} beta={beta:.2f} geom={geom_shoulder:.2f} | "
+              f"Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
+        
+        return best_q
 
     def _sample_object_positions(self):
-        cube_xy = np.array([0.0, -0.50])
-        cup_xy = np.array([0.0, -0.75])
+        # Move objects to reachable positions
+        # Cube is at 45cm, Cup is at 65cm.
+        cube_xy = np.array([0.0, -0.45])
+        cup_xy = np.array([0.0, -0.65])
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
-        action = np.array(action, dtype=float)
-        lower = np.array([self.robot.joint_limits[name][0] for name in self.robot.joint_names], dtype=float)
-        upper = np.array([self.robot.joint_limits[name][1] for name in self.robot.joint_names], dtype=float)
-        if action.shape != lower.shape:
-            raise ValueError(f"Expected action of shape {lower.shape}, received {action.shape}")
+        lower = np.array([self.robot.joint_limits[n][0] for n in self.robot.joint_names])
+        upper = np.array([self.robot.joint_limits[n][1] for n in self.robot.joint_names])
         span = np.maximum(upper - lower, 1e-6)
         margin = np.clip(0.05 * span, 1e-3, 0.1)
-        clipped = np.clip(action, lower + margin, upper - margin)
-        return clipped
+        return np.clip(action, lower + margin, upper - margin)
 
     def _get_observation(self):
-        camera_frames = self._gather_sensor_observations()
-        joint_positions = self.robot_articulation.get_joint_positions()
-        joint_velocities = self.robot_articulation.get_joint_velocities()
-        target_gripper = getattr(self, '_latest_target_gripper', None)
-        self.reward_engine.record_joint_state(joint_positions.astype(np.float32), joint_velocities.astype(np.float32), target_gripper)
-
-        cube_pos = None
-        gripper_pos = None
-        gripper_orient = None
-        try:
-            cube_pos, _ = self.cube.get_world_pose()
-            cube_pos = np.array(cube_pos, dtype=np.float32)
-        except Exception:
-            pass
+        cf = self._gather_sensor_observations()
+        jp, jv = self.robot_articulation.get_joint_positions(), self.robot_articulation.get_joint_velocities()
+        self.reward_engine.record_joint_state(jp.astype(np.float32), jv.astype(np.float32), self._latest_target_gripper)
         
-        if getattr(self, "_last_gripper_pose", None):
-            gp, go = self._last_gripper_pose
-            if gp is not None:
-                gripper_pos = np.array(gp, dtype=np.float32)
-                gripper_orient = go
-        if gripper_pos is None:
+        cube_pos, _ = self.cube.get_world_pose()
+        
+        # Get cup position from USD world transform
+        cup_pos = np.zeros(3, dtype=np.float32)
+        if self.cup_xform:
             try:
-                wrist_cam = getattr(self.robot, "wrist_camera", None)
-                if wrist_cam is not None:
-                    gripper_pos, _ = wrist_cam.get_world_pose()
-                    gripper_pos = np.array(gripper_pos, dtype=np.float32)
+                cup_mat = UsdGeom.Xformable(self.cup_xform).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                cup_pos_gf = cup_mat.ExtractTranslation()
+                cup_pos = np.array([cup_pos_gf[0], cup_pos_gf[1], cup_pos_gf[2]], dtype=np.float32)
             except Exception:
                 pass
 
+        gwp, gwo = self._last_gripper_pose
         obs = {
-            "joint_positions": joint_positions.astype(np.float32),
-            "joint_velocities": joint_velocities.astype(np.float32),
-            "cube_pos": cube_pos,
-            "gripper_pos": gripper_pos,
-            "gripper_orient": gripper_orient,
+            "joint_positions": jp.astype(np.float32), 
+            "joint_velocities": jv.astype(np.float32), 
+            "cube_pos": np.array(cube_pos, dtype=np.float32),
+            "cup_pos": cup_pos,
+            "gripper_pos": gwp, 
+            "gripper_orient": gwo
         }
-        for name, frame in camera_frames.items():
-            obs[name] = frame.copy() if frame is not None else None
+        obs.update(cf)
         return obs
 
     def _gather_sensor_observations(self):
-        camera_map = {"top": self.top_camera, "side": self.side_camera, "wrist": getattr(self.robot, "wrist_camera", None)}
+        cams = {"top": self.top_camera, "side": self.side_camera, "wrist": getattr(self.robot, "wrist_camera", None)}
         frames = {}
-        for key, camera in camera_map.items():
+        for k, c in cams.items():
             processed = None
-            if camera is not None:
+            if c:
                 try:
-                    raw_frame = camera.get_rgba()
-                    processed = self._prepare_camera_frame(raw_frame, key)
-                    if processed is not None:
-                        self._last_camera_frames[key] = processed
-                        self._camera_failure_logged[key] = False
-                except Exception:
-                    if not self._camera_failure_logged.get(key, False):
-                        self._camera_failure_logged[key] = True
-            
+                    processed = self._prepare_camera_frame(c.get_rgba(), k)
+                    if processed is not None: self._last_camera_frames[k], self._camera_failure_logged[k] = processed, False
+                except Exception: self._camera_failure_logged[k] = True
             if processed is None:
-                cached = self._last_camera_frames.get(key)
-                processed = cached if cached is not None else self._allocate_empty_camera_frame(camera, key)
-                self._last_camera_frames[key] = processed
-            frames[f"{key}_camera_rgb"] = processed
+                cached = self._last_camera_frames.get(k)
+                processed = cached if cached is not None else self._allocate_empty_camera_frame(c, k)
+                self._last_camera_frames[k] = processed
+            frames[f"{k}_camera_rgb"] = processed
         return frames
 
     def _prepare_camera_frame(self, frame, key):
-        if frame is None:
-            return None
+        if frame is None: return None
         array = np.asarray(frame)
-        if array.ndim == 2:
-            array = np.stack([array] * 3, axis=-1)
+        if array.ndim == 2: array = np.stack([array] * 3, axis=-1)
         elif array.ndim == 3:
-            channels = array.shape[-1]
-            if channels >= 3:
-                array = array[..., :3]
-            elif channels == 1:
-                array = np.repeat(array, 3, axis=-1)
-            else:
-                pad = 3 - channels
-                array = np.concatenate([array, np.zeros(array.shape[:2] + (pad,), dtype=array.dtype)], axis=-1)
-        else:
-            return None
-        if np.issubdtype(array.dtype, np.integer):
-            array = array.astype(np.float32) / 255.0
-        else:
-            array = np.clip(array.astype(np.float32, copy=False), 0.0, 1.0)
+            ch = array.shape[-1]
+            if ch >= 3: array = array[..., :3]
+            elif ch == 1: array = np.repeat(array, 3, axis=-1)
+            else: array = np.concatenate([array, np.zeros(array.shape[:2] + (3-ch,), dtype=array.dtype)], axis=-1)
+        if np.issubdtype(array.dtype, np.integer): array = array.astype(np.float32) / 255.0
+        else: array = np.clip(array.astype(np.float32, copy=False), 0.0, 1.0)
         self._camera_frame_shapes[key] = array.shape
         return np.ascontiguousarray(array)
 
     def _allocate_empty_camera_frame(self, camera, key):
-        if key in self._camera_frame_shapes:
-            h, w, _ = self._camera_frame_shapes[key]
+        if key in self._camera_frame_shapes: h, w, _ = self._camera_frame_shapes[key]
         else:
             w, h = 128, 128
             if camera:
@@ -610,30 +594,34 @@ class IsaacPickPlaceEnv:
         return np.zeros((h, w, 3), dtype=np.float32)
 
     def _compute_gripper_pose_from_camera(self):
-        wrist_cam = getattr(self.robot, "wrist_camera", None)
-        if wrist_cam is None:
-            return None
+        wrist = getattr(self.robot, "wrist_camera", None)
+        if not wrist: return None
         try:
-            p_w, o_w = wrist_cam.get_world_pose()
-            p_l, o_l = wrist_cam.get_local_pose()
-            R_w = quaternion_to_rotation_matrix(np.asarray(o_w, dtype=float))
-            R_l = quaternion_to_rotation_matrix(np.asarray(o_l, dtype=float))
-            R_g = R_w @ R_l.T
-            return np.asarray(p_w, dtype=float) - R_g @ np.asarray(p_l, dtype=float), rotation_matrix_to_quaternion(R_g)
-        except Exception:
-            return None
+            pw, ow = wrist.get_world_pose()
+            pl, ol = wrist.get_local_pose()
+            Rw, Rl = quaternion_to_rotation_matrix(np.asarray(ow, dtype=float)), quaternion_to_rotation_matrix(np.asarray(ol, dtype=float))
+            Rg = Rw @ Rl.T
+            return np.asarray(pw, dtype=float) - Rg @ np.asarray(pl, dtype=float), rotation_matrix_to_quaternion(Rg)
+        except Exception: return None
 
     def _compute_default_joint_positions(self):
-        defaults = {"shoulder_pan": 0.0, "shoulder_lift": -1.5, "elbow_flex": 1.1, "wrist_flex": 0.3, "wrist_roll": 0.0, "gripper": 0.03}
-        limits = self.robot.joint_limits
-        return np.asarray([float(np.clip(defaults.get(n, 0.0), *limits[n])) for n in self.robot.joint_names], dtype=np.float32)
+        # Default "home" position: arm raised and ready
+        # HIGHER shoulder_lift = arm DOWN, LOWER shoulder_lift = arm UP
+        # So for raised arm, use LOWER lift value
+        d = {
+            "shoulder_pan": 0.0,      # Centered
+            "shoulder_lift": 1.2,     # Arm raised (lower value = arm up)
+            "elbow_flex": -1.0,       # Elbow bent
+            "wrist_flex": 0.0,        # Wrist level
+            "wrist_roll": 0.0,        # No roll
+            "gripper": 1.0            # Gripper open
+        }
+        return np.asarray([float(np.clip(d.get(n, 0.0), *self.robot.joint_limits[n])) for n in self.robot.joint_names], dtype=np.float32)
 
     def _apply_default_joint_positions(self):
         if self.robot and self._default_joint_positions is not None:
-            try:
-                self.robot.set_joint_positions(self._default_joint_positions)
-            except Exception:
-                pass
+            try: self.robot.set_joint_positions(self._default_joint_positions)
+            except Exception: pass
 
     def _capture_base_fixture_pose(self):
         if self.robot_articulation:
@@ -641,191 +629,134 @@ class IsaacPickPlaceEnv:
                 p, o = self.robot_articulation.get_world_pose()
                 self._base_fixture_pose = (np.asarray(p, dtype=float), np.asarray(o, dtype=float))
                 self._workspace_origin_xy = self._base_fixture_pose[0][:2].copy()
-            except Exception:
-                pass
+            except Exception: pass
 
     def _restore_base_fixture_pose(self):
         if self.robot_articulation and self._base_fixture_pose:
-            try:
-                self.robot_articulation.set_world_pose(position=self._base_fixture_pose[0], orientation=self._base_fixture_pose[1])
-            except Exception:
-                pass
+            try: self.robot_articulation.set_world_pose(position=self._base_fixture_pose[0], orientation=self._base_fixture_pose[1])
+            except Exception: pass
     
     def _restore_fixed_camera_poses(self):
-        if not self._fixed_camera_poses:
-            return
+        if not self._fixed_camera_poses: return
         try:
-            for k, cam in [("top", self.top_camera), ("side", self.side_camera)]:
-                if k in self._fixed_camera_poses and cam:
-                    p, o = self._fixed_camera_poses[k]
-                    cam.set_world_pose(position=p, orientation=o)
-        except Exception:
-            pass
+            for k, (p, o) in self._fixed_camera_poses.items():
+                cam = getattr(self, f"{k}_camera", None)
+                if cam: cam.set_world_pose(position=p, orientation=o)
+        except Exception: pass
 
     def _resolve_link_paths(self):
-        stage = getattr(self.world, "stage", None)
-        root = getattr(self.robot, "prim_path", None)
-        if not stage or not root:
-            return
-
-        def _find(name: str):
-            direct = f"{root}/{name}"
-            if stage.GetPrimAtPath(direct).IsValid():
-                return direct
-            alts = [f"{root}/base_link/{name}", f"{root}/{name}_link", f"{root}/base/{name}",
-                    f"{root}/gripper/{name}" if name == "jaw" else None,
-                    f"{root}/fixed_jaw" if name == "gripper" else None,
-                    f"{root}/moving_jaw" if name == "jaw" else None]
-            for alt in alts:
-                if alt and stage.GetPrimAtPath(alt).IsValid():
-                    return alt
-            for prim in stage.Traverse():
-                path = str(prim.GetPath())
-                if not path.startswith(root):
-                    continue
-                leaf = path.split("/")[-1].lower()
-                if leaf == name.lower() or leaf.startswith(f"{name.lower()}_") or leaf.endswith(f"_{name.lower()}") or \
-                   (name == "jaw" and "moving" in leaf) or (name == "gripper" and "fixed" in leaf):
-                    if prim.IsA(UsdGeom.Xformable):
-                        return path
+        stage, root = self.world.stage, getattr(self.robot, "prim_path", None)
+        if not stage or not root: return
+        def _find(name):
+            d = f"{root}/{name}"
+            if stage.GetPrimAtPath(d).IsValid(): return d
+            alts = [f"{root}/base_link/{name}", f"{root}/{name}_link", f"{root}/base/{name}", f"{root}/gripper/{name}" if name=="jaw" else None, f"{root}/fixed_jaw" if name=="gripper" else None, f"{root}/moving_jaw" if name=="jaw" else None]
+            for a in alts:
+                if a and stage.GetPrimAtPath(a).IsValid(): return a
+            for p in stage.Traverse():
+                ps = str(p.GetPath())
+                if not ps.startswith(root): continue
+                l = ps.split("/")[-1].lower()
+                if l == name.lower() or l.startswith(name.lower()+"_") or l.endswith("_"+name.lower()) or (name=="jaw" and "moving" in l) or (name=="gripper" and "fixed" in l):
+                    if p.IsA(UsdGeom.Xformable): return ps
             return None
-
-        self._gripper_prim_path = _find("gripper") or self._gripper_prim_path
-        self._jaw_prim_path = _find("jaw") or self._jaw_prim_path
-        
+        self._gripper_prim_path, self._jaw_prim_path = _find("gripper") or self._gripper_prim_path, _find("jaw") or self._jaw_prim_path
         if not self._gripper_prim_path or not self._jaw_prim_path:
             try:
-                for prim in stage.Traverse():
-                    if not str(prim.GetPath()).startswith(root):
-                        continue
-                    if prim.IsA(UsdPhysics.Joint):
-                        joint = UsdPhysics.Joint(prim)
-                        rel0 = getattr(joint, "GetChild0Rel", lambda: None)()
-                        targets = rel0.GetTargets() if rel0 else []
-                        for t in targets:
-                            tl = str(t).split("/")[-1].lower()
-                            if "gripper" in tl and not self._gripper_prim_path:
-                                self._gripper_prim_path = str(t)
-                            if ("jaw" in tl or "finger" in tl) and not self._jaw_prim_path:
-                                self._jaw_prim_path = str(t)
-            except Exception:
-                pass
-
+                for p in stage.Traverse():
+                    if not str(p.GetPath()).startswith(root): continue
+                    if p.IsA(UsdPhysics.Joint):
+                        jt = UsdPhysics.Joint(p)
+                        rel0 = getattr(jt, "GetChild0Rel", lambda: None)()
+                        if rel0:
+                            for t in rel0.GetTargets():
+                                tl = str(t).split("/")[-1].lower()
+                                if "gripper" in tl and not self._gripper_prim_path: self._gripper_prim_path = str(t)
+                                if ("jaw" in tl or "finger" in tl) and not self._jaw_prim_path: self._jaw_prim_path = str(t)
+            except Exception: pass
         if self._gripper_prim_path and not self._jaw_prim_path:
-            g_prim = stage.GetPrimAtPath(self._gripper_prim_path)
-            for c in g_prim.GetChildren():
-                if c.IsA(UsdGeom.Xformable):
-                    self._jaw_prim_path = str(c.GetPath())
-                    break
-
-        if self._step_counter % 200 == 0:
-            if self._jaw_prim_path:
-                print(f"[ENV] Links: gripper={self._gripper_prim_path} jaw={self._jaw_prim_path}")
-            else:
-                print(f"[ENV] WARNING: Link resolution failed under {root}")
+            for c in stage.GetPrimAtPath(self._gripper_prim_path).GetChildren():
+                if c.IsA(UsdGeom.Xformable): self._jaw_prim_path = str(c.GetPath()); break
+        if self.robot_articulation:
+            try:
+                if self._gripper_prim_path: self._gripper_link_idx = self.robot_articulation.get_link_index(self._gripper_prim_path.split("/")[-1])
+                if self._jaw_prim_path: self._jaw_link_idx = self.robot_articulation.get_link_index(self._jaw_prim_path.split("/")[-1])
+                print(f"[ENV] Links resolved: G={self._gripper_link_idx} J={self._jaw_link_idx}")
+            except Exception: pass
 
     def _apply_gripper_friction(self):
         try:
             from pxr import PhysxSchema
-            stage = self.world.stage
-            root = getattr(self.robot, "prim_path", "/World/Robot")
+            stage, root = self.world.stage, getattr(self.robot, "prim_path", "/World/Robot")
             for p in [f"{root}/gripper", f"{root}/jaw"]:
-                prim = stage.GetPrimAtPath(p)
-                if prim.IsValid():
-                    mat = UsdPhysics.MaterialAPI.Apply(prim)
+                pr = stage.GetPrimAtPath(p)
+                if pr.IsValid():
+                    mat = UsdPhysics.MaterialAPI.Apply(pr)
                     mat.CreateStaticFrictionAttr().Set(float(self._gripper_friction))
                     mat.CreateDynamicFrictionAttr().Set(float(self._gripper_friction))
-                    mat.CreateRestitutionAttr().Set(0.0)
-                    ps = PhysxSchema.PhysxMaterialAPI.Apply(prim)
+                    ps = PhysxSchema.PhysxMaterialAPI.Apply(pr)
                     ps.CreateFrictionCombineModeAttr().Set("max")
-                    rb = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
+                    rb = PhysxSchema.PhysxRigidBodyAPI.Apply(pr)
                     rb.CreateContactOffsetAttr().Set(float(self._contact_offset))
                     rb.CreateRestOffsetAttr().Set(float(self._rest_offset))
-        except Exception:
-            pass
+        except Exception: pass
 
     def _configure_gripper_drive(self):
         try:
             from pxr import PhysxSchema
-            stage = self.world.stage
-            root = getattr(self.robot, "prim_path", "/World/Robot")
+            stage, root = self.world.stage, getattr(self.robot, "prim_path", "/World/Robot")
             gj = None
             for p in [f"{root}/gripper/gripper", f"{root}/gripper_joint", f"{root}/joints/gripper"]:
-                if stage.GetPrimAtPath(p).IsValid():
-                    gj = stage.GetPrimAtPath(p)
-                    break
+                if stage.GetPrimAtPath(p).IsValid(): gj = stage.GetPrimAtPath(p); break
             if not gj:
-                for prim in stage.Traverse():
-                    if "gripper" in str(prim.GetPath()).lower() and prim.IsA(UsdPhysics.RevoluteJoint):
-                        gj = prim
-                        break
+                for p in stage.Traverse():
+                    if "gripper" in str(p.GetPath()).lower() and p.IsA(UsdPhysics.RevoluteJoint): gj = p; break
             if gj:
-                if not gj.HasAPI(PhysxSchema.PhysxJointAPI):
-                    PhysxSchema.PhysxJointAPI.Apply(gj)
+                if not gj.HasAPI(PhysxSchema.PhysxJointAPI): PhysxSchema.PhysxJointAPI.Apply(gj)
                 dr = UsdPhysics.DriveAPI.Apply(gj, "angular")
                 dr.CreateStiffnessAttr().Set(float(self._gripper_drive_stiffness))
                 dr.CreateDampingAttr().Set(float(self._gripper_drive_damping))
                 dr.CreateMaxForceAttr().Set(float(self._gripper_drive_max_force))
-        except Exception:
-            pass
-
+        except Exception: pass
+    
     def _apply_domain_randomization(self):
-        if self.domain_randomizer:
-            self.domain_randomizer.randomize()
+        if self.domain_randomizer: self.domain_randomizer.randomize()
 
     def _get_recent_collisions(self):
         try:
             physics = self.world.get_physics_context()
-            getter = getattr(physics, "get_contact_report", lambda: None)
-            report = getter()
-            if not report:
-                return []
+            report = getattr(physics, "get_contact_report", lambda: None)()
+            if not report: return []
             entries = report.get("contacts", []) if isinstance(report, dict) else report
             return [{"prim0": e.get("body0"), "prim1": e.get("body1")} for e in entries if isinstance(e, dict)]
-        except Exception:
-            return []
+        except Exception: return []
 
     def _validate_state(self, _obs):
         issues = []
-        pos = self.reward_engine.latest_joint_positions
-        if pos is None:
-            issues.append("No joint pos")
-        elif not np.isfinite(pos).all():
-            issues.append("NaN joints")
+        pos = self.robot_articulation.get_joint_positions()
+        if not np.isfinite(pos).all(): issues.append("NaN joints")
         cube_pos = getattr(self.reward_engine, "task_state", {}).get("cube_pos")
-        if cube_pos is None:
-            issues.append("No cube pos")
-        elif cube_pos[2] < -0.05:
-            issues.append("Cube fell")
-        if issues:
-            print(f"[warn] Validation: {'; '.join(issues)}")
-        if any("fell" in i for i in issues):
-            self._force_terminate = True
-            self._termination_reason = "cube_fell"
+        if cube_pos is not None and cube_pos[2] < -0.05: issues.append("Cube fell")
+        if issues: print(f"[warn] Validation: {'; '.join(issues)}")
+        if any("fell" in i for i in issues): self._force_terminate, self._termination_reason = True, "cube_fell"
 
     def _capture_images(self):
         ts = int(time.time() * 1000)
-        for k, cam in [("top", self.top_camera), ("side", self.side_camera)]:
+        for k in ["top", "side"]:
+            cam = getattr(self, f"{k}_camera", None)
             if cam:
-                try:
-                    write_png(os.path.join(self.temp_dir, f"{k}_{ts}.png"), cam.get_rgba())
-                except Exception:
-                    pass
-        try:
-            wrist = getattr(self.robot, "wrist_camera", None)
-            if wrist:
-                write_png(os.path.join(self.temp_dir, f"wrist_{ts}.png"), wrist.get_rgba())
-        except Exception:
-            pass
+                try: write_png(os.path.join(self.temp_dir, f"{k}_{ts}.png"), cam.get_rgba())
+                except Exception: pass
+        wrist = getattr(self.robot, "wrist_camera", None)
+        if wrist:
+            try: write_png(os.path.join(self.temp_dir, f"wrist_{ts}.png"), wrist.get_rgba())
+            except Exception: pass
 
 def run_demo():
     env = IsaacPickPlaceEnv(headless=False)
     env.reset()
     try:
-        for _ in range(100):
-            env.step(env.robot.get_random_joint_positions(), render=True)
-    finally:
-        env.shutdown()
+        for _ in range(100): env.step(env.robot.get_random_joint_positions(), render=True)
+    finally: env.shutdown()
 
-if __name__ == "__main__":
-    run_demo()
+if __name__ == "__main__": run_demo()

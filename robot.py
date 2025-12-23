@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from omni.isaac.core.robots import Robot
+from omni.isaac.core.articulations import Articulation
 from isaacsim.asset.importer.urdf import _urdf
 import omni.kit.commands
 from omni.usd import get_context
@@ -65,7 +65,7 @@ class SO100Robot:
         )
         
         self.prim_path = prim_path
-        self.robot = Robot(prim_path=prim_path, name="so_arm100")
+        self.robot = Articulation(prim_path=prim_path, name="so_arm100")
         self.world.scene.add(self.robot)
     
     def create_wrist_camera(self):
