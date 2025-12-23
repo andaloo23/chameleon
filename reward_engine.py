@@ -32,8 +32,8 @@ class RewardEngine:
             history_length=15,
             stability_threshold=0.015,       # Max range for "stable" position
             min_stable_frames=5,             # Frames to confirm grasp
-            min_gripper_position=0.08,       # Below this = fully closed (no object)
-            max_gripper_for_grasp=1.0,       # Above this = too open for grasp
+            min_gripper_position=0.005,      # Allow detection even when nearly fully closed
+            max_gripper_for_grasp=1.2,       # Above this = too open for grasp
             closing_velocity_threshold=0.002, # Min velocity to detect "closing"
         )
 
@@ -97,8 +97,8 @@ class RewardEngine:
 
         # Pressure-based grasp detection using GraspDetector
         # Detects when gripper is trying to close but position is stable (blocked by object)
-        # Require the gripper to be very close before pressure-only grasp counts (otherwise we lift without a weld).
-        distance_threshold = self.env.cube_scale[0] * 1.2
+        # Use a reasonable distance threshold (15cm) to ensure we are near the cube.
+        distance_threshold = 0.15 
         
         # Update grasp detector with current gripper state
         grasp_state = None

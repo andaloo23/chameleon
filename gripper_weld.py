@@ -31,12 +31,12 @@ import numpy as np
 
 
 def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
-    """Convert quaternion [x, y, z, w] to 3x3 rotation matrix."""
-    x, y, z, w = float(q[0]), float(q[1]), float(q[2]), float(q[3])
-    norm = np.sqrt(x * x + y * y + z * z + w * w)
+    """Convert quaternion [w, x, y, z] to 3x3 rotation matrix."""
+    w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+    norm = np.sqrt(w * w + x * x + y * y + z * z)
     if norm < 1e-10:
         return np.eye(3, dtype=np.float32)
-    x, y, z, w = x / norm, y / norm, z / norm, w / norm
+    w, x, y, z = w / norm, x / norm, y / norm, z / norm
     return np.array(
         [
             [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
@@ -48,7 +48,7 @@ def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
 
 
 def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
-    """Convert 3x3 rotation matrix to quaternion [x, y, z, w]."""
+    """Convert 3x3 rotation matrix to quaternion [w, x, y, z]."""
     R = np.asarray(R, dtype=np.float64)
     trace = float(R[0, 0] + R[1, 1] + R[2, 2])
     if trace > 0.0:
@@ -75,9 +75,7 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
         x = (R[0, 2] + R[2, 0]) / s
         y = (R[1, 2] + R[2, 1]) / s
         z = 0.25 * s
-    q = np.array([x, y, z, w], dtype=np.float32)
-    n = float(np.linalg.norm(q))
-    return q if n < 1e-10 else (q / n)
+    return np.array([w, x, y, z], dtype=np.float32)
 
 
 @dataclass
@@ -171,6 +169,9 @@ class IntelligentGripperWeld:
         # Finger gap proxy (distance between the two jaw link frames).
         gap = float(np.linalg.norm(np.asarray(gripper_world_pos) - np.asarray(jaw_world_pos)))
 
+        if gap < 1e-4 and self.debug and self._step % 60 == 0:
+            print("[WELD] Warning: Finger gap is near zero. Jaw prim might be same as gripper prim!")
+
         # Are we commanding a close? (Target lower than current)
         closing = False
         if gripper_value is not None and target_gripper is not None:
@@ -178,7 +179,11 @@ class IntelligentGripperWeld:
 
         # Near an object (generic): gripper midpoint is near object COM.
         distance = float(np.linalg.norm(0.5 * (np.asarray(gripper_world_pos) + np.asarray(jaw_world_pos)) - np.asarray(object_world_pos)))
-        near_object = bool(distance <= self.near_distance_m)
+        
+        # If gap is zero (missing link poses), require much closer proximity (8cm) to avoid snapping.
+        # Otherwise, use the standard 30cm margin for link origins.
+        effective_near_m = self.near_distance_m if gap > 0.001 else 0.08
+        near_object = bool(distance <= effective_near_m)
 
         # Maintain a ~stall_time window of gap values.
         window_n = max(2, int(round(self.stall_time_s / max(self.dt, 1e-6))))
@@ -195,8 +200,13 @@ class IntelligentGripperWeld:
             stall = bool(gap_range <= self.stall_gap_range_m)
 
         # Accumulate stall time only while closing and near object.
+        # If gap is zero, we likely approximated jaw with gripper; in this case we 
+        # still allow welding but we require a slightly longer consistent stall to be sure.
         if closing and near_object and stall and not self._is_welded:
-            self._stall_accum_s += self.dt
+            # If we have a real gap, use standard accumulation.
+            # If gap is 0 (approximated), require more evidence (slower accumulation).
+            increment = self.dt if gap > 0.001 else 0.5 * self.dt
+            self._stall_accum_s += increment
         else:
             # decay quickly so we don't weld after intermittent stalls
             self._stall_accum_s = max(0.0, self._stall_accum_s - 2.0 * self.dt)
@@ -210,23 +220,25 @@ class IntelligentGripperWeld:
 
         # Create weld when we have a full second of consistent stall.
         if (not self._is_welded) and (self._stall_accum_s >= self.stall_time_s):
-            if gripper_world_orient is None or object_world_orient is None:
-                # Need orientations to preserve pose without teleport.
-                self._stall_accum_s = 0.0
-            else:
-                anchor_world = 0.5 * (np.asarray(gripper_world_pos) + np.asarray(jaw_world_pos))
-                self._create_fixed_joint(
-                    anchor_world=anchor_world,
-                    gripper_world_pos=np.asarray(gripper_world_pos),
-                    gripper_world_orient=np.asarray(gripper_world_orient),
-                    object_world_pos=np.asarray(object_world_pos),
-                    object_world_orient=np.asarray(object_world_orient),
-                    object_prim_path=object_prim_path,
-                    gripper_body_path=gripper_body_path,
-                )
-                self._is_welded = True
-                if self.debug:
-                    print("[WELD] ★★★ Weld created (stall confirmed)")
+            # Use current world poses exactly.
+            g_orient = gripper_world_orient if gripper_world_orient is not None else np.array([0, 0, 0, 1], dtype=np.float32)
+            o_orient = object_world_orient if object_world_orient is not None else np.array([0, 0, 0, 1], dtype=np.float32)
+            
+            # Anchor at the object's current center to avoid any snapping/translation.
+            anchor_world = np.asarray(object_world_pos)
+            
+            self._create_fixed_joint(
+                anchor_world=anchor_world,
+                gripper_world_pos=np.asarray(gripper_world_pos),
+                gripper_world_orient=np.asarray(g_orient),
+                object_world_pos=np.asarray(object_world_pos),
+                object_world_orient=np.asarray(o_orient),
+                object_prim_path=object_prim_path,
+                gripper_body_path=gripper_body_path,
+            )
+            self._is_welded = True
+            if self.debug:
+                print(f"[WELD] ★★★ Weld created at object center (stall confirmed, gap={gap:.4f})")
 
         return WeldDebug(closing, stall, gap, gap_range, near_object, distance)
 
@@ -251,7 +263,7 @@ class IntelligentGripperWeld:
         object_prim_path: str,
         gripper_body_path: str,
     ) -> None:
-        """Create a FixedJoint preserving current pose (no teleport)."""
+        """Create a FixedJoint preserving current world pose exactly (no teleport)."""
         stage = self.env.world.stage
         from pxr import UsdPhysics, Gf
 
@@ -266,28 +278,39 @@ class IntelligentGripperWeld:
         Rg = quaternion_to_rotation_matrix(gripper_world_orient)
         Ro = quaternion_to_rotation_matrix(object_world_orient)
 
+        # anchor_world is the midpoint between fingers.
+        # We compute local frames so that creating the joint doesn't move either body.
         anchor_local_g = Rg.T @ (anchor_world - gripper_world_pos)
         anchor_local_o = Ro.T @ (anchor_world - object_world_pos)
 
-        # relative rotation from object->gripper
-        rel_rot = Ro.T @ Rg
-        rel_quat = rotation_matrix_to_quaternion(rel_rot)
-
+        # relative rotation from object->gripper frame
+        # FixedJoint.Define requires Body0 and Body1 local transforms.
+        # If Body0 is gripper and Body1 is object:
+        # We want Pose_world(Body0) * Pose_local0 = Pose_world(Body1) * Pose_local1
+        
         joint = UsdPhysics.FixedJoint.Define(stage, self.joint_path)
         joint.CreateBody0Rel().SetTargets([gripper_body_path])
         joint.CreateBody1Rel().SetTargets([object_prim_path])
 
+        # Set local transforms to maintain current world poses exactly
         joint.CreateLocalPos0Attr().Set(Gf.Vec3f(float(anchor_local_g[0]), float(anchor_local_g[1]), float(anchor_local_g[2])))
         joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
 
         joint.CreateLocalPos1Attr().Set(Gf.Vec3f(float(anchor_local_o[0]), float(anchor_local_o[1]), float(anchor_local_o[2])))
+        
+        # Correct relative rotation: R_world_g * R_local0 = R_world_o * R_local1
+        # Since R_local0 = I, then R_local1 = R_world_o.T * R_world_g
+        rel_rot_mat = Ro.T @ Rg
+        rel_quat = rotation_matrix_to_quaternion(rel_rot_mat)
+        
+        # Isaac Sim Gf.Quatf expects (w, x, y, z)
         joint.CreateLocalRot1Attr().Set(
-            Gf.Quatf(float(rel_quat[3]), float(rel_quat[0]), float(rel_quat[1]), float(rel_quat[2]))
+            Gf.Quatf(float(rel_quat[0]), float(rel_quat[1]), float(rel_quat[2]), float(rel_quat[3]))
         )
 
-        # Optional safety: break forces prevent solver explosions.
+        # High break force to ensure it carries the mass during lift.
         try:
-            joint.CreateBreakForceAttr().Set(750.0)
-            joint.CreateBreakTorqueAttr().Set(750.0)
+            joint.CreateBreakForceAttr().Set(2000.0)
+            joint.CreateBreakTorqueAttr().Set(2000.0)
         except Exception:
             pass
