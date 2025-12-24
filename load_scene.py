@@ -236,6 +236,13 @@ class IsaacPickPlaceEnv:
         self.world.scene.add(self.side_camera)
 
         self.world.reset()
+        
+        # Set object positions AFTER world.reset() to prevent them being snapped back to defaults
+        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
+        if self.cup_xform:
+            from pxr import Gf, UsdGeom
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
+
         self._apply_default_joint_positions()
         self._capture_base_fixture_pose()
         self._resolve_link_paths()
@@ -264,10 +271,16 @@ class IsaacPickPlaceEnv:
         if self.gripper_weld: self.gripper_weld.release()
         cube_xy, cup_xy = self._sample_object_positions()
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
-        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
-        if self.cup_xform:
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         self.world.reset()
+        
+        # Set object positions AFTER world.reset()
+        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
+        print(f"[DEBUG] Setting cube world pose to: {pos}")
+        self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
+        if self.cup_xform:
+            from pxr import Gf, UsdGeom
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
+
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()
@@ -505,6 +518,7 @@ class IsaacPickPlaceEnv:
         # This provides the "room" the user requested.
         cube_xy = np.array([0.0, -0.37])
         cup_xy = np.array([0.0, -0.55])
+        print(f"[DEBUG] _sample_object_positions returning: cube={cube_xy}")
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
