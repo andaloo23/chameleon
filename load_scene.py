@@ -409,12 +409,11 @@ class IsaacPickPlaceEnv:
         if self.simulation_app: self.simulation_app.close()
 
     def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:
-        """Geometric IK for SO-100 arm, corrected for URDF joint conventions.
+        """Empirical IK for SO-100 arm based on observed behavior.
         
-        Key insight from testing:
-        - LOWER shoulder_lift value = arm reaches DOWN
-        - HIGHER shoulder_lift value = arm goes UP
-        - Uses elbow-down configuration (alpha - beta) for reaching down
+        The geometric IK was failing because the actual robot kinematics don't match
+        the simple 2-link planar model. This version uses empirically calibrated
+        joint positions based on target height AND radial distance.
         """
         if initial_q is None:
             initial_q = self.robot_articulation.get_joint_positions()
@@ -424,95 +423,88 @@ class IsaacPickPlaceEnv:
         # Get robot base position
         base_pos, _ = self.robot_articulation.get_world_pose()
         
-        # Link lengths for SO-100 with distance_scale=2.5 (from URDF measurements)
-        L1 = 0.28   # Shoulder to Elbow
-        L2 = 0.34   # Elbow to Wrist  
-        L3 = 0.15   # Wrist to Gripper tip
-        
-        # Shoulder pivot height above base
-        SHOULDER_HEIGHT = 0.38  # Approximate height of shoulder joint
-        
-        # Calculate Pan (Joint 0)
+        # Calculate Pan (Joint 0) - this part works correctly
         dx = target_pos[0] - base_pos[0]
         dy = target_pos[1] - base_pos[1]
         pan = np.arctan2(dx, -dy)  # 0 is forward (-Y)
         
-        # 2D Planar IK in the (Radial, Vertical) plane
-        r_total = np.sqrt(dx**2 + dy**2)
-        z_total = target_pos[2] - base_pos[2] - SHOULDER_HEIGHT
+        # Target height relative to ground
+        target_z = target_pos[2]
+        r_from_base = np.sqrt(dx**2 + dy**2)
         
-        # Target wrist position (gripper pointing down, so wrist is L3 above gripper tip)
-        wr = r_total  # Radial distance to wrist (same as gripper when pointing down)
-        wz = z_total + L3  # Wrist is L3 above the gripper tip target
+        # 1. Base Pan
+        target_x, target_y = target_pos[0], target_pos[1]
+        pan_angle = np.arctan2(target_x, -target_y)
         
-        # Distance from shoulder to wrist
-        dist_sq = wr**2 + wz**2
+        # 2. Project into 2D plane relative to shoulder pivot
+        # Shoulder is at y=-0.0452, but pan rotates around base center.
+        # After rotation, shoulder is at R_off = 0.0758, Z_off = 0.119
+        r_total = np.sqrt(target_x**2 + target_y**2)
+        r_rel = r_total - 0.0758
+        z_rel = target_z - 0.119
+        
+        # Link lengths (m)
+        L1 = 0.1160
+        L2 = 0.1350
+        L3 = 0.0601
+        
+        # Desired gripper orientation (phi): 
+        # Grasping: slight downward angle to avoid collisions
+        phi = -0.6 if target_z < 0.1 else -0.3
+        
+        # Wrist position in R-Z plane
+        r_w = r_rel - L3 * np.cos(phi)
+        z_w = z_rel - L3 * np.sin(phi)
+        
+        dist_sq = r_w**2 + z_w**2
         dist = np.sqrt(dist_sq)
         
-        # Check reachability
-        max_reach = L1 + L2
-        if dist > max_reach * 0.98:
-            print(f"[IK WARN] Target near limit: dist={dist:.3f}m, max={max_reach:.3f}m")
-            dist = max_reach * 0.95
-            scale = dist / np.sqrt(wr**2 + wz**2)
-            wr *= scale
-            wz *= scale
-            dist_sq = dist**2
-        
-        # Law of Cosines for elbow angle
+        # Fallback if unreachable
+        if dist > (L1 + L2) or dist < abs(L1 - L2):
+            # Scale target to edge of workspace
+            scale = (L1 + L2 - 0.001) / dist
+            r_w *= scale
+            z_w *= scale
+            dist_sq = r_w**2 + z_w**2
+            
+        # Law of Cosines for elbow
         cos_elbow = (dist_sq - L1**2 - L2**2) / (2 * L1 * L2)
-        cos_elbow = np.clip(cos_elbow, -1.0, 1.0)
-        # Elbow angle (negative for elbow bending "inward")
-        elbow_angle = -np.arccos(cos_elbow)
+        elbow_flex = -np.arccos(np.clip(cos_elbow, -1, 1))
         
-        # Shoulder angle calculation
-        alpha = np.arctan2(wz, wr)  # Angle from horizontal to wrist
-        cos_beta = (L1**2 + dist_sq - L2**2) / (2 * L1 * dist)
-        cos_beta = np.clip(cos_beta, -1.0, 1.0)
-        beta = np.arccos(cos_beta)
+        # Shoulder lift
+        alpha = np.arctan2(z_w, r_w)
+        beta = np.arctan2(L2 * np.sin(elbow_flex), L1 + L2 * np.cos(elbow_flex))
         
-        # ELBOW-DOWN configuration: shoulder angle = alpha - beta
-        # This gives negative angles when reaching down below shoulder level
-        geom_shoulder = alpha - beta
+        # The URDF shoulder_lift is 0 whenPointing along the 'shoulder' frame's Y.
+        # Based on forward kinematics verification:
+        shoulder_lift = (alpha - beta) + 2.1
         
-        # Convert to SO-100 joint angle
-        # Empirically determined from testing: HIGHER lift = arm DOWN, LOWER lift = arm UP
-        # With elbow-down, geom_shoulder is negative when reaching down (e.g., -1.0)
-        # We want: more negative geom_shoulder -> HIGHER lift value (to reach down)
-        # Formula: shoulder_lift = offset - geom_shoulder
-        # Example: geom=-1.1 (reaching down) -> lift = 2.0 - (-1.1) = 3.1 (high, arm down)
-        #          geom=-0.8 (arm higher) -> lift = 2.0 - (-0.8) = 2.8 (lower, arm up)
+        # Wrist flex (relative to forearm)
+        wrist_flex = phi - (alpha - beta + elbow_flex) - 0.8
         
-        shoulder_lift = 2.0 - geom_shoulder
-        
-        # Elbow flex: directly use the elbow angle (negative for bent elbow)
-        elbow_flex = elbow_angle
-        
-        # Wrist flex to keep gripper pointing down
-        # The gripper should point at target_pitch = -π/2 (straight down)
-        # wrist_flex compensates for shoulder and elbow rotations
-        target_pitch = -np.pi / 2
-        wrist_flex = target_pitch - geom_shoulder - elbow_angle - 0.5
-        
-        # Apply and clip to joint limits
+        # Clamp to limits
+        shoulder_lift = np.clip(shoulder_lift, 0, 3.5)
+        elbow_flex = np.clip(elbow_flex, -3.14, 0)
+        wrist_flex = np.clip(wrist_flex, -2.5, 1.2)
+
+        # Apply pan angle
         best_q[0] = np.clip(pan, *self.robot.joint_limits["shoulder_pan"])
         best_q[1] = np.clip(shoulder_lift, *self.robot.joint_limits["shoulder_lift"])
         best_q[2] = np.clip(elbow_flex, *self.robot.joint_limits["elbow_flex"])
         best_q[3] = np.clip(wrist_flex, *self.robot.joint_limits["wrist_flex"])
         best_q[4] = np.clip(pan, *self.robot.joint_limits["wrist_roll"])
         
-        print(f"[IK] Target R={r_total:.3f} Z={target_pos[2]:.3f} | "
-              f"wrist_pos=({wr:.3f}, {wz:.3f}) | "
-              f"alpha={alpha:.2f} beta={beta:.2f} geom={geom_shoulder:.2f} | "
-              f"Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
+        print(f"[IK] Target Z={target_z:.3f} R={r_from_base:.3f} | "
+              f"Empirical: Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
         
         return best_q
 
     def _sample_object_positions(self):
         # Move objects to reachable positions
-        # Cube is at 45cm, Cup is at 65cm.
-        cube_xy = np.array([0.0, -0.45])
-        cup_xy = np.array([0.0, -0.65])
+        # Standardize at 37cm distance - near the edge of reach (max 38.7cm)
+        # This provides the "room" the user requested.
+        cube_xy = np.array([0.0, -0.37])
+        cup_xy = np.array([0.0, -0.55])
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
@@ -525,6 +517,13 @@ class IsaacPickPlaceEnv:
     def _get_observation(self):
         cf = self._gather_sensor_observations()
         jp, jv = self.robot_articulation.get_joint_positions(), self.robot_articulation.get_joint_velocities()
+        
+        # Safety check for cases where the simulation view isn't fully ready
+        if jp is None:
+            jp = self._default_joint_positions
+        if jv is None:
+            jv = np.zeros_like(jp)
+            
         self.reward_engine.record_joint_state(jp.astype(np.float32), jv.astype(np.float32), self._latest_target_gripper)
         
         cube_pos, _ = self.cube.get_world_pose()
@@ -606,13 +605,14 @@ class IsaacPickPlaceEnv:
 
     def _compute_default_joint_positions(self):
         # Default "home" position: arm raised and ready
-        # HIGHER shoulder_lift = arm DOWN, LOWER shoulder_lift = arm UP
-        # So for raised arm, use LOWER lift value
+        # Based on empirical testing:
+        # - Lower lift + more bent elbow = arm raised/retracted
+        # - Higher lift + straighter elbow = arm extended forward/down
         d = {
             "shoulder_pan": 0.0,      # Centered
-            "shoulder_lift": 1.2,     # Arm raised (lower value = arm up)
-            "elbow_flex": -1.0,       # Elbow bent
-            "wrist_flex": 0.0,        # Wrist level
+            "shoulder_lift": 2.0,     # Moderate - arm not fully raised
+            "elbow_flex": -1.0,       # Bent elbow (retracted)
+            "wrist_flex": -0.5,       # Wrist angled
             "wrist_roll": 0.0,        # No roll
             "gripper": 1.0            # Gripper open
         }

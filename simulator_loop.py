@@ -128,8 +128,8 @@ class SimulationLoop:
                 
                 print(f"[POLICY] Target positions - Pre: z={target_pre[2]:.3f}, Grasp: z={target_grasp[2]:.3f}, Lift: z={target_lift[2]:.3f}")
                 
-                # Home position: arm raised (LOWER lift = arm UP)
-                q_home = np.array([0.0, 1.2, -1.0, 0.0, 0.0, 1.0])
+                # Home position: arm ready (bent elbow = retracted)
+                q_home = np.array([0.0, 2.0, -1.0, -0.5, 0.0, 1.0])
                 
                 # Solve IK for each waypoint
                 print("[POLICY] Computing IK for pre-grasp...")
@@ -172,35 +172,37 @@ class SimulationLoop:
                 print(f"[POLICY] Step {step}: current lift={current_q[1]:.2f}, elbow={current_q[2]:.2f}, "
                       f"target_pre_lift={targets['pre'][1]:.2f}")
 
-            # Stage 1: Move to pre-grasp position (0-150 steps)
-            if step < 150:
+            # Stage 1: Move to pre-grasp position (0-200 steps)
+            if step < 200:
                 target_q = targets["pre"].copy()
-                # Use higher alpha for faster convergence, but smooth start
-                alpha = min(0.15, 0.02 + step * 0.001)
+                # Slow, smooth approach
+                alpha = min(0.12, 0.02 + step * 0.001)
                 result = current_q * (1 - alpha) + target_q * alpha
                 return result
 
-            # Stage 2: Descend to grasp (150-350 steps)
-            elif step < 350 and not grasped_flag:
+            # Stage 2: Descend to grasp (200-500 steps)
+            elif step < 500 and not grasped_flag:
                 target_q = targets["grasp"].copy()
-                progress = (step - 150) / 200.0
+                progress = (step - 200) / 300.0
                 
                 # Gradually close gripper during descent
-                if progress > 0.7:
+                if progress > 0.5:
                     target_q[5] = 0.05
                 
-                alpha = 0.12
+                # Use EVEN SLOWER blending to prevent overshoot and floor collision
+                # 0.03 instead of 0.05
+                alpha = 0.03
                 result = current_q * (1 - alpha) + target_q * alpha
                 return result
 
-            # Stage 3: Lift (350+ steps or after grasp detected)
+            # Stage 3: Lift (500+ steps or after grasp detected)
             else:
                 if _policy._lift_start_step is None:
                     _policy._lift_start_step = step
                     print(f"[POLICY] === LIFT STAGE at step {step} ===")
                 
                 target_q = targets["lift"].copy()
-                alpha = 0.10
+                alpha = 0.08
                 result = current_q * (1 - alpha) + target_q * alpha
                 return result
 
