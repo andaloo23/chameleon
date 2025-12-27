@@ -514,9 +514,8 @@ class IsaacPickPlaceEnv:
 
     def _sample_object_positions(self):
         # Move objects to reachable positions
-        # Standardize at 37cm distance - near the edge of reach (max 38.7cm)
-        # This provides the "room" the user requested.
-        cube_xy = np.array([0.0, -0.37])
+        # Cube at 100cm distance - further from base
+        cube_xy = np.array([0.0, -1.0])
         cup_xy = np.array([0.0, -0.55])
         print(f"[DEBUG] _sample_object_positions returning: cube={cube_xy}")
         return cube_xy, cup_xy
