@@ -422,11 +422,13 @@ class IsaacPickPlaceEnv:
         if self.simulation_app: self.simulation_app.close()
 
     def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:
-        """Empirical IK for SO-100 arm based on observed behavior.
+        """Simplified empirical IK for SO-100 arm.
         
-        The geometric IK was failing because the actual robot kinematics don't match
-        the simple 2-link planar model. This version uses empirically calibrated
-        joint positions based on target height AND radial distance.
+        Uses a heuristic approach based on known-good configurations:
+        - grasp_config: lift=2.2, elbow=-1.2 reaches forward at low height
+        - home_config: lift=2.0, elbow=-1.0 is slightly retracted
+        
+        This avoids complex geometric IK that was producing wrong poses.
         """
         if initial_q is None:
             initial_q = self.robot_articulation.get_joint_positions()
@@ -436,79 +438,73 @@ class IsaacPickPlaceEnv:
         # Get robot base position
         base_pos, _ = self.robot_articulation.get_world_pose()
         
-        # Calculate Pan (Joint 0) - this part works correctly
+        # Calculate offset from robot base
         dx = target_pos[0] - base_pos[0]
         dy = target_pos[1] - base_pos[1]
-        pan = np.arctan2(dx, -dy)  # 0 is forward (-Y)
+        dz = target_pos[2] - base_pos[2]
         
-        # Target height relative to ground
-        target_z = target_pos[2]
-        r_from_base = np.sqrt(dx**2 + dy**2)
+        # Pan angle: forward is -Y, pan=0 points toward -Y
+        # arctan2(dx, -dy) gives angle from -Y axis toward +X axis
+        pan = np.arctan2(dx, -dy)
         
-        # 1. Base Pan
-        target_x, target_y = target_pos[0], target_pos[1]
-        pan_angle = np.arctan2(target_x, -target_y)
+        # Radial distance from robot base to target (in XY plane)
+        r_total = np.sqrt(dx**2 + dy**2)
         
-        # 2. Project into 2D plane relative to shoulder pivot
-        # Shoulder is at y=-0.0452, but pan rotates around base center.
-        # After rotation, shoulder is at R_off = 0.0758, Z_off = 0.119
-        r_total = np.sqrt(target_x**2 + target_y**2)
-        r_rel = r_total - 0.0758
-        z_rel = target_z - 0.119
+        print(f"[IK DEBUG] Base: {base_pos}")
+        print(f"[IK DEBUG] Target: {target_pos}")
+        print(f"[IK DEBUG] dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}")
+        print(f"[IK DEBUG] r_total={r_total:.3f}, pan={np.degrees(pan):.1f}°")
         
-        # Link lengths (m)
-        L1 = 0.1160
-        L2 = 0.1350
-        L3 = 0.0601
+        # SIMPLIFIED HEURISTIC IK:
+        # Instead of complex geometric IK, use empirical mappings
+        # 
+        # Known configurations (from calibrate_home.py):
+        # - Grasp pose: lift=2.2, elbow=-1.2 → arm reaches forward/down
+        # - Higher lift = lower arm position
+        # - More negative elbow = more bent (retracted)
+        # - Less negative elbow = more extended
+        #
+        # The arm's reach with lift=2.2, elbow=-1.2 is approximately 0.4-0.5m
+        # For 1m reach, we need to extend the elbow more (less negative)
         
-        # Desired gripper orientation (phi): 
-        # Grasping: slight downward angle to avoid collisions
-        phi = -0.6 if target_z < 0.1 else -0.3
+        # Estimate how much to extend based on distance
+        # Base reach at elbow=-1.2 is about 0.4m
+        # Max reach at elbow=0 is about 1.0m (fully extended)
+        BASE_REACH = 0.4
+        MAX_REACH = 1.0
         
-        # Wrist position in R-Z plane
-        r_w = r_rel - L3 * np.cos(phi)
-        z_w = z_rel - L3 * np.sin(phi)
+        # Map distance to elbow angle
+        reach_fraction = np.clip((r_total - BASE_REACH) / (MAX_REACH - BASE_REACH), 0, 1)
+        # elbow: -1.2 (bent) to -0.2 (mostly extended, but not fully straight)
+        elbow_flex = -1.2 + reach_fraction * 1.0  # Range: -1.2 to -0.2
         
-        dist_sq = r_w**2 + z_w**2
-        dist = np.sqrt(dist_sq)
+        # Map height to shoulder lift
+        # Higher target = lower lift value
+        # Target at z=0.05 (low) → lift=2.4 (arm reaching down)
+        # Target at z=0.30 (high) → lift=1.8 (arm more horizontal)
+        SHOULDER_HEIGHT = 0.30  # Approximate shoulder height above ground
+        height_diff = dz - SHOULDER_HEIGHT
+        # Map height difference to shoulder_lift adjustment
+        shoulder_lift = 2.2 - height_diff * 2.0  # Adjust based on height
         
-        # Fallback if unreachable
-        if dist > (L1 + L2) or dist < abs(L1 - L2):
-            # Scale target to edge of workspace
-            scale = (L1 + L2 - 0.001) / dist
-            r_w *= scale
-            z_w *= scale
-            dist_sq = r_w**2 + z_w**2
-            
-        # Law of Cosines for elbow
-        cos_elbow = (dist_sq - L1**2 - L2**2) / (2 * L1 * L2)
-        elbow_flex = -np.arccos(np.clip(cos_elbow, -1, 1))
+        # Wrist flex to keep gripper roughly level or slightly down
+        wrist_flex = -0.5 + height_diff * 0.5
         
-        # Shoulder lift
-        alpha = np.arctan2(z_w, r_w)
-        beta = np.arctan2(L2 * np.sin(elbow_flex), L1 + L2 * np.cos(elbow_flex))
+        # Clamp to joint limits
+        shoulder_lift = np.clip(shoulder_lift, 0.5, 3.0)
+        elbow_flex = np.clip(elbow_flex, -2.5, -0.1)
+        wrist_flex = np.clip(wrist_flex, -2.0, 1.0)
+        pan = np.clip(pan, -1.5, 1.5)
         
-        # The URDF shoulder_lift is 0 whenPointing along the 'shoulder' frame's Y.
-        # Based on forward kinematics verification:
-        shoulder_lift = (alpha - beta) + 2.1
+        # Apply joint angles
+        best_q[0] = pan           # shoulder_pan
+        best_q[1] = shoulder_lift # shoulder_lift
+        best_q[2] = elbow_flex    # elbow_flex
+        best_q[3] = wrist_flex    # wrist_flex
+        best_q[4] = 0.0           # wrist_roll
         
-        # Wrist flex (relative to forearm)
-        wrist_flex = phi - (alpha - beta + elbow_flex) - 0.8
-        
-        # Clamp to limits
-        shoulder_lift = np.clip(shoulder_lift, 0, 3.5)
-        elbow_flex = np.clip(elbow_flex, -3.14, 0)
-        wrist_flex = np.clip(wrist_flex, -2.5, 1.2)
-
-        # Apply pan angle
-        best_q[0] = np.clip(pan, *self.robot.joint_limits["shoulder_pan"])
-        best_q[1] = np.clip(shoulder_lift, *self.robot.joint_limits["shoulder_lift"])
-        best_q[2] = np.clip(elbow_flex, *self.robot.joint_limits["elbow_flex"])
-        best_q[3] = np.clip(wrist_flex, *self.robot.joint_limits["wrist_flex"])
-        best_q[4] = np.clip(pan, *self.robot.joint_limits["wrist_roll"])
-        
-        print(f"[IK] Target Z={target_z:.3f} R={r_from_base:.3f} | "
-              f"Empirical: Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
+        print(f"[IK] Pan={best_q[0]:.2f} Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
+        print(f"[IK] reach_fraction={reach_fraction:.2f}, height_diff={height_diff:.2f}")
         
         return best_q
 
