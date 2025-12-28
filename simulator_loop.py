@@ -88,123 +88,74 @@ class SimulationLoop:
         """IK-based scripted policy for the SO100 arm with corrected kinematics."""
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
-            # Persistent storage for IK targets
-            if not hasattr(_policy, "_ik_targets"):
-                _policy._ik_targets = None
-                _policy._lift_start_step = None
-                _policy._debug_printed = False
+            # Persistent state for the policy
+            if not hasattr(_policy, "_state"):
+                _policy._state = "APPROACH" # APPROACH -> GRASP -> LIFT
+                _policy._waypoints = {}
+                _policy._last_q = None
 
             cube_pos = observation.get("cube_pos")
             if cube_pos is None:
                 return self.random_policy(observation, step)
 
-            # Initialize IK targets at step 0
-            if _policy._ik_targets is None or step == 0:
-                print(f"\n[POLICY] ========== Computing IK for cube at {cube_pos} ==========")
-                
-                # Get robot base position
+            # Initialize waypoints at step 0
+            if not _policy._waypoints or step == 0:
+                print(f"\n[RMPFLOW] ========== Planning for cube at {cube_pos} ==========")
                 robot_base_pos, _ = self.env.robot_articulation.get_world_pose()
-                print(f"[POLICY] Robot base at: {robot_base_pos}")
                 
-                # Pan angle to the cube
-                dx = cube_pos[0] - robot_base_pos[0]
-                dy = cube_pos[1] - robot_base_pos[1]
-                pan_angle = np.arctan2(dx, -dy)
+                # Pre-grasp: 20cm above cube
+                target_pre = np.array(cube_pos) + np.array([0, 0, 0.20])
+                # Grasp: 2cm above cube center (accounting for jaw length)
+                target_grasp = np.array(cube_pos) + np.array([0, 0, 0.02])
+                # Lift: 30cm above table
+                target_lift = np.array(cube_pos) + np.array([0, 0, 0.30])
                 
-                # Small offset to center gripper on cube
-                side_offset = -0.015  # 1.5cm offset
-                off_x = side_offset * np.cos(pan_angle)
-                off_y = side_offset * np.sin(pan_angle)
-                
-                target_grasp = np.array(cube_pos) + np.array([off_x, off_y, 0.02])  # Slightly above cube center
-                
-                # Pre-grasp: 15cm above grasp point
-                target_pre = target_grasp.copy()
-                target_pre[2] += 0.15
-                
-                # Lift: 25cm above table
-                target_lift = target_grasp.copy()
-                target_lift[2] = 0.25
-                
-                print(f"[POLICY] Target positions - Pre: z={target_pre[2]:.3f}, Grasp: z={target_grasp[2]:.3f}, Lift: z={target_lift[2]:.3f}")
-                
-                # Home position: arm ready (bent elbow = retracted)
-                q_home = np.array([0.0, 2.0, -1.0, -0.5, 0.0, 1.0])
-                
-                # Solve IK for each waypoint
-                print("[POLICY] Computing IK for pre-grasp...")
-                q_pre = self.env.compute_ik(target_pre, initial_q=q_home)
-                print("[POLICY] Computing IK for grasp...")
-                q_grasp = self.env.compute_ik(target_grasp, initial_q=q_pre)
-                print("[POLICY] Computing IK for lift...")
-                q_lift = self.env.compute_ik(target_lift, initial_q=q_grasp)
-                
-                # Set gripper states
-                q_home[5] = 1.0   # Open
-                q_pre[5] = 1.2    # Wide open for approach
-                q_grasp[5] = 0.05 # Closed to grasp
-                q_lift[5] = 0.05  # Keep closed
-                
-                _policy._ik_targets = {
-                    "home": q_home,
-                    "pre": q_pre,
-                    "grasp": q_grasp,
-                    "lift": q_lift,
+                _policy._waypoints = {
+                    "pre": target_pre,
+                    "grasp": target_grasp,
+                    "lift": target_lift
                 }
-                
-                print(f"[POLICY] Final joint targets:")
-                print(f"  Home:  lift={q_home[1]:.2f}, elbow={q_home[2]:.2f}")
-                print(f"  Pre:   lift={q_pre[1]:.2f}, elbow={q_pre[2]:.2f}")
-                print(f"  Grasp: lift={q_grasp[1]:.2f}, elbow={q_grasp[2]:.2f}")
-                print(f"  Lift:  lift={q_lift[1]:.2f}, elbow={q_lift[2]:.2f}")
-                print("[POLICY] ======================================================\n")
+                _policy._state = "APPROACH"
+                print(f"[RMPFLOW] State: APPROACH | Target: {target_pre}")
 
-            # Get current state
+            # State Transitions
             reward_engine = getattr(self.env, "reward_engine", None)
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
             
-            targets = _policy._ik_targets
-            current_q = np.array(observation.get("joint_positions"), dtype=np.float32)
+            ee_pos, _ = self.env.robot_articulation.get_world_pose() # This is base pose, we need EE
+            # Actually, RMPflow handles the EE pose internally, we just provide the target.
+            
+            # Use step counts as a simple fallback for state transitions if needed
+            if _policy._state == "APPROACH" and step > 250:
+                _policy._state = "GRASP"
+                print(f"[RMPFLOW] State: GRASP | Target: {_policy._waypoints['grasp']}")
+            elif _policy._state == "GRASP" and (grasped_flag or step > 600):
+                _policy._state = "LIFT"
+                print(f"[RMPFLOW] State: LIFT | Target: {_policy._waypoints['lift']}")
 
-            # Debug: print joint positions periodically
-            if step % 50 == 0:
-                print(f"[POLICY] Step {step}: current lift={current_q[1]:.2f}, elbow={current_q[2]:.2f}, "
-                      f"target_pre_lift={targets['pre'][1]:.2f}")
-
-            # Stage 1: Move to pre-grasp position (0-200 steps)
-            if step < 200:
-                target_q = targets["pre"].copy()
-                # Slow, smooth approach
-                alpha = min(0.12, 0.02 + step * 0.001)
-                result = current_q * (1 - alpha) + target_q * alpha
-                return result
-
-            # Stage 2: Descend to grasp (200-500 steps)
-            elif step < 500 and not grasped_flag:
-                target_q = targets["grasp"].copy()
-                progress = (step - 200) / 300.0
-                
-                # Gradually close gripper during descent
-                if progress > 0.5:
-                    target_q[5] = 0.05
-                
-                # Use EVEN SLOWER blending to prevent overshoot and floor collision
-                # 0.03 instead of 0.05
-                alpha = 0.03
-                result = current_q * (1 - alpha) + target_q * alpha
-                return result
-
-            # Stage 3: Lift (500+ steps or after grasp detected)
+            # Compute RMP Action
+            target_pos = _policy._waypoints.get("pre" if _policy._state == "APPROACH" else 
+                                               "grasp" if _policy._state == "GRASP" else "lift")
+            
+            # Use a slightly downward orientation for the gripper
+            # RMPflow orientation is [w, x, y, z]
+            target_orient = np.array([0.707, 0, 0.707, 0]) # Pointing down
+            
+            next_q = self.env.compute_rmp_action(target_pos, target_orient)
+            
+            # Handle gripper manually
+            if _policy._state == "APPROACH":
+                next_q[5] = 1.2 # Wide open
+            elif _policy._state == "GRASP":
+                if step > 450 or grasped_flag:
+                    next_q[5] = 0.05 # Close
+                else:
+                    next_q[5] = 1.2 # Stay open until near
             else:
-                if _policy._lift_start_step is None:
-                    _policy._lift_start_step = step
-                    print(f"[POLICY] === LIFT STAGE at step {step} ===")
+                next_q[5] = 0.05 # Keep closed
                 
-                target_q = targets["lift"].copy()
-                alpha = 0.08
-                result = current_q * (1 - alpha) + target_q * alpha
-                return result
+            return next_q
 
         return _policy
 

@@ -25,12 +25,14 @@ UsdGeom = None
 UsdPhysics = None
 Usd = None
 SO100Robot = None
+RmpFlow = None
+ArticulationMotionPolicy = None
 
 
 def _ensure_isaac_sim(headless=False):
     """Create the SimulationApp and late-import Isaac APIs on first use."""
     global _SIMULATION_APP, _SIM_HEADLESS_FLAG
-    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, SO100Robot
+    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, Usd, SO100Robot, RmpFlow, ArticulationMotionPolicy
 
     if _SIMULATION_APP is None:
         _SIMULATION_APP = SimulationApp({
@@ -44,6 +46,7 @@ def _ensure_isaac_sim(headless=False):
         from omni.isaac.sensor import Camera as _Camera
         from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics, Usd as _Usd
         from robot import SO100Robot as _SO100Robot
+        from omni.isaac.motion_generation import RmpFlow as _RmpFlow, ArticulationMotionPolicy as _ArticulationMotionPolicy
 
         World = _World
         DynamicCuboid = _DynamicCuboid
@@ -54,6 +57,8 @@ def _ensure_isaac_sim(headless=False):
         UsdPhysics = _UsdPhysics
         Usd = _Usd
         SO100Robot = _SO100Robot
+        RmpFlow = _RmpFlow
+        ArticulationMotionPolicy = _ArticulationMotionPolicy
         initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
     elif headless != _SIM_HEADLESS_FLAG:
@@ -195,6 +200,17 @@ class IsaacPickPlaceEnv:
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
         self.robot_articulation = self.robot.get_robot()
+        
+        # Initialize RMPflow
+        self._rmpflow = RmpFlow(
+            robot_description_path=os.path.abspath(os.path.join(self.current_dir, "so100_description.yaml")),
+            rmpflow_config_path=os.path.abspath(os.path.join(self.current_dir, "so100_rmpflow_config.yaml")),
+            urdf_path=os.path.abspath(os.path.join(self.current_dir, "so100.urdf")),
+            end_effector_frame_name="gripper",
+            maximum_substep_size=0.033
+        )
+        self._motion_policy = ArticulationMotionPolicy(self.robot_articulation, self._rmpflow)
+        
         self._base_fixture_pose = None
         self._workspace_origin_xy = None
         self._default_joint_positions = self._compute_default_joint_positions()
@@ -422,91 +438,141 @@ class IsaacPickPlaceEnv:
         if self.simulation_app: self.simulation_app.close()
 
     def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:
-        """Simplified empirical IK for SO-100 arm.
+        """Corrected Geometric IK for SO-100 arm.
         
-        Uses a heuristic approach based on known-good configurations:
-        - grasp_config: lift=2.2, elbow=-1.2 reaches forward at low height
-        - home_config: lift=2.0, elbow=-1.0 is slightly retracted
-        
-        This avoids complex geometric IK that was producing wrong poses.
+        Incorporates:
+        - Jaw extension in L3 for realistic reach.
+        - Precise URDF joint offsets (s_lift mapping).
+        - Search for optimal approach angle to maintain natural posture.
         """
         if initial_q is None:
             initial_q = self.robot_articulation.get_joint_positions()
         
         best_q = np.array(initial_q, dtype=np.float32)
-        
-        # Get robot base position
         base_pos, _ = self.robot_articulation.get_world_pose()
         
-        # Calculate offset from robot base
         dx = target_pos[0] - base_pos[0]
         dy = target_pos[1] - base_pos[1]
         dz = target_pos[2] - base_pos[2]
         
-        # Pan angle: forward is -Y, pan=0 points toward -Y
-        # arctan2(dx, -dy) gives angle from -Y axis toward +X axis
         pan = np.arctan2(dx, -dy)
-        
-        # Radial distance from robot base to target (in XY plane)
         r_total = np.sqrt(dx**2 + dy**2)
         
-        print(f"[IK DEBUG] Base: {base_pos}")
-        print(f"[IK DEBUG] Target: {target_pos}")
-        print(f"[IK DEBUG] dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}")
-        print(f"[IK DEBUG] r_total={r_total:.3f}, pan={np.degrees(pan):.1f}°")
+        # Link lengths (scaled by 2.5)
+        L1 = 0.1160 * 2.5
+        L2 = 0.1350 * 2.5
+        # L3 includes wrist-to-gripper offset PLUS jaw length extension
+        L3 = 0.1600 * 2.5
         
-        # SIMPLIFIED HEURISTIC IK:
-        # Instead of complex geometric IK, use empirical mappings
-        # 
-        # Known configurations (from calibrate_home.py):
-        # - Grasp pose: lift=2.2, elbow=-1.2 → arm reaches forward/down
-        # - Higher lift = lower arm position
-        # - More negative elbow = more bent (retracted)
-        # - Less negative elbow = more extended
-        #
-        # The arm's reach with lift=2.2, elbow=-1.2 is approximately 0.4-0.5m
-        # For 1m reach, we need to extend the elbow more (less negative)
+        R0 = 0.0758 * 2.5
+        Z0 = 0.119 * 2.5
         
-        # Estimate how much to extend based on distance
-        # Base reach at elbow=-1.2 is about 0.4m
-        # Max reach at elbow=0 is about 1.0m (fully extended)
-        BASE_REACH = 0.4
-        MAX_REACH = 1.0
+        r_rel = r_total - R0
+        z_rel = dz - Z0
         
-        # Map distance to elbow angle
-        reach_fraction = np.clip((r_total - BASE_REACH) / (MAX_REACH - BASE_REACH), 0, 1)
-        # elbow: -1.2 (bent) to -0.2 (mostly extended, but not fully straight)
-        elbow_flex = -1.2 + reach_fraction * 1.0  # Range: -1.2 to -0.2
+        # Joint limits for scoring and validation
+        limits = {
+            "lift": (0.0, 3.5),
+            "elbow": (-3.14158, 0.0),
+            "wrist": (-2.5, 1.2)
+        }
         
-        # Map height to shoulder lift
-        # Higher target = lower lift value
-        # Target at z=0.05 (low) → lift=2.4 (arm reaching down)
-        # Target at z=0.30 (high) → lift=1.8 (arm more horizontal)
-        SHOULDER_HEIGHT = 0.30  # Approximate shoulder height above ground
-        height_diff = dz - SHOULDER_HEIGHT
-        # Map height difference to shoulder_lift adjustment
-        shoulder_lift = 2.2 - height_diff * 2.0  # Adjust based on height
+        best_score = -float('inf')
+        found_sol = False
         
-        # Wrist flex to keep gripper roughly level or slightly down
-        wrist_flex = -0.5 + height_diff * 0.5
+        # Search for optimal approach angle phi (angle of gripper relative to horizontal)
+        for phi in np.linspace(-np.pi, 0.5 * np.pi, 64):
+            r_w = r_rel - L3 * np.cos(phi)
+            z_w = z_rel - L3 * np.sin(phi)
+            
+            dist_sq = r_w**2 + z_w**2
+            dist = np.sqrt(dist_sq)
+            
+            if dist > (L1 + L2) or dist < abs(L1 - L2):
+                continue
+            
+            for elbow_sign in [-1, 1]:
+                cos_elbow = (dist_sq - L1**2 - L2**2) / (2 * L1 * L2)
+                th2_rel = elbow_sign * np.arccos(np.clip(cos_elbow, -1, 1))
+                
+                alpha = np.arctan2(z_w, r_w)
+                beta = np.arctan2(L2 * np.sin(th2_rel), L1 + L2 * np.cos(th2_rel))
+                th1 = alpha - beta
+                
+                # Map to joint space using URDF-derived offsets
+                s_lift = th1 + 0.228
+                e_flex = th2_rel - 1.571
+                w_flex = phi - (th1 + th2_rel) + 1.0
+                
+                # Validate against hard limits
+                if not (limits["lift"][0] <= s_lift <= limits["lift"][1] and
+                        limits["elbow"][0] <= e_flex <= limits["elbow"][1] and
+                        limits["wrist"][0] <= w_flex <= limits["wrist"][1]):
+                    continue
+                
+                # Scoring function:
+                # 1. Strong preference for lower shoulder (smaller s_lift) for extending forward
+                score = -2.0 * s_lift 
+                
+                # 2. Preference for joints to be away from limits
+                for val, lim in [(s_lift, limits["lift"]), (e_flex, limits["elbow"]), (w_flex, limits["wrist"])]:
+                    center = (lim[0] + lim[1]) / 2.0
+                    span = lim[1] - lim[0]
+                    score -= 0.5 * (abs(val - center) / span)**2
+                
+                # 3. Preference for downward approach phi for grasping (~ -1.2 rad)
+                score -= 0.5 * abs(phi + 1.2) 
+                
+                if score > best_score:
+                    best_score = score
+                    best_q[0] = np.clip(pan, -1.57, 1.57)
+                    best_q[1] = s_lift
+                    best_q[2] = e_flex
+                    best_q[3] = w_flex
+                    best_q[4] = 0.0 # wrist_roll
+                    found_sol = True
         
-        # Clamp to joint limits
-        shoulder_lift = np.clip(shoulder_lift, 0.5, 3.0)
-        elbow_flex = np.clip(elbow_flex, -2.5, -0.1)
-        wrist_flex = np.clip(wrist_flex, -2.0, 1.0)
-        pan = np.clip(pan, -1.5, 1.5)
-        
-        # Apply joint angles
-        best_q[0] = pan           # shoulder_pan
-        best_q[1] = shoulder_lift # shoulder_lift
-        best_q[2] = elbow_flex    # elbow_flex
-        best_q[3] = wrist_flex    # wrist_flex
-        best_q[4] = 0.0           # wrist_roll
-        
-        print(f"[IK] Pan={best_q[0]:.2f} Lift={best_q[1]:.2f} Elbow={best_q[2]:.2f} Wrist={best_q[3]:.2f}")
-        print(f"[IK] reach_fraction={reach_fraction:.2f}, height_diff={height_diff:.2f}")
-        
+        if not found_sol:
+            # Fallback: update pan only
+            best_q[0] = np.clip(pan, -1.57, 1.57)
+            
         return best_q
+        
+    def compute_rmp_action(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None) -> np.ndarray:
+        """Use RMPflow to compute the next joint positions.
+        
+        Args:
+            target_pos: Target position for the end-effector
+            target_quat: Optional target orientation (quaternion [w, x, y, z])
+            
+        Returns:
+            Target joint positions for the next timestep
+        """
+        # Update RMPflow with current robot state
+        self._rmpflow.set_robot_state(
+            self.robot_articulation.get_joint_positions(),
+            self.robot_articulation.get_joint_velocities()
+        )
+        
+        # Set target for RMPflow
+        self._rmpflow.set_end_effector_target(
+            target_position=target_pos,
+            target_orientation=target_quat
+        )
+        
+        # Compute joint velocities from RMPflow
+        action = self._motion_policy.get_next_articulation_action(step_size=1/60.0)
+        
+        # Integrate velocities to get target positions (Isaac Sim Articulation controller usually takes positions)
+        current_pos = self.robot_articulation.get_joint_positions()
+        target_positions = current_pos + action.joint_velocities * (1/60.0)
+        
+        # Clip to joint limits
+        for i, name in enumerate(self.robot.joint_names):
+            low, high = self.robot.joint_limits[name]
+            target_positions[i] = np.clip(target_positions[i], low, high)
+            
+        return target_positions
 
     def _sample_object_positions(self):
         # Move objects to reachable positions

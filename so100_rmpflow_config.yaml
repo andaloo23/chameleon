@@ -1,0 +1,43 @@
+# RMPflow configuration parameters
+api_version: 1.0
+
+joint_limit_buffers: [.01, .01, .01, .01, .01]
+
+# Collision parameters
+body_cylinders:
+  - name: base
+    pt1: [0, 0, 0]
+    pt2: [0, 0, 0.2]
+    radius: 0.2
+
+# Motion policies and weights
+joint_velocity_cap: 1.0 # rad/s
+
+# Parameters for the end-effector target policy
+target_rmp:
+  metric_scalar: 100.0
+  position_gain: 20.0
+  damping_gain: 30.0
+  robust_position_gain: 5.0
+  robust_orientation_gain: 1.0
+  inertia: 1.0
+
+# Parameters for the joint space target policy (keeps arm in preferred posture)
+cspace_target_rmp:
+  metric_scalar: 1.0
+  position_gain: 10.0
+  damping_gain: 20.0
+  robust_position_gain: 1.0
+  inertia: 1.0
+
+# Self-collision avoidance
+self_collision_rmp:
+  metric_scalar: 10.0
+  margin: 0.05
+  damping_gain: 10.0
+
+# Obstacle avoidance
+obstacle_rmp:
+  metric_scalar: 10.0
+  margin: 0.1
+  damping_gain: 50.0
