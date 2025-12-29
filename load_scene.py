@@ -523,42 +523,6 @@ class IsaacPickPlaceEnv:
             best_q[0] = np.clip(pan, -1.57, 1.57)
             
         return best_q
-        
-    def compute_rmp_action(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None) -> np.ndarray:
-        """Use RMPflow to compute the next joint positions.
-        
-        Args:
-            target_pos: Target position for the end-effector
-            target_quat: Optional target orientation (quaternion [w, x, y, z])
-            
-        Returns:
-            Target joint positions for the next timestep
-        """
-        # Update RMPflow with current robot state
-        self._rmpflow.set_robot_state(
-            self.robot_articulation.get_joint_positions(),
-            self.robot_articulation.get_joint_velocities()
-        )
-        
-        # Set target for RMPflow
-        self._rmpflow.set_end_effector_target(
-            target_position=target_pos,
-            target_orientation=target_quat
-        )
-        
-        # Compute joint velocities from RMPflow
-        action = self._motion_policy.get_next_articulation_action(step_size=1/60.0)
-        
-        # Integrate velocities to get target positions (Isaac Sim Articulation controller usually takes positions)
-        current_pos = self.robot_articulation.get_joint_positions()
-        target_positions = current_pos + action.joint_velocities * (1/60.0)
-        
-        # Clip to joint limits
-        for i, name in enumerate(self.robot.joint_names):
-            low, high = self.robot.joint_limits[name]
-            target_positions[i] = np.clip(target_positions[i], low, high)
-            
-        return target_positions
 
     def _sample_object_positions(self):
         # Move objects to reachable positions

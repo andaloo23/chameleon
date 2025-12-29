@@ -100,7 +100,7 @@ class SimulationLoop:
 
             # Initialize waypoints at step 0
             if not _policy._waypoints or step == 0:
-                print(f"\n[RMPFLOW] ========== Planning for cube at {cube_pos} ==========")
+                print(f"\n[IK] ========== Planning for cube at {cube_pos} ==========")
                 robot_base_pos, _ = self.env.robot_articulation.get_world_pose()
                 
                 # Pre-grasp: 20cm above cube
@@ -116,33 +116,27 @@ class SimulationLoop:
                     "lift": target_lift
                 }
                 _policy._state = "APPROACH"
-                print(f"[RMPFLOW] State: APPROACH | Target: {target_pre}")
+                print(f"[IK] State: APPROACH | Target: {target_pre}")
 
             # State Transitions
             reward_engine = getattr(self.env, "reward_engine", None)
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
             
-            ee_pos, _ = self.env.robot_articulation.get_world_pose() # This is base pose, we need EE
-            # Actually, RMPflow handles the EE pose internally, we just provide the target.
-            
             # Use step counts as a simple fallback for state transitions if needed
             if _policy._state == "APPROACH" and step > 250:
                 _policy._state = "GRASP"
-                print(f"[RMPFLOW] State: GRASP | Target: {_policy._waypoints['grasp']}")
+                print(f"[IK] State: GRASP | Target: {_policy._waypoints['grasp']}")
             elif _policy._state == "GRASP" and (grasped_flag or step > 600):
                 _policy._state = "LIFT"
-                print(f"[RMPFLOW] State: LIFT | Target: {_policy._waypoints['lift']}")
+                print(f"[IK] State: LIFT | Target: {_policy._waypoints['lift']}")
 
-            # Compute RMP Action
+            # Compute IK Action
             target_pos = _policy._waypoints.get("pre" if _policy._state == "APPROACH" else 
                                                "grasp" if _policy._state == "GRASP" else "lift")
             
-            # Use a slightly downward orientation for the gripper
-            # RMPflow orientation is [w, x, y, z]
-            target_orient = np.array([0.707, 0, 0.707, 0]) # Pointing down
-            
-            next_q = self.env.compute_rmp_action(target_pos, target_orient)
+            # Use geometric IK to compute joint positions
+            next_q = self.env.compute_ik(target_pos)
             
             # Handle gripper manually
             if _policy._state == "APPROACH":
