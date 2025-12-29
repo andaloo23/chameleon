@@ -1,46 +1,9 @@
-# RMPflow configuration parameters
+# Minimal RMPflow configuration for SO-100 arm
+# Based on Isaac Sim Lula library requirements
 api_version: 1.0
 
-# Artificial buffers around joint limits
+# Artificial buffers around joint limits (one per actuated joint)
 joint_limit_buffers: [0.01, 0.01, 0.01, 0.01, 0.01]
-
-# Motion policies and weights
-joint_velocity_cap: [1.0]
-
-# Canonical Resolve parameters (Required by Lula)
-canonical_resolve:
-  max_acceleration_norm: 50.0
-  projection_tolerance: 0.01
-  damping_gain: 10.0
-
-# Configuration space target policy (keeps arm in default posture)
-c-space_target_rmp:
-  metric_scalar: 1.0
-  position_gain: 10.0
-  damping_gain: 20.0
-  robust_position_term_thresh: 0.5
-  inertia: 1.0
-
-# End-effector target policy
-target_rmp:
-  metric_scalar: 100.0
-  position_gain: 20.0
-  damping_gain: 30.0
-  robust_position_term_thresh: 0.5
-  robust_orientation_term_thresh: 0.1
-  inertia: 1.0
-
-# Self-collision avoidance between robot links
-self_collision_rmp:
-  metric_scalar: 10.0
-  margin: 0.05
-  damping_gain: 10.0
-
-# Obstacle avoidance policy
-obstacle_rmp:
-  metric_scalar: 10.0
-  margin: 0.1
-  damping_gain: 50.0
 
 # Representation of the robot body for collision avoidance
 body_cylinders:
