@@ -25,14 +25,12 @@ UsdGeom = None
 UsdPhysics = None
 Usd = None
 SO100Robot = None
-RmpFlow = None
-ArticulationMotionPolicy = None
 
 
 def _ensure_isaac_sim(headless=False):
     """Create the SimulationApp and late-import Isaac APIs on first use."""
     global _SIMULATION_APP, _SIM_HEADLESS_FLAG
-    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, Usd, SO100Robot, RmpFlow, ArticulationMotionPolicy
+    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, Usd, SO100Robot
 
     if _SIMULATION_APP is None:
         _SIMULATION_APP = SimulationApp({
@@ -46,7 +44,6 @@ def _ensure_isaac_sim(headless=False):
         from omni.isaac.sensor import Camera as _Camera
         from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics, Usd as _Usd
         from robot import SO100Robot as _SO100Robot
-        from omni.isaac.motion_generation import RmpFlow as _RmpFlow, ArticulationMotionPolicy as _ArticulationMotionPolicy
 
         World = _World
         DynamicCuboid = _DynamicCuboid
@@ -57,14 +54,13 @@ def _ensure_isaac_sim(headless=False):
         UsdPhysics = _UsdPhysics
         Usd = _Usd
         SO100Robot = _SO100Robot
-        RmpFlow = _RmpFlow
-        ArticulationMotionPolicy = _ArticulationMotionPolicy
         initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
     elif headless != _SIM_HEADLESS_FLAG:
         print(f"[warn] SimulationApp already initialized with headless={_SIM_HEADLESS_FLAG}")
 
     return _SIMULATION_APP
+
 
 
 class IsaacPickPlaceEnv:
@@ -200,16 +196,6 @@ class IsaacPickPlaceEnv:
         urdf_path = os.path.join(self.current_dir, "so100.urdf")
         self.robot = SO100Robot(self.world, urdf_path)
         self.robot_articulation = self.robot.get_robot()
-        
-        # Initialize RMPflow
-        self._rmpflow = RmpFlow(
-            robot_description_path=os.path.abspath(os.path.join(self.current_dir, "so100_description.yaml")),
-            rmpflow_config_path=os.path.abspath(os.path.join(self.current_dir, "so100_rmpflow_config.yaml")),
-            urdf_path=os.path.abspath(os.path.join(self.current_dir, "so100.urdf")),
-            end_effector_frame_name="gripper",
-            maximum_substep_size=0.033
-        )
-        self._motion_policy = ArticulationMotionPolicy(self.robot_articulation, self._rmpflow)
         
         self._base_fixture_pose = None
         self._workspace_origin_xy = None
