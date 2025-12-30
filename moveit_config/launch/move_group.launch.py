@@ -20,8 +20,8 @@ def generate_launch_description():
     # Get package directory
     pkg_share = get_package_share_directory('so100_moveit_config')
     
-    # Load URDF
-    urdf_file = os.path.join(pkg_share, 'urdf', 'so100.urdf')
+    # Load URDF (use the ROS2-compatible version with package:// paths)
+    urdf_file = os.path.join(pkg_share, 'urdf', 'so100_ros.urdf')
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
     
@@ -35,9 +35,6 @@ def generate_launch_description():
     
     # Load joint limits
     joint_limits_yaml = load_yaml('so100_moveit_config', 'config/joint_limits.yaml')
-    
-    # Load OMPL planning config
-    ompl_yaml = load_yaml('so100_moveit_config', 'config/ompl_planning.yaml')
     
     # Robot State Publisher
     robot_state_publisher = Node(
@@ -59,12 +56,9 @@ def generate_launch_description():
                 'robot_description': robot_description,
                 'robot_description_semantic': robot_description_semantic,
                 'robot_description_kinematics': kinematics_yaml,
-                'robot_description_planning': {
-                    'joint_limits': joint_limits_yaml,
-                },
-                'planning_pipelines': ['ompl'],
-                'ompl': ompl_yaml,
                 'use_sim_time': True,
+                'publish_robot_description': True,
+                'publish_robot_description_semantic': True,
             },
         ],
     )
