@@ -1,0 +1,31 @@
+# MoveIt2 Jazzy move_group parameters
+move_group:
+  use_sim_time: true
+  publish_robot_description: true
+  publish_robot_description_semantic: true
+  
+  # Planning pipelines  
+  planning_pipelines:
+    - ompl
+  default_planning_pipeline: ompl
+  
+  # OMPL pipeline configuration
+  ompl:
+    planning_plugin: ompl_interface/OMPLPlanner
+    request_adapters:
+      - default_planner_request_adapters/AddTimeOptimalParameterization
+      - default_planner_request_adapters/FixWorkspaceBounds
+      - default_planner_request_adapters/FixStartStateBounds
+      - default_planner_request_adapters/FixStartStateCollision
+      - default_planner_request_adapters/FixStartStatePathConstraints
+    start_state_max_bounds_error: 0.1
+    
+  # Planning scene monitor
+  planning_scene_monitor_options:
+    name: planning_scene_monitor
+    robot_description: robot_description
+    joint_state_topic: /joint_states
+    attached_collision_object_topic: /attached_collision_object
+    publish_planning_scene_topic: /publish_planning_scene
+    monitored_planning_scene_topic: /monitored_planning_scene
+    wait_for_initial_state_timeout: 10.0
