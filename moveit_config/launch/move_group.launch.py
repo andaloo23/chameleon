@@ -44,6 +44,7 @@ def generate_launch_description():
     )
     
     # MoveIt move_group node with proper parameter format for Jazzy
+    # All list parameters must be actual Python lists, not space-separated strings
     move_group_params = {
         'robot_description': robot_description,
         'robot_description_semantic': robot_description_semantic,
@@ -51,10 +52,17 @@ def generate_launch_description():
         'use_sim_time': True,
         'publish_robot_description': True,
         'publish_robot_description_semantic': True,
-        # Planning pipeline - must use correct Jazzy format
+        # Planning pipeline - all arrays must be proper lists
         'move_group.planning_pipelines': ['ompl'],
         'move_group.planning_plugin': 'ompl_interface/OMPLPlanner',
-        'move_group.request_adapters': 'default_planner_request_adapters/AddTimeOptimalParameterization default_planner_request_adapters/FixWorkspaceBounds default_planner_request_adapters/FixStartStateBounds default_planner_request_adapters/FixStartStateCollision default_planner_request_adapters/FixStartStatePathConstraints',
+        # request_adapters MUST be a list, not a space-separated string
+        'move_group.request_adapters': [
+            'default_planner_request_adapters/AddTimeOptimalParameterization',
+            'default_planner_request_adapters/FixWorkspaceBounds',
+            'default_planner_request_adapters/FixStartStateBounds',
+            'default_planner_request_adapters/FixStartStateCollision',
+            'default_planner_request_adapters/FixStartStatePathConstraints',
+        ],
         'move_group.start_state_max_bounds_error': 0.1,
     }
     
