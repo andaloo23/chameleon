@@ -54,13 +54,9 @@
   <disable_collisions link1="lower_arm" link2="wrist" reason="Adjacent"/>
   <disable_collisions link1="wrist" link2="gripper" reason="Adjacent"/>
   <disable_collisions link1="gripper" link2="jaw" reason="Adjacent"/>
-  <disable_collisions link1="wrist" link2="wrist_camera" reason="Adjacent"/>
-  <disable_collisions link1="base" link2="top_camera" reason="Adjacent"/>
-  <disable_collisions link1="base" link2="side_camera" reason="Adjacent"/>
   
   <!-- Additional collision pairs to disable -->
   <disable_collisions link1="base" link2="upper_arm" reason="Never"/>
   <disable_collisions link1="shoulder" link2="lower_arm" reason="Never"/>
-  <disable_collisions link1="gripper" link2="wrist_camera" reason="Never"/>
   
 </robot>
