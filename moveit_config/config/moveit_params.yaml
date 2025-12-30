@@ -5,27 +5,77 @@ move_group:
   publish_robot_description_semantic: true
   
   # Planning pipelines  
-  planning_pipelines:
-    - ompl
-  default_planning_pipeline: ompl
+  planning_pipelines: ["ompl"]
+  default_planning_pipeline: "ompl"
   
   # OMPL pipeline configuration
   ompl:
-    planning_plugin: ompl_interface/OMPLPlanner
+    planning_plugin: "ompl_interface/OMPLPlanner"
     request_adapters:
-      - default_planner_request_adapters/AddTimeOptimalParameterization
-      - default_planner_request_adapters/FixWorkspaceBounds
-      - default_planner_request_adapters/FixStartStateBounds
-      - default_planner_request_adapters/FixStartStateCollision
-      - default_planner_request_adapters/FixStartStatePathConstraints
+      - "default_planner_request_adapters/AddTimeOptimalParameterization"
+      - "default_planner_request_adapters/FixWorkspaceBounds"
+      - "default_planner_request_adapters/FixStartStateBounds"
+      - "default_planner_request_adapters/FixStartStateCollision"
+      - "default_planner_request_adapters/FixStartStatePathConstraints"
     start_state_max_bounds_error: 0.1
+    
+    # Arm planning group configuration
+    arm:
+      planner_configs:
+        - SBLkConfigDefault
+        - ESTkConfigDefault
+        - LBKPIECEkConfigDefault
+        - BKPIECEkConfigDefault
+        - KPIECEkConfigDefault
+        - RRTkConfigDefault
+        - RRTConnectkConfigDefault
+        - RRTstarkConfigDefault
+        - TRRTkConfigDefault
+        - PRMkConfigDefault
+        - PRMstarkConfigDefault
+        - FMTkConfigDefault
+        - BFMTkConfigDefault
+        - PDSTkConfigDefault
+        - STRIDEkConfigDefault
+        - BiTRRTkConfigDefault
+        - LBTRRTkConfigDefault
+        - BiESTkConfigDefault
+        - ProjESTkConfigDefault
+        - LazyPRMkConfigDefault
+        - LazyPRMstarkConfigDefault
+        - SPARSkConfigDefault
+        - SPARStwokConfigDefault
+      projection_evaluator: "joints(shoulder_pan,shoulder_lift)"
+      longest_valid_segment_fraction: 0.005
+
+    # Gripper planning group configuration
+    gripper:
+      planner_configs:
+        - RRTConnectkConfigDefault
+      projection_evaluator: "joints(gripper)"
+      longest_valid_segment_fraction: 0.005
+
+    # Planner configurations
+    planner_configs:
+      SBLkConfigDefault:
+        type: geometric::SBL
+      RRTConnectkConfigDefault:
+        type: geometric::RRTConnect
+        range: 0.0  # Max step size if non-zero
+      RRTkConfigDefault:
+        type: geometric::RRT
+        range: 0.0
+      RRTstarkConfigDefault:
+        type: geometric::RRTstar
+        range: 0.0
+      # ... other planners can be added if needed, but RRTConnect is the default
     
   # Planning scene monitor
   planning_scene_monitor_options:
-    name: planning_scene_monitor
-    robot_description: robot_description
-    joint_state_topic: /joint_states
-    attached_collision_object_topic: /attached_collision_object
-    publish_planning_scene_topic: /publish_planning_scene
-    monitored_planning_scene_topic: /monitored_planning_scene
+    name: "planning_scene_monitor"
+    robot_description: "robot_description"
+    joint_state_topic: "/joint_states"
+    attached_collision_object_topic: "/attached_collision_object"
+    publish_planning_scene_topic: "/publish_planning_scene"
+    monitored_planning_scene_topic: "/monitored_planning_scene"
     wait_for_initial_state_timeout: 10.0

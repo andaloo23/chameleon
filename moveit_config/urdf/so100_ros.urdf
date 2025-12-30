@@ -5,12 +5,13 @@
   <material name="3d_printed">
     <color rgba="1.0 0.82 0.12 1.0"/>
   </material>
-  <material name="sts3215">
-    <color rgba="0.1 0.1 0.1 1.0"/>
-  </material>
-  <material name="camera_material">
-    <color rgba="0.7 0.7 0.7 1.0"/>
-  </material>
+
+  <!-- Dummy root link to avoid KDL warnings about root link inertia -->
+  <link name="world"/>
+  <joint name="world_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="base"/>
+  </joint>
 
   <!-- Link base -->
   <link name="base">
