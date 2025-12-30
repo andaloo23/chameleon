@@ -33,13 +33,6 @@ def generate_launch_description():
     # Load kinematics config
     kinematics_yaml = load_yaml('so100_moveit_config', 'config/kinematics.yaml')
     
-    # OMPL Planning configuration
-    ompl_planning_config = {
-        'planning_plugin': 'ompl_interface/OMPLPlanner',
-        'request_adapters': 'default_planner_request_adapters/AddTimeOptimalParameterization default_planner_request_adapters/FixWorkspaceBounds default_planner_request_adapters/FixStartStateBounds default_planner_request_adapters/FixStartStateCollision default_planner_request_adapters/FixStartStatePathConstraints',
-        'start_state_max_bounds_error': 0.1,
-    }
-    
     # Robot State Publisher
     robot_state_publisher = Node(
         package='robot_state_publisher',
@@ -50,25 +43,26 @@ def generate_launch_description():
         }],
     )
     
-    # MoveIt move_group node
+    # MoveIt move_group node with proper parameter format for Jazzy
+    move_group_params = {
+        'robot_description': robot_description,
+        'robot_description_semantic': robot_description_semantic,
+        'robot_description_kinematics': kinematics_yaml,
+        'use_sim_time': True,
+        'publish_robot_description': True,
+        'publish_robot_description_semantic': True,
+        # Planning pipeline - must use correct Jazzy format
+        'move_group.planning_pipelines': ['ompl'],
+        'move_group.planning_plugin': 'ompl_interface/OMPLPlanner',
+        'move_group.request_adapters': 'default_planner_request_adapters/AddTimeOptimalParameterization default_planner_request_adapters/FixWorkspaceBounds default_planner_request_adapters/FixStartStateBounds default_planner_request_adapters/FixStartStateCollision default_planner_request_adapters/FixStartStatePathConstraints',
+        'move_group.start_state_max_bounds_error': 0.1,
+    }
+    
     move_group_node = Node(
         package='moveit_ros_move_group',
         executable='move_group',
         output='screen',
-        parameters=[
-            {
-                'robot_description': robot_description,
-                'robot_description_semantic': robot_description_semantic,
-                'robot_description_kinematics': kinematics_yaml,
-                'use_sim_time': True,
-                'publish_robot_description': True,
-                'publish_robot_description_semantic': True,
-                # Planning pipeline configuration
-                'planning_pipelines': ['ompl'],
-                'default_planning_pipeline': 'ompl',
-                'ompl': ompl_planning_config,
-            },
-        ],
+        parameters=[move_group_params],
     )
     
     return LaunchDescription([
