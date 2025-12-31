@@ -1,9 +1,24 @@
 # OMPL Planning Pipeline Configuration for SO-100
-planning_plugin: ompl_interface/OMPLPlanner
+planning_plugin: "ompl_interface/OMPLPlanner"
 request_adapters:
-  - default_planner_request_adapters/AddTimeOptimalParameterization
-  - default_planner_request_adapters/FixWorkspaceBounds
-  - default_planner_request_adapters/FixStartStateBounds
-  - default_planner_request_adapters/FixStartStateCollision
-  - default_planner_request_adapters/FixStartStatePathConstraints
+  - "default_planner_request_adapters/AddTimeOptimalParameterization"
+  - "default_planner_request_adapters/FixWorkspaceBounds"
+  - "default_planner_request_adapters/FixStartStateBounds"
+  - "default_planner_request_adapters/FixStartStateCollision"
+  - "default_planner_request_adapters/FixStartStatePathConstraints"
 start_state_max_bounds_error: 0.1
+# Group configurations
+arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: "joints(shoulder_pan,shoulder_lift)"
+  longest_valid_segment_fraction: 0.005
+gripper:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: "joints(gripper)"
+  longest_valid_segment_fraction: 0.005
+planner_configs:
+  RRTConnectkConfigDefault:
+    type: "geometric::RRTConnect"
+    range: 0.0
