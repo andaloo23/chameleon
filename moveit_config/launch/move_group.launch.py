@@ -10,12 +10,15 @@ from moveit_configs_utils import MoveItConfigsBuilder
 
 
 def generate_launch_description():
+    pkg_name = "so100_moveit_config"
+    pkg_share = get_package_share_directory(pkg_name)
+
     moveit_config = (
-        MoveItConfigsBuilder("so_arm100", package_name="so100_moveit_config")
+        MoveItConfigsBuilder("so_arm100", package_name=pkg_name)
         .robot_description(file_path="urdf/so_arm100.urdf")
         .robot_description_semantic(file_path="config/so_arm100.srdf")
-        .robot_description_kinematics(file_path="config/kinematics.yaml")
-        .joint_limits(file_path="config/joint_limits.yaml")
+        .robot_description_kinematics(file_path="config/so_arm100.kinematics.yaml")
+        .joint_limits(file_path="config/so_arm100.joint_limits.yaml")
         .planning_pipelines(pipelines=["ompl"])
         .planning_scene_monitor(
             publish_planning_scene=True,
