@@ -11,7 +11,11 @@ SRC_DIR="$WS_DIR/src/$PKG_NAME"
 
 echo "=== Starting SO-100 MoveIt2 Setup ==="
 
-# 2. Preparation
+# 2. Dependencies
+echo "Installing Python dependencies..."
+pip install pyyaml numpy
+
+# 3. Preparation
 mkdir -p "$SRC_DIR/config"
 mkdir -p "$SRC_DIR/launch"
 mkdir -p "$SRC_DIR/urdf"
