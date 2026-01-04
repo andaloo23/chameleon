@@ -96,25 +96,47 @@ class MoveItBridgeServer(Node):
         request.motion_plan_request.num_planning_attempts = 10
         request.motion_plan_request.allowed_planning_time = 5.0
         
-        constraints = Constraints()
-        from moveit_msgs.msg import PositionConstraint, OrientationConstraint
+        # Manually build Position and Orientation constraints to avoid moveit_msgs.utils mismatch
+        from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint
+        from shape_msgs.msg import SolidPrimitive
         
-        # Simplified planning request (pose goal)
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = "base"
-        pose_stamped.pose.position.x = float(pose_dict['pos'][0])
-        pose_stamped.pose.position.y = float(pose_dict['pos'][1])
-        pose_stamped.pose.position.z = float(pose_dict['pos'][2])
-        pose_stamped.pose.orientation.x = float(pose_dict['quat'][0])
-        pose_stamped.pose.orientation.y = float(pose_dict['quat'][1])
-        pose_stamped.pose.orientation.z = float(pose_dict['quat'][2])
-        pose_stamped.pose.orientation.w = float(pose_dict['quat'][3])
+        goal_constraint = Constraints()
         
-        # We wrap it in a goal constraint
-        from moveit_msgs.utils import constraints_from_pose
-        request.motion_plan_request.goal_constraints.append(
-            constraints_from_pose(pose_stamped, 0.01, 0.01)
-        )
+        # Position constraint
+        pc = PositionConstraint()
+        pc.header.frame_id = "base"
+        pc.link_name = "wrist_roll" # The target link to move
+        
+        # Define a small tolerance box for the position
+        s = SolidPrimitive()
+        s.type = SolidPrimitive.BOX
+        s.dimensions = [0.01, 0.01, 0.01]
+        pc.constraint_region.primitives.append(s)
+        
+        # Set the target position in the constraint region
+        target_pose = Pose()
+        target_pose.position.x = float(pose_dict['pos'][0])
+        target_pose.position.y = float(pose_dict['pos'][1])
+        target_pose.position.z = float(pose_dict['pos'][2])
+        pc.constraint_region.primitive_poses.append(target_pose)
+        pc.weight = 1.0
+        goal_constraint.position_constraints.append(pc)
+        
+        # Orientation constraint
+        oc = OrientationConstraint()
+        oc.header.frame_id = "base"
+        oc.link_name = "wrist_roll"
+        oc.orientation.x = float(pose_dict['quat'][0])
+        oc.orientation.y = float(pose_dict['quat'][1])
+        oc.orientation.z = float(pose_dict['quat'][2])
+        oc.orientation.w = float(pose_dict['quat'][3])
+        oc.absolute_x_axis_tolerance = 0.05
+        oc.absolute_y_axis_tolerance = 0.05
+        oc.absolute_z_axis_tolerance = 0.05
+        oc.weight = 1.0
+        goal_constraint.orientation_constraints.append(oc)
+        
+        request.motion_plan_request.goal_constraints.append(goal_constraint)
         
         future = self.plan_client.call_async(request)
         rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
