@@ -104,7 +104,8 @@ class SimulationLoop:
             # Helper to plan to a target
             def plan_to(target_pos, quat=None):
                 if not moveit: return None
-                from geometry_msgs.msg import Pose
+                # Use the client's internal Pose helper to avoid ROS2 dependencies in 3.11
+                from moveit_interface import Pose
                 pose = Pose()
                 pose.position.x = float(target_pos[0])
                 pose.position.y = float(target_pos[1])

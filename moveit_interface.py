@@ -1,178 +1,130 @@
 """
-MoveIt2 Python Interface for SO-100 Robot
-This module provides motion planning capabilities using MoveIt2.
+MoveIt2 Socket Client for SO-100 Robot
+This module provides a lightweight interface to the MoveIt2 Bridge Server.
+It does NOT require rclpy, making it compatible with Isaac Sim's bundled Python.
 """
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Pose, PoseStamped
-from moveit_msgs.msg import RobotState, Constraints
-from moveit_msgs.srv import GetPositionIK, GetMotionPlan
-from sensor_msgs.msg import JointState
-import numpy as np
-from typing import Optional, List, Tuple
+import socket
+import json
+import time
+from typing import Optional, List, Dict, Any
 
+class Point:
+    def __init__(self, x=0.0, y=0.0, z=0.0):
+        self.x, self.y, self.z = x, y, z
 
-class MoveItInterface(Node):
-    """MoveIt2 interface for SO-100 robot motion planning."""
-    
+class Quaternion:
+    def __init__(self, x=0.0, y=0.0, z=0.0, w=1.0):
+        self.x, self.y, self.z, self.w = x, y, z, w
+
+class Pose:
     def __init__(self):
-        super().__init__('so100_moveit_interface')
+        self.position = Point()
+        self.orientation = Quaternion()
+
+class MoveItInterface:
+    """Lightweight Socket client for MoveIt2 motion planning."""
+    
+    def __init__(self, host='127.0.0.1', port=65432):
+        self.host = host
+        self.port = port
+        self.sock = None
+        self._connect()
         
-        # Planning group names
+        # Planning group names (for reference)
         self.arm_group = "arm"
         self.gripper_group = "gripper"
-        
-        # Joint names (must match URDF)
-        self.arm_joint_names = [
-            "shoulder_pan",
-            "shoulder_lift", 
-            "elbow_flex",
-            "wrist_flex",
-            "wrist_roll"
-        ]
+        self.arm_joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
         self.gripper_joint_names = ["gripper"]
+
+    def _connect(self):
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.host, self.port))
+            print(f"[MoveIt] Connected to Bridge Server at {self.host}:{self.port}")
+        except Exception as e:
+            print(f"[MoveIt] [ERROR] Could not connect to Bridge Server: {e}")
+            self.sock = None
+
+    def _send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.sock:
+            self._connect()
+            if not self.sock:
+                return {"status": "error", "message": "Not connected"}
         
-        # Service clients for IK and motion planning
-        self.ik_client = self.create_client(GetPositionIK, 'compute_ik')
-        self.plan_client = self.create_client(GetMotionPlan, 'plan_kinematic_path')
-        
-        # Publisher for joint states (to sync simulation -> MoveIt)
-        self.joint_state_pub = self.create_publisher(JointState, 'joint_states', 10)
-        
-        # Wait for services
-        self.get_logger().info('Waiting for MoveIt2 services...')
-        self.ik_client.wait_for_service(timeout_sec=10.0)
-        self.plan_client.wait_for_service(timeout_sec=10.0)
-        self.get_logger().info('MoveIt2 services available!')
-        
-    def compute_ik(self, target_pose: Pose, 
-                   current_joint_state: Optional[List[float]] = None) -> Optional[List[float]]:
-        """Compute inverse kinematics for a target pose.
-        
-        Args:
-            target_pose: Target end-effector pose
-            current_joint_state: Current joint positions (for seeding IK)
-            
-        Returns:
-            Joint positions if IK solution found, None otherwise
-        """
-        request = GetPositionIK.Request()
-        request.ik_request.group_name = self.arm_group
-        
-        # Set target pose
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = "base"
-        pose_stamped.pose = target_pose
-        request.ik_request.pose_stamped = pose_stamped
-        
-        # Set current state as seed if provided
-        if current_joint_state is not None:
-            robot_state = RobotState()
-            robot_state.joint_state.name = self.arm_joint_names
-            robot_state.joint_state.position = current_joint_state
-            request.ik_request.robot_state = robot_state
-            
-        # Call IK service
-        future = self.ik_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
-        
-        if future.result() is not None:
-            result = future.result()
-            if result.error_code.val == 1:  # SUCCESS
-                return list(result.solution.joint_state.position)
-        return None
-    
-    def plan_to_pose(self, target_pose: Pose) -> Optional[List[List[float]]]:
+        try:
+            self.sock.sendall(json.dumps(request).encode('utf-8'))
+            data = self.sock.recv(65536)
+            if not data:
+                self.sock = None
+                return {"status": "error", "message": "Connection lost"}
+            return json.loads(data.decode('utf-8'))
+        except Exception as e:
+            print(f"[MoveIt] [ERROR] Socket error: {e}")
+            self.sock = None
+            return {"status": "error", "message": str(e)}
+
+    def publish_joint_state(self, arm_joints: List[float], gripper_joint: float):
+        """Publish current joint states to MoveIt via Bridge."""
+        request = {
+            "command": "publish_joint_state",
+            "arm_joints": [float(j) for j in arm_joints],
+            "gripper_joint": float(gripper_joint)
+        }
+        self._send_request(request)
+
+    def plan_to_pose(self, pose_msg: Any) -> Optional[List[List[float]]]:
         """Plan a trajectory to a target pose.
         
         Args:
-            target_pose: Target end-effector pose
-            
-        Returns:
-            List of waypoints (joint positions) if plan found, None otherwise
+            pose_msg: We expect an object with 'position' and 'orientation' 
+                     attributes, each with x, y, z (and w) fields.
         """
-        request = GetMotionPlan.Request()
-        request.motion_plan_request.group_name = self.arm_group
-        request.motion_plan_request.num_planning_attempts = 10
-        request.motion_plan_request.allowed_planning_time = 5.0
+        # Convert ROS-like pose message to dict for JSON transfer
+        pose_dict = {
+            "pos": [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z],
+            "quat": [pose_msg.orientation.x, pose_msg.orientation.y, 
+                     pose_msg.orientation.z, pose_msg.orientation.w]
+        }
         
-        # Set goal constraints from target pose
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = "base"
-        pose_stamped.pose = target_pose
+        request = {
+            "command": "plan_to_pose",
+            "pose": pose_dict
+        }
         
-        # Call planning service
-        future = self.plan_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
-        
-        if future.result() is not None:
-            result = future.result()
-            if result.motion_plan_response.error_code.val == 1:  # SUCCESS
-                trajectory = result.motion_plan_response.trajectory.joint_trajectory
-                waypoints = []
-                for point in trajectory.points:
-                    waypoints.append(list(point.positions))
-                return waypoints
+        resp = self._send_request(request)
+        if resp.get("status") == "success":
+            return resp.get("trajectory")
         return None
-    
-    def plan_to_joint_positions(self, target_joints: List[float]) -> Optional[List[List[float]]]:
-        """Plan a trajectory to target joint positions.
-        
-        Args:
-            target_joints: Target joint positions for the arm
-            
-        Returns:
-            List of waypoints (joint positions) if plan found, None otherwise
-        """
-        request = GetMotionPlan.Request()
-        request.motion_plan_request.group_name = self.arm_group
-        request.motion_plan_request.num_planning_attempts = 10
-        request.motion_plan_request.allowed_planning_time = 5.0
-        
-        # Set goal as joint constraints
-        constraints = Constraints()
-        from moveit_msgs.msg import JointConstraint
-        for i, name in enumerate(self.arm_joint_names):
-            jc = JointConstraint()
-            jc.joint_name = name
-            jc.position = target_joints[i]
-            jc.tolerance_above = 0.01
-            jc.tolerance_below = 0.01
-            jc.weight = 1.0
-            constraints.joint_constraints.append(jc)
-        request.motion_plan_request.goal_constraints.append(constraints)
-        
-        # Call planning service
-        future = self.plan_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
-        
-        if future.result() is not None:
-            result = future.result()
-            if result.motion_plan_response.error_code.val == 1:  # SUCCESS
-                trajectory = result.motion_plan_response.trajectory.joint_trajectory
-                waypoints = []
-                for point in trajectory.points:
-                    waypoints.append(list(point.positions))
-                return waypoints
-        return None
-    
-    def publish_joint_state(self, arm_joints: List[float], gripper_joint: float):
-        """Publish current joint states to MoveIt."""
-        msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = self.arm_joint_names + self.gripper_joint_names
-        msg.position = list(arm_joints) + [gripper_joint]
-        self.joint_state_pub.publish(msg)
 
+    def compute_ik(self, target_pos: List[float], target_quat: List[float], 
+                   seed_joints: Optional[List[float]] = None) -> Optional[List[float]]:
+        """Compute inverse kinematics via Bridge."""
+        pose_dict = {
+            "pos": [float(x) for x in target_pos],
+            "quat": [float(x) for x in target_quat]
+        }
+        
+        request = {
+            "command": "compute_ik",
+            "pose": pose_dict,
+            "seed": seed_joints
+        }
+        
+        resp = self._send_request(request)
+        if resp.get("status") == "success":
+            return resp.get("solution")
+        return None
+
+    def destroy_node(self):
+        """Mock method for compatibility with rclpy cleanup code."""
+        if self.sock:
+            self.sock.close()
+            self.sock = None
 
 def init_moveit() -> MoveItInterface:
-    """Initialize ROS2 and create MoveIt interface."""
-    if not rclpy.ok():
-        rclpy.init()
+    """Initialize MoveIt bridge client."""
     return MoveItInterface()
 
-
 def shutdown_moveit(interface: MoveItInterface):
-    """Shutdown MoveIt interface and ROS2."""
+    """Shutdown MoveIt bridge client."""
     interface.destroy_node()
-    rclpy.shutdown()
