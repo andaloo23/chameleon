@@ -33,11 +33,11 @@ class MoveItInterface(Node):
         self.gripper_joint_names = ["gripper"]
         
         # Service clients for IK and motion planning
-        self.ik_client = self.create_client(GetPositionIK, '/compute_ik')
-        self.plan_client = self.create_client(GetMotionPlan, '/plan_kinematic_path')
+        self.ik_client = self.create_client(GetPositionIK, 'compute_ik')
+        self.plan_client = self.create_client(GetMotionPlan, 'plan_kinematic_path')
         
-        # Publisher for joint commands
-        self.joint_pub = self.create_publisher(JointState, '/joint_commands', 10)
+        # Publisher for joint states (to sync simulation -> MoveIt)
+        self.joint_state_pub = self.create_publisher(JointState, 'joint_states', 10)
         
         # Wait for services
         self.get_logger().info('Waiting for MoveIt2 services...')
@@ -156,27 +156,19 @@ class MoveItInterface(Node):
                 return waypoints
         return None
     
-    def create_pose(self, x: float, y: float, z: float,
-                   qx: float = 0.0, qy: float = 0.707, 
-                   qz: float = 0.0, qw: float = 0.707) -> Pose:
-        """Create a Pose message from position and orientation.
-        
-        Default orientation is pointing downward (for pick operations).
-        """
-        pose = Pose()
-        pose.position.x = x
-        pose.position.y = y
-        pose.position.z = z
-        pose.orientation.x = qx
-        pose.orientation.y = qy
-        pose.orientation.z = qz
-        pose.orientation.w = qw
-        return pose
+    def publish_joint_state(self, arm_joints: List[float], gripper_joint: float):
+        """Publish current joint states to MoveIt."""
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = self.arm_joint_names + self.gripper_joint_names
+        msg.position = list(arm_joints) + [gripper_joint]
+        self.joint_state_pub.publish(msg)
 
 
 def init_moveit() -> MoveItInterface:
     """Initialize ROS2 and create MoveIt interface."""
-    rclpy.init()
+    if not rclpy.ok():
+        rclpy.init()
     return MoveItInterface()
 
 

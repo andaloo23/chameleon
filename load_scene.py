@@ -12,6 +12,7 @@ from image_utils import write_png
 from reward_engine import RewardEngine
 from gripper_weld import IntelligentGripperWeld, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
+from moveit_interface import init_moveit, shutdown_moveit
 
 _SIMULATION_APP = None
 _SIM_HEADLESS_FLAG = None
@@ -160,6 +161,14 @@ class IsaacPickPlaceEnv:
         self._build_scene()
         self.reward_engine.initialize()
         self.reward_engine.reset()
+        
+        # Initialize MoveIt Interface
+        try:
+            self.moveit = init_moveit()
+            print("[INFO] MoveIt Interface initialized.")
+        except Exception as e:
+            print(f"[WARN] Failed to initialize MoveIt: {e}")
+            self.moveit = None
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -295,6 +304,11 @@ class IsaacPickPlaceEnv:
         self._force_terminate, self._termination_reason = False, None
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
+        
+        # Sync initial state to MoveIt
+        if self.moveit:
+            self.moveit.publish_joint_state(self._default_joint_positions[:-1], self._default_joint_positions[-1])
+            
         return self._get_observation()
 
     def _get_link_poses(self):
@@ -405,6 +419,10 @@ class IsaacPickPlaceEnv:
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
 
+        # Sync current state to MoveIt
+        if self.moveit:
+            self.moveit.publish_joint_state(ap[:-1], agp)
+
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
         self._validate_state(obs)
@@ -421,6 +439,8 @@ class IsaacPickPlaceEnv:
 
     def shutdown(self):
         self.close()
+        if self.moveit:
+            shutdown_moveit(self.moveit)
         if self.simulation_app: self.simulation_app.close()
 
     def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:

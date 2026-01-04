@@ -85,71 +85,103 @@ class SimulationLoop:
         self.random_policy = functools.partial(_default_random_policy, self.env)
 
     def scripted_policy(self) -> PolicyFn:
-        """IK-based scripted policy for the SO100 arm with corrected kinematics."""
+        """MoveIt-based scripted policy for the SO100 arm."""
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
             # Persistent state for the policy
             if not hasattr(_policy, "_state"):
                 _policy._state = "APPROACH" # APPROACH -> GRASP -> LIFT
-                _policy._waypoints = {}
-                _policy._last_q = None
+                _policy._trajectory = []
+                _policy._traj_idx = 0
 
             cube_pos = observation.get("cube_pos")
             if cube_pos is None:
                 return self.random_policy(observation, step)
 
-            # Initialize waypoints at step 0
-            if not _policy._waypoints or step == 0:
-                print(f"\n[IK] ========== Planning for cube at {cube_pos} ==========")
-                robot_base_pos, _ = self.env.robot_articulation.get_world_pose()
+            # Check if MoveIt interface is available
+            moveit = getattr(self.env, "moveit", None)
+            
+            # Helper to plan to a target
+            def plan_to(target_pos, quat=None):
+                if not moveit: return None
+                from geometry_msgs.msg import Pose
+                pose = Pose()
+                pose.position.x = float(target_pos[0])
+                pose.position.y = float(target_pos[1])
+                pose.position.z = float(target_pos[2])
+                # Downward orientation
+                pose.orientation.x = 0.0
+                pose.orientation.y = 0.707
+                pose.orientation.z = 0.0
+                pose.orientation.w = 0.707
                 
-                # Pre-grasp: 20cm above cube
-                target_pre = np.array(cube_pos) + np.array([0, 0, 0.20])
-                # Grasp: 2cm above cube center (accounting for jaw length)
-                target_grasp = np.array(cube_pos) + np.array([0, 0, 0.02])
-                # Lift: 30cm above table
-                target_lift = np.array(cube_pos) + np.array([0, 0, 0.30])
-                
-                _policy._waypoints = {
-                    "pre": target_pre,
-                    "grasp": target_grasp,
-                    "lift": target_lift
-                }
-                _policy._state = "APPROACH"
-                print(f"[IK] State: APPROACH | Target: {target_pre}")
+                print(f"[MoveIt] Planning to {target_pos}...")
+                return moveit.plan_to_pose(pose)
 
-            # State Transitions
+            # State Transitions and Planning
             reward_engine = getattr(self.env, "reward_engine", None)
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
-            
-            # Use step counts as a simple fallback for state transitions if needed
-            if _policy._state == "APPROACH" and step > 250:
-                _policy._state = "GRASP"
-                print(f"[IK] State: GRASP | Target: {_policy._waypoints['grasp']}")
-            elif _policy._state == "GRASP" and (grasped_flag or step > 600):
-                _policy._state = "LIFT"
-                print(f"[IK] State: LIFT | Target: {_policy._waypoints['lift']}")
 
-            # Compute IK Action
-            target_pos = _policy._waypoints.get("pre" if _policy._state == "APPROACH" else 
-                                               "grasp" if _policy._state == "GRASP" else "lift")
-            
-            # Use geometric IK to compute joint positions
-            next_q = self.env.compute_ik(target_pos)
-            
-            # Handle gripper manually
-            if _policy._state == "APPROACH":
-                next_q[5] = 1.2 # Wide open
-            elif _policy._state == "GRASP":
-                if step > 450 or grasped_flag:
-                    next_q[5] = 0.05 # Close
-                else:
-                    next_q[5] = 1.2 # Stay open until near
-            else:
-                next_q[5] = 0.05 # Keep closed
+            # Plan new phase if trajectory is empty or state changed
+            new_state = None
+            if step == 0 or not _policy._trajectory or _policy._traj_idx >= len(_policy._trajectory):
+                if _policy._state == "APPROACH" and (step > 10 or (not _policy._trajectory and step > 0)):
+                    # Fallback to next state if approach is done (simple heuristic)
+                    if step > 250:
+                        new_state = "GRASP"
+                elif _policy._state == "GRASP" and (grasped_flag or step > 600):
+                    new_state = "LIFT"
+
+                if new_state:
+                    _policy._state = new_state
+                    _policy._trajectory = []
+                    _policy._traj_idx = 0
+                    print(f"[MoveIt] Transitioned to {new_state}")
+
+                # If no trajectory, plan it!
+                if not _policy._trajectory or _policy._traj_idx >= len(_policy._trajectory):
+                    target = None
+                    if _policy._state == "APPROACH":
+                        target = np.array(cube_pos) + np.array([0, 0, 0.20])
+                    elif _policy._state == "GRASP":
+                        target = np.array(cube_pos) + np.array([0, 0, 0.02])
+                    elif _policy._state == "LIFT":
+                        target = np.array(cube_pos) + np.array([0, 0, 0.30])
+                    
+                    if target is not None:
+                        traj = plan_to(target)
+                        if traj:
+                            _policy._trajectory = traj
+                            _policy._traj_idx = 0
+                        else:
+                            print(f"[MoveIt] Planning failed for {_policy._state}, using fallback IK")
+                            # Fallback to single-point IK if planning fails
+                            fallback_q = self.env.compute_ik(target)
+                            _policy._trajectory = [fallback_q[:5].tolist()]
+                            _policy._traj_idx = 0
+
+            # Execute trajectory
+            if _policy._trajectory and _policy._traj_idx < len(_policy._trajectory):
+                arm_q = _policy._trajectory[_policy._traj_idx]
+                _policy._traj_idx += 1
                 
-            return next_q
+                # Construct full 6D action
+                next_q = np.zeros(6, dtype=np.float32)
+                next_q[:5] = arm_q
+                
+                # Handle gripper
+                if _policy._state == "APPROACH":
+                    next_q[5] = 1.2
+                elif _policy._state == "GRASP":
+                    next_q[5] = 0.05 if (step > 450 or grasped_flag) else 1.2
+                else:
+                    next_q[5] = 0.05
+                    
+                return next_q
+            
+            # Absolute fallback
+            return self.env.robot_articulation.get_joint_positions()
 
         return _policy
 
