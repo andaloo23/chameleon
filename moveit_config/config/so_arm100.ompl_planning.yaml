@@ -1,5 +1,6 @@
 # OMPL Planning Pipeline Configuration for SO-100
-# This file MUST be named so_arm100.ompl_planning.yaml for MoveItConfigsBuilder
+# High-level pipeline configuration
+# These parameters will be loaded under the 'ompl' namespace
 planning_plugin: "ompl_interface/OMPLPlanner"
 request_adapters:
   - "default_planner_request_adapters/AddTimeOptimalParameterization"
@@ -9,7 +10,7 @@ request_adapters:
   - "default_planner_request_adapters/FixStartStatePathConstraints"
 start_state_max_bounds_error: 0.1
 
-# Group configurations
+# Group-specific planner settings
 arm:
   planner_configs:
     - RRTConnectkConfigDefault
@@ -23,10 +24,26 @@ gripper:
   projection_evaluator: "joints(gripper)"
   longest_valid_segment_fraction: 0.005
 
+# Planner configuration details
 planner_configs:
   RRTConnectkConfigDefault:
     type: "geometric::RRTConnect"
     range: 0.0
   RRTstarkConfigDefault:
     type: "geometric::RRTstar"
+    range: 0.0
+  SBLkConfigDefault:
+    type: "geometric::SBL"
+    range: 0.0
+  LBKPIECEkConfigDefault:
+    type: "geometric::LBKPIECE"
+    range: 0.0
+  BKPIECEkConfigDefault:
+    type: "geometric::BKPIECE"
+    range: 0.0
+  KPIECEkConfigDefault:
+    type: "geometric::KPIECE"
+    range: 0.0
+  RRTkConfigDefault:
+    type: "geometric::RRT"
     range: 0.0

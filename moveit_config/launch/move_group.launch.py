@@ -1,53 +1,81 @@
 """
-Standard MoveIt2 Launch File for SO-100 Robot
-Uses MoveItConfigsBuilder to resolve ROS2 Jazzy parameter namespaces.
+MoveIt2 Launch File for SO-100 Robot
+This launch file explicitly constructs the parameter structure for MoveIt2 Jazzy.
 """
 import os
+import yaml
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
-from moveit_configs_utils import MoveItConfigsBuilder
+
+
+def load_yaml(package_name, file_path):
+    package_path = get_package_share_directory(package_name)
+    absolute_file_path = os.path.join(package_path, file_path)
+    try:
+        with open(absolute_file_path, 'r') as file:
+            return yaml.safe_load(file)
+    except Exception as e:
+        print(f"Error loading {file_path}: {e}")
+        return None
 
 
 def generate_launch_description():
     pkg_name = 'so100_moveit_config'
-    
-    # MoveItConfigsBuilder automatically looks for:
-    # - config/<robot_name>.srdf
-    # - config/joint_limits.yaml
-    # - config/<robot_name>.kinematics.yaml
-    # - config/<robot_name>.ompl_planning.yaml
-    moveit_config = (
-        MoveItConfigsBuilder("so_arm100", package_name=pkg_name)
-        .robot_description(file_path="urdf/so_arm100.urdf")
-        .robot_description_semantic(file_path="config/so_arm100.srdf")
-        .robot_description_kinematics(file_path="config/so_arm100.kinematics.yaml")
-        .joint_limits(file_path="config/so_arm100.joint_limits.yaml")
-        .planning_pipelines(pipelines=["ompl"])
-        .to_moveit_configs()
-    )
+    pkg_share = get_package_share_directory(pkg_name)
 
-    # Move Group Node
-    # In Jazzy, name must match what the MoveItConfigsBuilder expects
-    move_group_node = Node(
-        package="moveit_ros_move_group",
-        executable="move_group",
-        output="screen",
-        parameters=[
-            moveit_config.to_dict(),
-            {"use_sim_time": True},
-        ],
-    )
+    # 1. Load URDF and SRDF
+    urdf_path = os.path.join(pkg_share, 'urdf', 'so_arm100.urdf')
+    with open(urdf_path, 'r') as f:
+        robot_description = f.read()
 
-    # Robot State Publisher
+    srdf_path = os.path.join(pkg_share, 'config', 'so_arm100.srdf')
+    with open(srdf_path, 'r') as f:
+        robot_description_semantic = f.read()
+
+    # 2. Load YAML configs
+    kinematics_yaml = load_yaml(pkg_name, 'config/kinematics.yaml')
+    joint_limits_yaml = load_yaml(pkg_name, 'config/joint_limits.yaml')
+    ompl_planning_yaml = load_yaml(pkg_name, 'config/ompl_planning.yaml')
+
+    # 3. Construct Parameters for move_group
+    # Note: ROS2 Jazzy's MoveIt implementation is sensitive to depth and type
+    move_group_parameters = {
+        'robot_description': robot_description,
+        'robot_description_semantic': robot_description_semantic,
+        'robot_description_kinematics': kinematics_yaml,
+        'robot_description_planning': joint_limits_yaml,
+        'planning_pipelines': ['ompl'],
+        'default_planning_pipeline': 'ompl',
+        'ompl': ompl_planning_yaml,
+        'use_sim_time': True,
+        # Publishing updates
+        'publish_planning_scene': True,
+        'publish_geometry_updates': True,
+        'publish_state_updates': True,
+        'publish_transforms_updates': True,
+        'monitor_dynamics': False,
+    }
+
+    # 4. Robot State Publisher Node
     robot_state_publisher = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        output="screen",
-        parameters=[
-            moveit_config.robot_description,
-            {"use_sim_time": True},
-        ],
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[{
+            'robot_description': robot_description,
+            'use_sim_time': True,
+        }],
+    )
+
+    # 5. Move Group Node
+    move_group_node = Node(
+        package='moveit_ros_move_group',
+        executable='move_group',
+        name='move_group',
+        output='screen',
+        parameters=[move_group_parameters],
     )
 
     return LaunchDescription([
