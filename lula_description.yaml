@@ -19,7 +19,7 @@ cspace:
   - wrist_roll
 
 # Default joint positions (home)
-default_joint_positions:
+default_q:
   shoulder_pan: 0.0
   shoulder_lift: 2.0
   elbow_flex: -1.0
