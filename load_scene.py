@@ -162,31 +162,10 @@ class IsaacPickPlaceEnv:
         self.reward_engine.initialize()
         self.reward_engine.reset()
         
-        # Initialize RMPFlow Controller
-        try:
-            from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
-            
-            # URDF and config paths
-            urdf_path = os.path.join(self.current_dir, "so100.urdf")
-            robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
-            rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
-            
-            # Initialize RMPFlow
-            self.rmpflow = RmpFlow(
-                robot_description_path=robot_description_path,
-                urdf_path=urdf_path,
-                rmpflow_config_path=rmpflow_config_path,
-                end_effector_frame_name="gripper",
-                maximum_substep_size=0.0033
-            )
-            
-            # Define articulation policy
-            self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow)
-            print("[INFO] RMPFlow Controller initialized.")
-        except Exception as e:
-            print(f"[WARN] Failed to initialize RMPFlow: {e}")
-            self.rmpflow = None
-            self.motion_policy = None
+        # Note: RMPFlow initialization removed - using geometric IK solver instead
+        # which is simpler and more reliable for this robot configuration
+        self.rmpflow = None
+        self.motion_policy = None
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
