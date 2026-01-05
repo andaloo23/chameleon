@@ -174,8 +174,9 @@ class IsaacPickPlaceEnv:
             self.rmpflow = RmpFlow(
                 robot_description_path=rmp_config_path,
                 urdf_path=urdf_path,
-                rmpflow_config_path=rmp_config_path, # Using same yaml for both if applicable, or default
-                end_effector_frame_name="gripper"
+                rmpflow_config_path=rmp_config_path,
+                end_effector_frame_name="gripper",
+                maximum_substep_size=0.0033
             )
             
             # Define articulation policy
