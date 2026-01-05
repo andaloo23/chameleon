@@ -85,104 +85,82 @@ class SimulationLoop:
         self.random_policy = functools.partial(_default_random_policy, self.env)
 
     def scripted_policy(self) -> PolicyFn:
-        """MoveIt-based scripted policy for the SO100 arm."""
+        """RMPFlow-based scripted policy for the SO100 arm."""
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
             # Persistent state for the policy
             if not hasattr(_policy, "_state"):
                 _policy._state = "APPROACH" # APPROACH -> GRASP -> LIFT
-                _policy._trajectory = []
-                _policy._traj_idx = 0
+                _policy._target_pos = None
 
             cube_pos = observation.get("cube_pos")
             if cube_pos is None:
                 return self.random_policy(observation, step)
 
-            # Check if MoveIt interface is available
-            moveit = getattr(self.env, "moveit", None)
-            
-            # Helper to plan to a target
-            def plan_to(target_pos, quat=None):
-                if not moveit: return None
-                # Use the client's internal Pose helper to avoid ROS2 dependencies in 3.11
-                from moveit_interface import Pose
-                pose = Pose()
-                pose.position.x = float(target_pos[0])
-                pose.position.y = float(target_pos[1])
-                pose.position.z = float(target_pos[2])
-                # Downward orientation
-                pose.orientation.x = 0.0
-                pose.orientation.y = 0.707
-                pose.orientation.z = 0.0
-                pose.orientation.w = 0.707
-                
-                print(f"[MoveIt] Planning to {target_pos}...")
-                return moveit.plan_to_pose(pose)
+            # RMPFlow controller from env
+            rmpflow = getattr(self.env, "rmpflow", None)
+            motion_policy = getattr(self.env, "motion_policy", None)
 
-            # State Transitions and Planning
+            # State Transitions
             reward_engine = getattr(self.env, "reward_engine", None)
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
 
-            # Plan new phase if trajectory is empty or state changed
-            new_state = None
-            if step == 0 or not _policy._trajectory or _policy._traj_idx >= len(_policy._trajectory):
-                if _policy._state == "APPROACH" and (step > 10 or (not _policy._trajectory and step > 0)):
-                    # Fallback to next state if approach is done (simple heuristic)
-                    if step > 250:
-                        new_state = "GRASP"
-                elif _policy._state == "GRASP" and (grasped_flag or step > 600):
-                    new_state = "LIFT"
+            if _policy._state == "APPROACH" and step > 200:
+                _policy._state = "GRASP"
+                print(f"[RMPFlow] Transitioned to GRASP")
+            elif _policy._state == "GRASP" and (grasped_flag or step > 500):
+                _policy._state = "LIFT"
+                print(f"[RMPFlow] Transitioned to LIFT")
 
-                if new_state:
-                    _policy._state = new_state
-                    _policy._trajectory = []
-                    _policy._traj_idx = 0
-                    print(f"[MoveIt] Transitioned to {new_state}")
+            # Set RMPFlow Target based on state
+            target_pos = None
+            if _policy._state == "APPROACH":
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.20])
+            elif _policy._state == "GRASP":
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.02])
+            elif _policy._state == "LIFT":
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.30])
 
-                # If no trajectory, plan it!
-                if not _policy._trajectory or _policy._traj_idx >= len(_policy._trajectory):
-                    target = None
-                    if _policy._state == "APPROACH":
-                        target = np.array(cube_pos) + np.array([0, 0, 0.20])
-                    elif _policy._state == "GRASP":
-                        target = np.array(cube_pos) + np.array([0, 0, 0.02])
-                    elif _policy._state == "LIFT":
-                        target = np.array(cube_pos) + np.array([0, 0, 0.30])
-                    
-                    if target is not None:
-                        traj = plan_to(target)
-                        if traj:
-                            _policy._trajectory = traj
-                            _policy._traj_idx = 0
-                        else:
-                            print(f"[MoveIt] Planning failed for {_policy._state}, using fallback IK")
-                            # Fallback to single-point IK if planning fails
-                            fallback_q = self.env.compute_ik(target)
-                            _policy._trajectory = [fallback_q[:5].tolist()]
-                            _policy._traj_idx = 0
-
-            # Execute trajectory
-            if _policy._trajectory and _policy._traj_idx < len(_policy._trajectory):
-                arm_q = _policy._trajectory[_policy._traj_idx]
-                _policy._traj_idx += 1
+            if rmpflow and motion_policy and target_pos is not None:
+                # Downward orientation
+                target_quat = np.array([0.707, 0.0, 0.707, 0.0]) # w, x, y, z in Lula/RMPFlow (check convention!)
+                # Isaac Sim RmpFlow usually expects [w, x, y, z] or [x, y, z, w]? 
+                # Actually Lula usually uses [x, y, z, w] or [w, x, y, z]. 
+                # In omni.isaac.motion_generation, it's [w, x, y, z].
                 
-                # Construct full 6D action
-                next_q = np.zeros(6, dtype=np.float32)
-                next_q[:5] = arm_q
+                rmpflow.set_end_effector_target(
+                    target_position=target_pos,
+                    target_orientation=np.array([0.707, 0.0, 0.707, 0.0]) 
+                )
                 
-                # Handle gripper
-                if _policy._state == "APPROACH":
-                    next_q[5] = 1.2
-                elif _policy._state == "GRASP":
-                    next_q[5] = 0.05 if (step > 450 or grasped_flag) else 1.2
+                # Get joint command (dt is usually 1/60 or 1/120)
+                # The env uses 120Hz physics but step() is called less frequently possibly.
+                # simulator_loop.py doesn't specify dt clearly, but let's assume 1/60 for control.
+                articulation_action = motion_policy.get_next_articulation_action(step_size=1.0/60.0)
+                
+                if articulation_action and articulation_action.joint_positions is not None:
+                    arm_q = articulation_action.joint_positions[:5]
                 else:
-                    next_q[5] = 0.05
-                    
-                return next_q
+                    # Fallback to IK if RMPFlow fails
+                    arm_q = self.env.compute_ik(target_pos)[:5]
+            else:
+                # Fallback to IK if RMPFlow is not initialized
+                arm_q = self.env.compute_ik(target_pos)[:5]
+
+            # Construct full 6D action
+            next_q = np.zeros(6, dtype=np.float32)
+            next_q[:5] = arm_q
             
-            # Absolute fallback
-            return self.env.robot_articulation.get_joint_positions()
+            # Handle gripper
+            if _policy._state == "APPROACH":
+                next_q[5] = 1.2
+            elif _policy._state == "GRASP":
+                next_q[5] = 0.05 if (step > 350 or grasped_flag) else 1.2
+            else:
+                next_q[5] = 0.05
+                
+            return next_q
 
         return _policy
 

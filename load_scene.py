@@ -12,7 +12,7 @@ from image_utils import write_png
 from reward_engine import RewardEngine
 from gripper_weld import IntelligentGripperWeld, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
-from moveit_interface import init_moveit, shutdown_moveit
+from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 
 _SIMULATION_APP = None
 _SIM_HEADLESS_FLAG = None
@@ -162,13 +162,29 @@ class IsaacPickPlaceEnv:
         self.reward_engine.initialize()
         self.reward_engine.reset()
         
-        # Initialize MoveIt Interface
+        # Initialize RMPFlow Controller
         try:
-            self.moveit = init_moveit()
-            print("[INFO] MoveIt Interface initialized.")
+            from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
+            
+            # URDF and RMPFlow config paths
+            urdf_path = os.path.join(self.current_dir, "so100.urdf")
+            rmp_config_path = os.path.join(self.current_dir, "lula_description.yaml")
+            
+            # Initialize RMPFlow
+            self.rmpflow = RmpFlow(
+                robot_description_path=rmp_config_path,
+                urdf_path=urdf_path,
+                rmpflow_config_path=rmp_config_path, # Using same yaml for both if applicable, or default
+                end_effector_frame_name="gripper"
+            )
+            
+            # Define articulation policy
+            self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow)
+            print("[INFO] RMPFlow Controller initialized.")
         except Exception as e:
-            print(f"[WARN] Failed to initialize MoveIt: {e}")
-            self.moveit = None
+            print(f"[WARN] Failed to initialize RMPFlow: {e}")
+            self.rmpflow = None
+            self.motion_policy = None
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -305,9 +321,9 @@ class IsaacPickPlaceEnv:
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         
-        # Sync initial state to MoveIt
-        if self.moveit:
-            self.moveit.publish_joint_state(self._default_joint_positions[:-1], self._default_joint_positions[-1])
+        # Sync initial state to RMPFlow
+        if self.rmpflow:
+            self.rmpflow.set_robot_base_pose(*self.robot_articulation.get_world_pose())
             
         return self._get_observation()
 
@@ -419,9 +435,10 @@ class IsaacPickPlaceEnv:
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
 
-        # Sync current state to MoveIt
-        if self.moveit:
-            self.moveit.publish_joint_state(ap[:-1], agp)
+        # RMPFlow doesn't strictly need a "publish" step here as it queries state when calculate_joint_command is called
+        # but we ensure the base pose is up to date if the robot moves
+        if self.rmpflow:
+            self.rmpflow.set_robot_base_pose(*self.robot_articulation.get_world_pose())
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
@@ -439,8 +456,6 @@ class IsaacPickPlaceEnv:
 
     def shutdown(self):
         self.close()
-        if self.moveit:
-            shutdown_moveit(self.moveit)
         if self.simulation_app: self.simulation_app.close()
 
     def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:

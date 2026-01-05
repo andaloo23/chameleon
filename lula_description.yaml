@@ -1,0 +1,84 @@
+# Lula robot description for SO-100
+# Reference: https://docs.omniverse.nvidia.com/isaacsim/latest/advanced_topics/supported_robot_models.html
+
+api_version: 1.0
+
+# Joint names must match the URDF
+joint_names:
+  - shoulder_pan
+  - shoulder_lift
+  - elbow_flex
+  - wrist_flex
+  - wrist_roll
+
+# Default joint positions (home)
+default_joint_positions:
+  shoulder_pan: 0.0
+  shoulder_lift: 2.0
+  elbow_flex: -1.0
+  wrist_flex: -0.5
+  wrist_roll: 0.0
+
+# RMPflow parameters
+rmp_params:
+  cspace_target_rmp:
+    metric_scalar: 50.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_threshold: 1e-3
+    inertia: 1.0
+  cspace_trajectory_rmp:
+    metric_scalar: 1.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_threshold: 1e-3
+    inertia: 1.0
+  cspace_min_propagation_distance: 0.1
+  joint_limit_rmp:
+    metric_scalar: 1000.0
+    metric_length: 0.1
+    metric_explog_min_dist: 0.01
+    soft_limit_margin: 0.05
+  joint_velocity_cap_rmp:
+    max_velocity: 1.0
+    velocity_gain: 1.0
+    metric_scalar: 1.0
+  target_rmp:
+    metric_scalar: 1.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_threshold: 1e-3
+    inertia: 1.0
+  axis_target_rmp:
+    metric_scalar: 1.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_threshold: 1e-3
+    inertia: 1.0
+  collision_rmp:
+    damping_gain: 20.0
+    metric_scalar: 10.0
+    metric_length: 0.1
+    metric_explog_min_dist: 0.01
+    robust_threshold: 1e-3
+  damping_rmp:
+    metric_scalar: 0.1
+    inertia: 1.0
+
+# Define collision spheres for the robot links
+# This is a simplified model for obstacle avoidance
+collision_spheres:
+  base:
+    - [0.0, 0.0, 0.0, 0.1]
+  shoulder:
+    - [0.0, 0.0, 0.0, 0.05]
+  upper_arm:
+    - [0.0, 0.05, 0.0, 0.05]
+    - [0.0, 0.1, 0.0, 0.05]
+  lower_arm:
+    - [0.0, 0.0, 0.05, 0.05]
+    - [0.0, 0.0, 0.1, 0.05]
+  wrist:
+    - [0.0, -0.03, 0.0, 0.05]
+  gripper:
+    - [0.0, -0.02, 0.0, 0.04]
