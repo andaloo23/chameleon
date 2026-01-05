@@ -166,15 +166,16 @@ class IsaacPickPlaceEnv:
         try:
             from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
             
-            # URDF and RMPFlow config paths
+            # URDF and config paths
             urdf_path = os.path.join(self.current_dir, "so100.urdf")
-            rmp_config_path = os.path.join(self.current_dir, "lula_description.yaml")
+            robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
+            rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
             
             # Initialize RMPFlow
             self.rmpflow = RmpFlow(
-                robot_description_path=rmp_config_path,
+                robot_description_path=robot_description_path,
                 urdf_path=urdf_path,
-                rmpflow_config_path=rmp_config_path,
+                rmpflow_config_path=rmpflow_config_path,
                 end_effector_frame_name="gripper",
                 maximum_substep_size=0.0033
             )

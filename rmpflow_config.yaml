@@ -1,0 +1,25 @@
+# RMPFlow configuration for SO-100
+
+api_version: 1.0
+
+cspace_target_rmp:
+  metric_scalar: 50.0
+  position_gain: 100.0
+  damping_gain: 20.0
+  robust_position_term_thresh: 0.001
+  inertia: 1.0
+
+cspace_trajectory_rmp:
+  p_gain: 100.0
+  d_gain: 20.0
+  ff_gain: 0.25
+
+cspace_affine_rmp:
+  final_handover_time_std_dev: 0.05
+  weight: 100.0
+
+max_acceleration: 10.0
+max_jerk: 100.0
+
+body_cylinders: []
+body_collision_controllers: []
