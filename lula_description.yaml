@@ -18,13 +18,8 @@ cspace:
   - wrist_flex
   - wrist_roll
 
-# Default joint positions (home)
-default_q:
-  shoulder_pan: 0.0
-  shoulder_lift: 2.0
-  elbow_flex: -1.0
-  wrist_flex: -0.5
-  wrist_roll: 0.0
+# Default joint positions (home) - must be a list in cspace order
+default_q: [0.0, 2.0, -1.0, -0.5, 0.0]
 
 # RMPflow parameters
 rmp_params:
