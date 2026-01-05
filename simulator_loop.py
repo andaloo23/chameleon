@@ -85,81 +85,62 @@ class SimulationLoop:
         self.random_policy = functools.partial(_default_random_policy, self.env)
 
     def scripted_policy(self) -> PolicyFn:
-        """RMPFlow-based scripted policy for the SO100 arm."""
+        """IK-based scripted policy for the SO100 arm."""
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
             # Persistent state for the policy
             if not hasattr(_policy, "_state"):
-                _policy._state = "APPROACH" # APPROACH -> GRASP -> LIFT
-                _policy._target_pos = None
+                _policy._state = "APPROACH"  # APPROACH -> GRASP -> LIFT
+                _policy._last_q = None
 
             cube_pos = observation.get("cube_pos")
             if cube_pos is None:
                 return self.random_policy(observation, step)
-
-            # RMPFlow controller from env
-            rmpflow = getattr(self.env, "rmpflow", None)
-            motion_policy = getattr(self.env, "motion_policy", None)
 
             # State Transitions
             reward_engine = getattr(self.env, "reward_engine", None)
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
 
-            if _policy._state == "APPROACH" and step > 200:
+            if _policy._state == "APPROACH" and step > 150:
                 _policy._state = "GRASP"
-                print(f"[RMPFlow] Transitioned to GRASP")
-            elif _policy._state == "GRASP" and (grasped_flag or step > 500):
+                print(f"[IK] Transitioned to GRASP")
+            elif _policy._state == "GRASP" and (grasped_flag or step > 400):
                 _policy._state = "LIFT"
-                print(f"[RMPFlow] Transitioned to LIFT")
+                print(f"[IK] Transitioned to LIFT")
 
-            # Set RMPFlow Target based on state
-            target_pos = None
+            # Set target position based on state
             if _policy._state == "APPROACH":
-                target_pos = np.array(cube_pos) + np.array([0, 0, 0.20])
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.15])
             elif _policy._state == "GRASP":
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.02])
             elif _policy._state == "LIFT":
-                target_pos = np.array(cube_pos) + np.array([0, 0, 0.30])
-
-            if rmpflow and motion_policy and target_pos is not None:
-                # Downward orientation
-                target_quat = np.array([0.707, 0.0, 0.707, 0.0]) # w, x, y, z in Lula/RMPFlow (check convention!)
-                # Isaac Sim RmpFlow usually expects [w, x, y, z] or [x, y, z, w]? 
-                # Actually Lula usually uses [x, y, z, w] or [w, x, y, z]. 
-                # In omni.isaac.motion_generation, it's [w, x, y, z].
-                
-                rmpflow.set_end_effector_target(
-                    target_position=target_pos,
-                    target_orientation=np.array([0.707, 0.0, 0.707, 0.0]) 
-                )
-                
-                # Get joint command (dt is usually 1/60 or 1/120)
-                # The env uses 120Hz physics but step() is called less frequently possibly.
-                # simulator_loop.py doesn't specify dt clearly, but let's assume 1/60 for control.
-                articulation_action = motion_policy.get_next_articulation_action(step_size=1.0/60.0)
-                
-                if articulation_action and articulation_action.joint_positions is not None:
-                    arm_q = articulation_action.joint_positions[:5]
-                else:
-                    # Fallback to IK if RMPFlow fails
-                    arm_q = self.env.compute_ik(target_pos)[:5]
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
             else:
-                # Fallback to IK if RMPFlow is not initialized
-                arm_q = self.env.compute_ik(target_pos)[:5]
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.15])
+
+            # Use geometric IK to compute arm joint positions
+            ik_solution = self.env.compute_ik(target_pos)
+            arm_q = ik_solution[:5]
+
+            # Smooth transition - interpolate towards target
+            if _policy._last_q is not None:
+                alpha = 0.1  # Smoothing factor (lower = smoother but slower)
+                arm_q = _policy._last_q * (1 - alpha) + arm_q * alpha
+            _policy._last_q = arm_q.copy()
 
             # Construct full 6D action
             next_q = np.zeros(6, dtype=np.float32)
             next_q[:5] = arm_q
-            
+
             # Handle gripper
             if _policy._state == "APPROACH":
-                next_q[5] = 1.2
+                next_q[5] = 1.2  # Open gripper
             elif _policy._state == "GRASP":
-                next_q[5] = 0.05 if (step > 350 or grasped_flag) else 1.2
+                next_q[5] = 0.05 if (step > 300 or grasped_flag) else 1.2  # Close gripper
             else:
-                next_q[5] = 0.05
-                
+                next_q[5] = 0.05  # Keep gripper closed during lift
+
             return next_q
 
         return _policy
