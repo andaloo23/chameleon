@@ -535,17 +535,24 @@ class IsaacPickPlaceEnv:
                     found_sol = True
         
         if not found_sol:
-            # Fallback: update pan only
+            # Fallback: update pan and keep current pose but perhaps point at it
             best_q[0] = np.clip(pan, -1.57, 1.57)
+            # We could optionally raise the lift slightly here or just stick to initial_q
+            print(f"[IK] No solution found for target {target_pos}, distance {r_rel:.3f}m. Max reach is approx 0.8m-0.9m.")
             
         return best_q
 
     def _sample_object_positions(self):
-        # Move objects to reachable positions
-        # Cube at 100cm distance - further from base
-        cube_xy = np.array([0.0, -1.0])
-        cup_xy = np.array([0.0, -0.55])
-        print(f"[DEBUG] _sample_object_positions returning: cube={cube_xy}")
+        # Use the workspace sampling logic to ensure reachable positions
+        from workspace import sample_workspace_xy
+        import random
+        
+        rng = np.random.RandomState(random.randint(0, 10000))
+        
+        cube_xy = sample_workspace_xy(rng)
+        cup_xy = sample_workspace_xy(rng, existing=[cube_xy])
+        
+        print(f"[INFO] _sample_object_positions: cube={cube_xy}, cup={cup_xy}")
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
