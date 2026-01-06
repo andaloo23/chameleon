@@ -11,6 +11,12 @@ from load_scene import IsaacPickPlaceEnv
 PolicyFn = Callable[[Dict[str, Any], int], np.ndarray]
 
 
+class PolicyState:
+    APPROACH = "APPROACH"
+    GRASP = "GRASP"
+    LIFT = "LIFT"
+
+
 @dataclass
 class EpisodeResult:
     """Stores the results of a single simulation episode."""
@@ -89,11 +95,13 @@ class SimulationLoop:
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
             # Persistent state for the policy
-            if not hasattr(_policy, "_state"):
-                _policy._state = "APPROACH"  # APPROACH -> GRASP -> LIFT
+            if not hasattr(_policy, "state"):
+                _policy.state = PolicyState.APPROACH  # APPROACH -> GRASP -> LIFT
+                _policy.state_timer = 0
 
             cube_pos = observation.get("cube_pos")
-            if cube_pos is None:
+            gripper_pos = observation.get("gripper_pos")
+            if cube_pos is None or gripper_pos is None:
                 return self.random_policy(observation, step)
 
             # RMPFlow controller from env
@@ -105,37 +113,30 @@ class SimulationLoop:
             stage_flags = getattr(reward_engine, "stage_flags", {}) if reward_engine is not None else {}
             grasped_flag = bool(stage_flags.get("grasped"))
 
-            if _policy._state == "APPROACH" and step > 150:
-                _policy._state = "GRASP"
-                print(f"[RMPFlow] Transitioned to GRASP")
-            elif _policy._state == "GRASP" and (grasped_flag or step > 400):
-                _policy._state = "LIFT"
-                print(f"[RMPFlow] Transitioned to LIFT")
-
             target_pos = None
             gripper_action = None # Default to None, will be set later
 
-            if self.state == PolicyState.APPROACH:
+            if _policy.state == PolicyState.APPROACH:
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
                 dist = np.linalg.norm(np.array(gripper_pos) - target_pos)
                 if dist < 0.05:
                     print(f"[RMPFlow] Transitioned to GRASP")
-                    self.state = PolicyState.GRASP
-                    self.state_timer = 0
-            elif self.state == PolicyState.GRASP:
+                    _policy.state = PolicyState.GRASP
+                    _policy.state_timer = 0
+            elif _policy.state == PolicyState.GRASP:
                 # Gradually lower to the cube instead of jumping
-                alpha = min(1.0, self.state_timer / 40.0)
+                alpha = min(1.0, _policy.state_timer / 40.0)
                 approach_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
                 target_pos = (1 - alpha) * approach_pos + alpha * np.array(cube_pos)
                 
-                # Keep gripper OPEN while approaching/grasping
+                # Keep gripper OPEN while approaching/handling
                 gripper_action = 0.05 
-                self.state_timer += 1
-                if self.state_timer > 60:
+                _policy.state_timer += 1
+                if _policy.state_timer > 60:
                     print(f"[RMPFlow] Transitioned to LIFT")
-                    self.state = PolicyState.LIFT
-                    self.state_timer = 0
-            elif self.state == PolicyState.LIFT:
+                    _policy.state = PolicyState.LIFT
+                    _policy.state_timer = 0
+            elif _policy.state == PolicyState.LIFT:
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
                 # Keep gripper CLOSED while lifting
                 gripper_action = 1.5
