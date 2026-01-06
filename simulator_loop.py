@@ -112,14 +112,33 @@ class SimulationLoop:
                 _policy._state = "LIFT"
                 print(f"[RMPFlow] Transitioned to LIFT")
 
-            # Set RMPFlow Target based on state
             target_pos = None
-            if _policy._state == "APPROACH":
-                target_pos = np.array(cube_pos) + np.array([0, 0, 0.15])
-            elif _policy._state == "GRASP":
-                target_pos = np.array(cube_pos) + np.array([0, 0, 0.02])
-            elif _policy._state == "LIFT":
+            gripper_action = None # Default to None, will be set later
+
+            if self.state == PolicyState.APPROACH:
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
+                dist = np.linalg.norm(np.array(gripper_pos) - target_pos)
+                if dist < 0.05:
+                    print(f"[RMPFlow] Transitioned to GRASP")
+                    self.state = PolicyState.GRASP
+                    self.state_timer = 0
+            elif self.state == PolicyState.GRASP:
+                # Gradually lower to the cube instead of jumping
+                alpha = min(1.0, self.state_timer / 40.0)
+                approach_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
+                target_pos = (1 - alpha) * approach_pos + alpha * np.array(cube_pos)
+                
+                # Keep gripper OPEN while approaching/grasping
+                gripper_action = 0.05 
+                self.state_timer += 1
+                if self.state_timer > 60:
+                    print(f"[RMPFlow] Transitioned to LIFT")
+                    self.state = PolicyState.LIFT
+                    self.state_timer = 0
+            elif self.state == PolicyState.LIFT:
+                target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
+                # Keep gripper CLOSED while lifting
+                gripper_action = 1.5
 
             if rmpflow and motion_policy and target_pos is not None:
                 # Simplify for debugging: no orientation target for now

@@ -1,10 +1,28 @@
 # Lula robot description for SO-100
 api_version: 1.0
-cspace:
-  - shoulder_pan
-  - shoulder_lift
-  - elbow_flex
-  - wrist_flex
-  - wrist_roll
-root_link: base
-default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
+robot_description:
+  root_link: base
+  cspace:
+    - shoulder_pan
+    - shoulder_lift
+    - elbow_flex
+    - wrist_flex
+    - wrist_roll
+  default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
+  
+  collision_spheres:
+    - shoulder:
+        - center: [0, 0, 0]
+          radius: 0.1
+    - upper_arm:
+        - center: [0, 0.1, 0]
+          radius: 0.1
+    - lower_arm:
+        - center: [0, 0, 0.1]
+          radius: 0.1
+    - wrist:
+        - center: [0, 0, 0]
+          radius: 0.05
+    - gripper:
+        - center: [0, 0, 0]
+          radius: 0.05
