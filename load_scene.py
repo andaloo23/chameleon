@@ -166,15 +166,16 @@ class IsaacPickPlaceEnv:
         try:
             from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
             
-            # Scaled URDF and merged config path
+            # Scaled URDF and split config paths
             urdf_path = os.path.join(self.current_dir, "scaled_so100.urdf")
-            rmp_config_path = os.path.join(self.current_dir, "rmp_config.yaml")
+            robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
+            rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
             
             # Initialize RMPFlow
             self.rmpflow = RmpFlow(
-                robot_description_path=rmp_config_path,
+                robot_description_path=robot_description_path,
                 urdf_path=urdf_path,
-                rmpflow_config_path=rmp_config_path,
+                rmpflow_config_path=rmpflow_config_path,
                 end_effector_frame_name="gripper",
                 maximum_substep_size=0.0033
             )
@@ -224,8 +225,7 @@ class IsaacPickPlaceEnv:
         except Exception as e:
             print(f"[warn] Could not configure physics: {e}")
 
-        urdf_path = os.path.join(self.current_dir, "so100.urdf")
-        self.robot = SO100Robot(self.world, urdf_path)
+        self.robot = SO100Robot(self.world, os.path.join(self.current_dir, "scaled_so100.urdf"))
         self.robot_articulation = self.robot.get_robot()
         
         self._base_fixture_pose = None
@@ -492,17 +492,20 @@ class IsaacPickPlaceEnv:
         pan = np.arctan2(dy, dx)
         r_total = np.sqrt(dx**2 + dy**2)
         
-        # Link lengths (scaled by 2.5)
-        L1 = 0.1160 * 2.5
-        L2 = 0.1350 * 2.5
-        L3 = 0.1600 * 2.5
+        # Precise scaled parameters for 2.5x robot
+        L1 = 0.29       # shoulder_pan to elbow_flex
+        L2 = 0.3375     # elbow_flex to wrist_flex
+        L3 = 0.22       # wrist_flex to gripper center
         
-        # Simpler R0 for initial verification
-        R0 = 0.0
-        Z0 = 0.119 * 2.5
+        # Base origin to shoulder lift joint
+        R0 = 0.0        # Net offset in horizontal plane
+        Z0 = 0.11775    # Net height of shoulder lift joint
         
         r_rel = r_total - R0
         z_rel = dz - Z0
+
+        if self._step_counter % 60 == 0:
+            print(f"[IK DEBUG] target_pos={target_pos}, r_rel={r_rel:.3f}, z_rel={z_rel:.3f}")
         
         # Joint limits for scoring and validation
         limits = {

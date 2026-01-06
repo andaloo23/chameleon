@@ -41,7 +41,7 @@ class SO100Robot:
             import_config.fix_base = True
             import_config.make_default_prim = True
             import_config.self_collision = False  # Keep self-collision off to avoid arm conflicts
-            import_config.distance_scale = 2.5
+            import_config.distance_scale = 1.0
             import_config.density = 500.0  # Set some density for collision response
         
         self.import_config = import_config

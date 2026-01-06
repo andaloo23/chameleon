@@ -1,10 +1,8 @@
-# RMPFlow configuration for SO-100
+# RMPFlow parameters for SO-100
 api_version: 1.0
 
-# Joint limit buffers in radians
 joint_limit_buffers: [0.01, 0.01, 0.01, 0.01, 0.01]
 
-# C-Space target RMP
 cspace_target_rmp:
   metric_weight: 1.0
   position_gain: 100.0
@@ -12,7 +10,6 @@ cspace_target_rmp:
   robust_position_term_thresh: 0.01
   inertia: 1.0
 
-# Target RMP (Cartesian)
 target_rmp:
   metric_weight: 1.0
   position_gain: 200.0
@@ -22,7 +19,6 @@ target_rmp:
   min_metric_alpha: 0.1
   metric_alpha_length_scale: 0.05
 
-# Axis target RMP (Orientation)
 axis_target_rmp:
   metric_weight: 1.0
   position_gain: 100.0
@@ -30,21 +26,14 @@ axis_target_rmp:
   robust_position_term_thresh: 0.01
   inertia: 1.0
 
-# Joint limit RMP
 joint_limit_rmp:
   metric_weight: 1000.0
   metric_length_scale: 0.01
   metric_explg_min_dist: 0.01
 
-# Joint velocity cap RMP
 joint_velocity_cap_rmp:
   max_velocity: 1.0
   velocity_damping_gain: 0.5
 
-# Collision avoidance parameters
-body_cylinders: []
-body_collision_controllers: []
-
-# Limits
 max_acceleration: 10.0
 max_jerk: 100.0
