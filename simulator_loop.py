@@ -85,17 +85,20 @@ class SimulationLoop:
         self.random_policy = functools.partial(_default_random_policy, self.env)
 
     def scripted_policy(self) -> PolicyFn:
-        """IK-based scripted policy for the SO100 arm."""
+        """RMPFlow-based scripted policy for the SO100 arm with scaled assets."""
 
         def _policy(observation: Dict[str, Any], step: int) -> np.ndarray:
             # Persistent state for the policy
             if not hasattr(_policy, "_state"):
                 _policy._state = "APPROACH"  # APPROACH -> GRASP -> LIFT
-                _policy._last_q = None
 
             cube_pos = observation.get("cube_pos")
             if cube_pos is None:
                 return self.random_policy(observation, step)
+
+            # RMPFlow controller from env
+            rmpflow = getattr(self.env, "rmpflow", None)
+            motion_policy = getattr(self.env, "motion_policy", None)
 
             # State Transitions
             reward_engine = getattr(self.env, "reward_engine", None)
@@ -104,30 +107,43 @@ class SimulationLoop:
 
             if _policy._state == "APPROACH" and step > 150:
                 _policy._state = "GRASP"
-                print(f"[IK] Transitioned to GRASP")
+                print(f"[RMPFlow] Transitioned to GRASP")
             elif _policy._state == "GRASP" and (grasped_flag or step > 400):
                 _policy._state = "LIFT"
-                print(f"[IK] Transitioned to LIFT")
+                print(f"[RMPFlow] Transitioned to LIFT")
 
-            # Set target position based on state
+            # Set RMPFlow Target based on state
+            target_pos = None
             if _policy._state == "APPROACH":
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.15])
             elif _policy._state == "GRASP":
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.02])
             elif _policy._state == "LIFT":
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
+
+            if rmpflow and motion_policy and target_pos is not None:
+                # Downward orientation [w, x, y, z]
+                rmpflow.set_end_effector_target(
+                    target_position=target_pos,
+                    target_orientation=np.array([0.707, 0.0, 0.707, 0.0])
+                )
+                
+                # Update RMPFlow state with current joint positions/velocities
+                # This is crucial for reactive control
+                rmpflow.update_robot_state()
+                
+                # Get joint command
+                articulation_action = motion_policy.get_next_articulation_action(step_size=1.0/60.0)
+                
+                if articulation_action and articulation_action.joint_positions is not None:
+                    # RMPFlow handles the first 5 degrees of freedom (cspace)
+                    arm_q = articulation_action.joint_positions[:5]
+                else:
+                    # Fallback to IK if RMPFlow fails
+                    arm_q = self.env.compute_ik(target_pos)[:5]
             else:
-                target_pos = np.array(cube_pos) + np.array([0, 0, 0.15])
-
-            # Use geometric IK to compute arm joint positions
-            ik_solution = self.env.compute_ik(target_pos)
-            arm_q = ik_solution[:5]
-
-            # Smooth transition - interpolate towards target
-            if _policy._last_q is not None:
-                alpha = 0.1  # Smoothing factor (lower = smoother but slower)
-                arm_q = _policy._last_q * (1 - alpha) + arm_q * alpha
-            _policy._last_q = arm_q.copy()
+                # Fallback to IK if RMPFlow is not initialized
+                arm_q = self.env.compute_ik(target_pos)[:5]
 
             # Construct full 6D action
             next_q = np.zeros(6, dtype=np.float32)
