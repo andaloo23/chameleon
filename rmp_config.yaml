@@ -1,17 +1,15 @@
-# Merged RMPFlow and Lula configuration for SO-100
+# Flat RMPFlow and Lula configuration for SO-100
 api_version: 1.0
 
-# Lula robot description
-lula_robot_description:
-  name: so100
-  root_link: base
-  cspace:
-    - shoulder_pan
-    - shoulder_lift
-    - elbow_flex
-    - wrist_flex
-    - wrist_roll
-  default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
+# Kinematics (Lula)
+cspace:
+  - shoulder_pan
+  - shoulder_lift
+  - elbow_flex
+  - wrist_flex
+  - wrist_roll
+root_link: base
+default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
 
 # RMPFlow parameters
 joint_limit_buffers: [0.01, 0.01, 0.01, 0.01, 0.01]

@@ -488,7 +488,7 @@ class IsaacPickPlaceEnv:
         dy = target_pos[1] - base_pos[1]
         dz = target_pos[2] - base_pos[2]
         
-        # Correct pan calculation (X forward, Y left)
+        # Standard pan calculation (Assuming robot faces +X at pan=0)
         pan = np.arctan2(dy, dx)
         r_total = np.sqrt(dx**2 + dy**2)
         
@@ -497,10 +497,9 @@ class IsaacPickPlaceEnv:
         L2 = 0.1350 * 2.5
         L3 = 0.1600 * 2.5
         
-        # Precise offsets from base origin to shoulder lift joint (scaled)
-        # Derived from URDF: r_eccentric = 0.1895, z_offset = 0.2975
-        R0 = 0.1895 * 2.5
-        Z0 = 0.2975 * 2.5
+        # Simpler R0 for initial verification
+        R0 = 0.0
+        Z0 = 0.119 * 2.5
         
         r_rel = r_total - R0
         z_rel = dz - Z0
@@ -573,6 +572,10 @@ class IsaacPickPlaceEnv:
             best_q[0] = np.clip(pan, -1.57, 1.57)
             # We could optionally raise the lift slightly here or just stick to initial_q
             print(f"[IK] No solution found for target {target_pos}, distance {r_rel:.3f}m. Max reach is approx 0.8m-0.9m.")
+        else:
+            # Debug successful IK
+            if self._step_counter % 60 == 0:
+                 print(f"[IK] Found solution: pan={best_q[0]:.2f}, lift={best_q[1]:.2f}, elbow={best_q[2]:.2f}, wrist={best_q[3]:.2f}")
             
         return best_q
 
