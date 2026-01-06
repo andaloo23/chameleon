@@ -166,16 +166,15 @@ class IsaacPickPlaceEnv:
         try:
             from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
             
-            # Scaled URDF and config paths
+            # Scaled URDF and merged config path
             urdf_path = os.path.join(self.current_dir, "scaled_so100.urdf")
-            robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
-            rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
+            rmp_config_path = os.path.join(self.current_dir, "rmp_config.yaml")
             
             # Initialize RMPFlow
             self.rmpflow = RmpFlow(
-                robot_description_path=robot_description_path,
+                robot_description_path=rmp_config_path,
                 urdf_path=urdf_path,
-                rmpflow_config_path=rmpflow_config_path,
+                rmpflow_config_path=rmp_config_path,
                 end_effector_frame_name="gripper",
                 maximum_substep_size=0.0033
             )
@@ -489,17 +488,19 @@ class IsaacPickPlaceEnv:
         dy = target_pos[1] - base_pos[1]
         dz = target_pos[2] - base_pos[2]
         
-        pan = np.arctan2(dx, -dy)
+        # Correct pan calculation (X forward, Y left)
+        pan = np.arctan2(dy, dx)
         r_total = np.sqrt(dx**2 + dy**2)
         
         # Link lengths (scaled by 2.5)
         L1 = 0.1160 * 2.5
         L2 = 0.1350 * 2.5
-        # L3 includes wrist-to-gripper offset PLUS jaw length extension
         L3 = 0.1600 * 2.5
         
-        R0 = 0.0758 * 2.5
-        Z0 = 0.119 * 2.5
+        # Precise offsets from base origin to shoulder lift joint (scaled)
+        # Derived from URDF: r_eccentric = 0.1895, z_offset = 0.2975
+        R0 = 0.1895 * 2.5
+        Z0 = 0.2975 * 2.5
         
         r_rel = r_total - R0
         z_rel = dz - Z0
@@ -534,7 +535,8 @@ class IsaacPickPlaceEnv:
                 th1 = alpha - beta
                 
                 # Map to joint space using URDF-derived offsets
-                s_lift = th1 + 0.228
+                # shoulder_lift=0 points back/down, add 1.8 to point forward
+                s_lift = th1 + 1.8
                 e_flex = th2_rel - 1.571
                 w_flex = phi - (th1 + th2_rel) + 1.0
                 
