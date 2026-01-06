@@ -122,10 +122,10 @@ class SimulationLoop:
                 target_pos = np.array(cube_pos) + np.array([0, 0, 0.25])
 
             if rmpflow and motion_policy and target_pos is not None:
-                # Downward orientation [w, x, y, z]
+                # Simplify for debugging: no orientation target for now
                 rmpflow.set_end_effector_target(
                     target_position=target_pos,
-                    target_orientation=np.array([0.707, 0.0, 0.707, 0.0])
+                    target_orientation=None
                 )
                 
                 # Update RMPFlow state with current joint positions/velocities

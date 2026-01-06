@@ -182,7 +182,12 @@ class IsaacPickPlaceEnv:
             
             # Define articulation policy
             self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow)
-            print("[INFO] RMPFlow Controller initialized with scaled assets.")
+            
+            # Sync initial base pose
+            p, o = self.robot_articulation.get_world_pose()
+            self.rmpflow.set_robot_base_pose(p, o)
+            
+            print("[INFO] RMPFlow Controller initialized with scaled assets and base pose synced.")
         except Exception as e:
             print(f"[WARN] Failed to initialize RMPFlow: {e}")
             self.rmpflow = None
@@ -315,6 +320,12 @@ class IsaacPickPlaceEnv:
         self._restore_fixed_camera_poses()
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
+        
+        # Sync robot base pose to RMPFlow after reset
+        if self.rmpflow:
+            p, o = self.robot_articulation.get_world_pose()
+            self.rmpflow.set_robot_base_pose(p, o)
+            
         for i in range(5): self.world.step(render=(render if i == 4 else False))
         self._apply_domain_randomization()
         self.reward_engine.reset()
