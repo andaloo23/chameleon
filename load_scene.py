@@ -242,7 +242,7 @@ class IsaacPickPlaceEnv:
             scale=self.cube_scale,
             size=1.0,
             color=np.array([1, 0, 0]),
-            mass=0.5, # Increased mass for stability
+            mass=2.0, # Increased mass for stability
         )
         self.world.scene.add(self.cube)
         
@@ -251,8 +251,8 @@ class IsaacPickPlaceEnv:
             if cube_prim and cube_prim.IsValid():
                 UsdPhysics.CollisionAPI.Apply(cube_prim)
                 material_api = UsdPhysics.MaterialAPI.Apply(cube_prim)
-                material_api.CreateStaticFrictionAttr().Set(1.0) # High friction
-                material_api.CreateDynamicFrictionAttr().Set(1.0)
+                material_api.CreateStaticFrictionAttr().Set(2.0) # High friction
+                material_api.CreateDynamicFrictionAttr().Set(2.0)
                 material_api.CreateRestitutionAttr().Set(0.0)
         except Exception: pass
 

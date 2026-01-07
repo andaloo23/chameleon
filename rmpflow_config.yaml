@@ -33,7 +33,7 @@ rmp_params:
     metric_explg_min_dist: 0.01
 
   joint_velocity_cap_rmp:
-    max_velocity: 1.0
+    max_velocity: 0.5
     velocity_damping_gain: 0.5
 
   obstacle_collision_rmp:
@@ -54,5 +54,5 @@ rmp_params:
     position_gain: 300.0
     inertia: 1.0
 
-max_acceleration: 10.0
-max_jerk: 100.0
+max_acceleration: 5.0
+max_jerk: 20.0
