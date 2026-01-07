@@ -35,5 +35,14 @@ joint_velocity_cap_rmp:
   max_velocity: 1.0
   velocity_damping_gain: 0.5
 
+obstacle_collision_rmp:
+  metric_weight: 10.0
+  boundary_threshold: 0.1
+  proximity_threshold: 0.05
+  restore_threshold: 0.02
+  damping_gain: 1.0
+  position_gain: 100.0
+  inertia: 1.0
+
 max_acceleration: 10.0
 max_jerk: 100.0
