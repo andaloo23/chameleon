@@ -1,48 +1,49 @@
 # RMPFlow parameters for SO-100
 api_version: 1.0
 
-joint_limit_buffers: [0.01, 0.01, 0.01, 0.01, 0.01]
+rmp_params:
+  joint_limit_buffers: [0.01, 0.01, 0.01, 0.01, 0.01]
 
-cspace_target_rmp:
-  metric_weight: 1.0
-  position_gain: 100.0
-  damping_gain: 20.0
-  robust_position_term_thresh: 0.01
-  inertia: 1.0
+  cspace_target_rmp:
+    metric_weight: 1.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_position_term_thresh: 0.01
+    inertia: 1.0
 
-target_rmp:
-  metric_weight: 1.0
-  position_gain: 200.0
-  damping_gain: 40.0
-  robust_position_term_thresh: 0.01
-  inertia: 1.0
-  min_metric_alpha: 0.1
-  metric_alpha_length_scale: 0.05
+  target_rmp:
+    metric_weight: 1.0
+    position_gain: 200.0
+    damping_gain: 40.0
+    robust_position_term_thresh: 0.01
+    inertia: 1.0
+    min_metric_alpha: 0.1
+    metric_alpha_length_scale: 0.05
 
-axis_target_rmp:
-  metric_weight: 1.0
-  position_gain: 100.0
-  damping_gain: 20.0
-  robust_position_term_thresh: 0.01
-  inertia: 1.0
+  axis_target_rmp:
+    metric_weight: 1.0
+    position_gain: 100.0
+    damping_gain: 20.0
+    robust_position_term_thresh: 0.01
+    inertia: 1.0
 
-joint_limit_rmp:
-  metric_weight: 1000.0
-  metric_length_scale: 0.01
-  metric_explg_min_dist: 0.01
+  joint_limit_rmp:
+    metric_weight: 1000.0
+    metric_length_scale: 0.01
+    metric_explg_min_dist: 0.01
 
-joint_velocity_cap_rmp:
-  max_velocity: 1.0
-  velocity_damping_gain: 0.5
+  joint_velocity_cap_rmp:
+    max_velocity: 1.0
+    velocity_damping_gain: 0.5
 
-obstacle_collision_rmp:
-  metric_weight: 10.0
-  boundary_threshold: 0.1
-  proximity_threshold: 0.05
-  restore_threshold: 0.02
-  damping_gain: 1.0
-  position_gain: 100.0
-  inertia: 1.0
+  obstacle_collision_rmp:
+    metric_weight: 10.0
+    boundary_threshold: 0.1
+    proximity_threshold: 0.05
+    restore_threshold: 0.02
+    damping_gain: 1.0
+    position_gain: 100.0
+    inertia: 1.0
 
 max_acceleration: 10.0
 max_jerk: 100.0

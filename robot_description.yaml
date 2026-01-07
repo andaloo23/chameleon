@@ -7,7 +7,6 @@ cspace:
   - elbow_flex
   - wrist_flex
   - wrist_roll
-default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
 collision_spheres:
   shoulder:
     - center: [0.0, 0.0, 0.0]
