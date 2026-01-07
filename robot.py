@@ -69,23 +69,44 @@ class SO100Robot:
         self.world.scene.add(self.robot)
         
     def configure_drives(self):
-        """Configure joint drives for smooth motion."""
-        # Arm joints (0-4)
-        for i in range(5):
-            self.robot.get_joint_control_interface().set_joint_drive_parameters(
-                joint_index=i,
-                stiffness=1e6, # High stiffness for precise RMPFlow tracking
-                damping=1e4,   # High damping to prevent oscillations
-                max_force=100.0
-            )
+        """Configure joint drives for smooth motion using USD API."""
+        from pxr import UsdPhysics, PhysxSchema
+        stage = self.world.stage
         
-        # Gripper joint (5)
-        self.robot.get_joint_control_interface().set_joint_drive_parameters(
-            joint_index=5,
-            stiffness=6000.0,
-            damping=400.0,
-            max_force=100.0
-        )
+        # Define joints and their desired gains
+        # joint_name -> (stiffness, damping)
+        arm_gains = {
+            "shoulder_pan": (1e6, 1e4),
+            "shoulder_lift": (1e6, 1e4),
+            "elbow_flex": (1e6, 1e4),
+            "wrist_flex": (1e6, 1e4),
+            "wrist_roll": (1e6, 1e4),
+            "gripper": (6000.0, 400.0)
+        }
+        
+        for joint_name, (stiffness, damping) in arm_gains.items():
+            joint_path = f"{self.prim_path}/{joint_name}"
+            joint_prim = stage.GetPrimAtPath(joint_path)
+            if joint_prim.IsValid():
+                if not joint_prim.HasAPI(PhysxSchema.PhysxJointAPI):
+                    PhysxSchema.PhysxJointAPI.Apply(joint_prim)
+                
+                # Apply DriveAPI for angular drive
+                drive = UsdPhysics.DriveAPI.Apply(joint_prim, "angular")
+                drive.CreateStiffnessAttr().Set(float(stiffness))
+                drive.CreateDampingAttr().Set(float(damping))
+                drive.CreateMaxForceAttr().Set(100.0)
+            else:
+                # Try common variations if name doesn't match exactly
+                for child in stage.GetPrimAtPath(self.prim_path).GetChildren():
+                    if joint_name in child.GetName():
+                        if not child.HasAPI(PhysxSchema.PhysxJointAPI):
+                            PhysxSchema.PhysxJointAPI.Apply(child)
+                        drive = UsdPhysics.DriveAPI.Apply(child, "angular")
+                        drive.CreateStiffnessAttr().Set(float(stiffness))
+                        drive.CreateDampingAttr().Set(float(damping))
+                        drive.CreateMaxForceAttr().Set(100.0)
+                        break
     
     def create_wrist_camera(self):
         """Create a camera attached to the robot's wrist."""
