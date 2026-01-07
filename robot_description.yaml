@@ -14,26 +14,26 @@ default_q:
   wrist_flex: -1.0
   wrist_roll: 0.0
 collision_spheres:
-  shoulder:
+  - shoulder:
     - center: [0.0, 0.0, 0.0]
       radius: 0.12
-  upper_arm:
+  - upper_arm:
     - center: [0.0, 0.1, 0.0]
       radius: 0.1
     - center: [0.0, 0.2, 0.0]
       radius: 0.1
     - center: [0.0, 0.28, 0.0]
       radius: 0.1
-  lower_arm:
+  - lower_arm:
     - center: [0.0, 0.0, 0.1]
       radius: 0.1
     - center: [0.0, 0.0, 0.2]
       radius: 0.1
     - center: [0.0, 0.0, 0.3]
       radius: 0.1
-  wrist:
+  - wrist:
     - center: [0.0, 0.0, 0.0]
       radius: 0.08
-  gripper:
+  - gripper:
     - center: [0.0, 0.0, 0.0]
       radius: 0.08
