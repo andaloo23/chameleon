@@ -67,6 +67,25 @@ class SO100Robot:
         self.prim_path = prim_path
         self.robot = Articulation(prim_path=prim_path, name="so_arm100")
         self.world.scene.add(self.robot)
+        
+    def configure_drives(self):
+        """Configure joint drives for smooth motion."""
+        # Arm joints (0-4)
+        for i in range(5):
+            self.robot.get_joint_control_interface().set_joint_drive_parameters(
+                joint_index=i,
+                stiffness=1e6, # High stiffness for precise RMPFlow tracking
+                damping=1e4,   # High damping to prevent oscillations
+                max_force=100.0
+            )
+        
+        # Gripper joint (5)
+        self.robot.get_joint_control_interface().set_joint_drive_parameters(
+            joint_index=5,
+            stiffness=6000.0,
+            damping=400.0,
+            max_force=100.0
+        )
     
     def create_wrist_camera(self):
         """Create a camera attached to the robot's wrist."""
@@ -161,13 +180,17 @@ class SO100Robot:
 
         return new_positions
     
-    def set_joint_positions(self, positions):
+    def set_joint_positions(self, positions, use_targets=True):
         """Set the joint positions of the robot.
         
         Args:
             positions: Array or list of joint positions
+            use_targets: If True, uses PD control targets. If False, snaps immediately.
         """
-        self.robot.set_joint_positions(np.array(positions))
+        if use_targets:
+            self.robot.set_joint_position_targets(np.array(positions))
+        else:
+            self.robot.set_joint_positions(np.array(positions))
     
     def get_robot(self):
         """Get the underlying Isaac Sim Robot object.

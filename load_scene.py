@@ -302,6 +302,7 @@ class IsaacPickPlaceEnv:
 
         self._apply_gripper_friction()
         self._configure_gripper_drive()
+        self.robot.configure_drives() # Set up PD controllers for arm
         for _ in range(5): self.world.step(render=not self.headless)
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
@@ -716,7 +717,7 @@ class IsaacPickPlaceEnv:
 
     def _apply_default_joint_positions(self):
         if self.robot and self._default_joint_positions is not None:
-            try: self.robot.set_joint_positions(self._default_joint_positions)
+            try: self.robot.set_joint_positions(self._default_joint_positions, use_targets=False)
             except Exception: pass
 
     def _capture_base_fixture_pose(self):
