@@ -170,12 +170,16 @@ class SimulationLoop:
             next_q[:5] = arm_q
 
             # Handle gripper
-            if _policy._state == "APPROACH":
-                next_q[5] = 1.2  # Open gripper
-            elif _policy._state == "GRASP":
-                next_q[5] = 0.05 if (step > 300 or grasped_flag) else 1.2  # Close gripper
+            if gripper_action is not None:
+                next_q[5] = gripper_action
             else:
-                next_q[5] = 0.05  # Keep gripper closed during lift
+                # Fallback logic if gripper_action wasn't set (shouldn't happen with current states)
+                if _policy.state == PolicyState.APPROACH:
+                    next_q[5] = 1.2  # Open gripper
+                elif _policy.state == PolicyState.GRASP:
+                    next_q[5] = 0.05 if (step > 300 or grasped_flag) else 1.2  # Close gripper
+                else:
+                    next_q[5] = 0.05  # Keep gripper closed during lift
 
             return next_q
 

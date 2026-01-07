@@ -87,6 +87,8 @@ class SO100Robot:
         
         camera_schema = UsdGeom.Camera(camera_prim)
         camera_schema.GetFocalLengthAttr().Set(18.0)
+        camera_schema.GetHorizontalApertureAttr().Set(2.0955)
+        camera_schema.GetVerticalApertureAttr().Set(2.0955)
     
     def update_wrist_camera_position(self, verbose=False):
         """Update the wrist camera position relative to the gripper.

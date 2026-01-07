@@ -264,8 +264,15 @@ class IsaacPickPlaceEnv:
         #     height=self.cup_height, bottom_thickness=self.cup_bottom_thickness, color=self.cup_color, mass=self.cup_mass
         # )
 
-        self.top_camera = Camera(prim_path="/World/top_camera", name="top_camera", position=np.array([0, 0, 1.5]))
-        self.side_camera = Camera(prim_path="/World/side_camera", name="side_camera", position=np.array([1.0, 0, 0.5]))
+        self.top_camera = Camera(prim_path="/World/top_camera", name="top_camera", position=np.array([0, 0, 1.5]), resolution=(128, 128))
+        self.side_camera = Camera(prim_path="/World/side_camera", name="side_camera", position=np.array([1.0, 0, 0.5]), resolution=(128, 128))
+        
+        # Ensure square pixels and consistent aspect ratio
+        for cam in [self.top_camera, self.side_camera]:
+            if cam.prim.IsValid():
+                cam.set_vertical_aperture(2.0955)
+                cam.set_horizontal_aperture(2.0955)
+        
         self.world.scene.add(self.top_camera)
         self.world.scene.add(self.side_camera)
 
