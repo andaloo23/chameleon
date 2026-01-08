@@ -189,9 +189,8 @@ class IsaacPickPlaceEnv:
             
             print("[INFO] RMPFlow Controller initialized with scaled assets and base pose synced.")
         except Exception as e:
-            print(f"[WARN] Failed to initialize RMPFlow: {e}")
-            self.rmpflow = None
-            self.motion_policy = None
+            print(f"[CRITICAL] Failed to initialize RMPFlow: {e}")
+            raise
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -479,117 +478,6 @@ class IsaacPickPlaceEnv:
         self.close()
         if self.simulation_app: self.simulation_app.close()
 
-    def compute_ik(self, target_pos: np.ndarray, target_quat: Optional[np.ndarray] = None, initial_q: Optional[np.ndarray] = None) -> np.ndarray:
-        """Corrected Geometric IK for SO-100 arm.
-        
-        Incorporates:
-        - Jaw extension in L3 for realistic reach.
-        - Precise URDF joint offsets (s_lift mapping).
-        - Search for optimal approach angle to maintain natural posture.
-        """
-        if initial_q is None:
-            initial_q = self.robot_articulation.get_joint_positions()
-        
-        best_q = np.array(initial_q, dtype=np.float32)
-        base_pos, _ = self.robot_articulation.get_world_pose()
-        
-        dx = target_pos[0] - base_pos[0]
-        dy = target_pos[1] - base_pos[1]
-        dz = target_pos[2] - base_pos[2]
-        
-        # Standard pan calculation (Assuming robot faces +X at pan=0)
-        pan = np.arctan2(dy, dx)
-        r_total = np.sqrt(dx**2 + dy**2)
-        
-        # Precise scaled parameters for 2.5x robot
-        L1 = 0.29       # shoulder_pan to elbow_flex
-        L2 = 0.3375     # elbow_flex to wrist_flex
-        L3 = 0.22       # wrist_flex to gripper center
-        
-        # Base origin to shoulder lift joint
-        R0 = 0.0        # Net offset in horizontal plane
-        Z0 = 0.11775    # Net height of shoulder lift joint
-        
-        r_rel = r_total - R0
-        z_rel = dz - Z0
-
-        if self._step_counter % 60 == 0:
-            print(f"[IK DEBUG] target_pos={target_pos}, r_rel={r_rel:.3f}, z_rel={z_rel:.3f}")
-        
-        # Joint limits for scoring and validation
-        limits = {
-            "lift": (0.0, 3.5),
-            "elbow": (-3.14158, 0.0),
-            "wrist": (-2.5, 1.2)
-        }
-        
-        best_score = -float('inf')
-        found_sol = False
-        
-        # Search for optimal approach angle phi (angle of gripper relative to horizontal)
-        for phi in np.linspace(-np.pi, 0.5 * np.pi, 64):
-            r_w = r_rel - L3 * np.cos(phi)
-            z_w = z_rel - L3 * np.sin(phi)
-            
-            dist_sq = r_w**2 + z_w**2
-            dist = np.sqrt(dist_sq)
-            
-            if dist > (L1 + L2) or dist < abs(L1 - L2):
-                continue
-            
-            for elbow_sign in [-1, 1]:
-                cos_elbow = (dist_sq - L1**2 - L2**2) / (2 * L1 * L2)
-                th2_rel = elbow_sign * np.arccos(np.clip(cos_elbow, -1, 1))
-                
-                alpha = np.arctan2(z_w, r_w)
-                beta = np.arctan2(L2 * np.sin(th2_rel), L1 + L2 * np.cos(th2_rel))
-                th1 = alpha - beta
-                
-                # Map to joint space using URDF-derived offsets
-                # shoulder_lift=0 points back/down, add 1.8 to point forward
-                s_lift = th1 + 1.8
-                e_flex = th2_rel - 1.571
-                w_flex = phi - (th1 + th2_rel) + 1.0
-                
-                # Validate against hard limits
-                if not (limits["lift"][0] <= s_lift <= limits["lift"][1] and
-                        limits["elbow"][0] <= e_flex <= limits["elbow"][1] and
-                        limits["wrist"][0] <= w_flex <= limits["wrist"][1]):
-                    continue
-                
-                # Scoring function:
-                # 1. Strong preference for lower shoulder (smaller s_lift) for extending forward
-                score = -2.0 * s_lift 
-                
-                # 2. Preference for joints to be away from limits
-                for val, lim in [(s_lift, limits["lift"]), (e_flex, limits["elbow"]), (w_flex, limits["wrist"])]:
-                    center = (lim[0] + lim[1]) / 2.0
-                    span = lim[1] - lim[0]
-                    score -= 0.5 * (abs(val - center) / span)**2
-                
-                # 3. Preference for downward approach phi for grasping (~ -1.2 rad)
-                score -= 0.5 * abs(phi + 1.2) 
-                
-                if score > best_score:
-                    best_score = score
-                    best_q[0] = np.clip(pan, -1.57, 1.57)
-                    best_q[1] = s_lift
-                    best_q[2] = e_flex
-                    best_q[3] = w_flex
-                    best_q[4] = 0.0 # wrist_roll
-                    found_sol = True
-        
-        if not found_sol:
-            # Fallback: update pan and keep current pose but perhaps point at it
-            best_q[0] = np.clip(pan, -1.57, 1.57)
-            # We could optionally raise the lift slightly here or just stick to initial_q
-            print(f"[IK] No solution found for target {target_pos}, distance {r_rel:.3f}m. Max reach is approx 0.8m-0.9m.")
-        else:
-            # Debug successful IK
-            if self._step_counter % 60 == 0:
-                 print(f"[IK] Found solution: pan={best_q[0]:.2f}, lift={best_q[1]:.2f}, elbow={best_q[2]:.2f}, wrist={best_q[3]:.2f}")
-            
-        return best_q
 
     def _sample_object_positions(self):
         # Use the workspace sampling logic to ensure reachable positions

@@ -159,11 +159,9 @@ class SimulationLoop:
                     # RMPFlow handles the first 5 degrees of freedom (cspace)
                     arm_q = articulation_action.joint_positions[:5]
                 else:
-                    # Fallback to IK if RMPFlow fails
-                    arm_q = self.env.compute_ik(target_pos)[:5]
+                    raise RuntimeError(f"RMPFlow failed to generate an action at step {step}")
             else:
-                # Fallback to IK if RMPFlow is not initialized
-                arm_q = self.env.compute_ik(target_pos)[:5]
+                raise RuntimeError("RMPFlow is not initialized or target position is missing")
 
             # Construct full 6D action
             next_q = np.zeros(6, dtype=np.float32)

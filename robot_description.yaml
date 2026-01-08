@@ -9,31 +9,31 @@ cspace:
   - wrist_roll
 default_q: [0.0, 1.8, -1.8, -1.0, 0.0]
 collision_spheres:
-  - base:
-      - center: [0.0, -0.113, 0.04]
-        radius: 0.15
-      - center: [0.0, 0.0, 0.0]
-        radius: 0.15
-  - shoulder:
-      - center: [0.0, 0.0, 0.0]
-        radius: 0.12
-  - upper_arm:
-      - center: [0.0, 0.1, 0.0]
-        radius: 0.1
-      - center: [0.0, 0.2, 0.0]
-        radius: 0.1
-      - center: [0.0, 0.28, 0.0]
-        radius: 0.1
-  - lower_arm:
-      - center: [0.0, 0.0, 0.1]
-        radius: 0.1
-      - center: [0.0, 0.0, 0.2]
-        radius: 0.1
-      - center: [0.0, 0.0, 0.3]
-        radius: 0.1
-  - wrist:
-      - center: [0.0, 0.0, 0.0]
-        radius: 0.08
-  - gripper:
-      - center: [0.0, 0.0, 0.0]
-        radius: 0.08
+  base:
+    - center: [0.0, -0.113, 0.04]
+      radius: 0.15
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.15
+  shoulder:
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.12
+  upper_arm:
+    - center: [0.0, 0.1, 0.0]
+      radius: 0.1
+    - center: [0.0, 0.2, 0.0]
+      radius: 0.1
+    - center: [0.0, 0.28, 0.0]
+      radius: 0.1
+  lower_arm:
+    - center: [0.0, 0.0, 0.1]
+      radius: 0.1
+    - center: [0.0, 0.0, 0.2]
+      radius: 0.1
+    - center: [0.0, 0.0, 0.3]
+      radius: 0.1
+  wrist:
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.08
+  gripper:
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.08
