@@ -302,7 +302,10 @@ class IsaacPickPlaceEnv:
         self._apply_gripper_friction()
         self._configure_gripper_drive()
         self.robot.configure_drives() # Set up PD controllers for arm
-        for _ in range(5): self.world.step(render=not self.headless)
+        
+        # Increased warm-up for camera/synthetic data stability
+        for _ in range(20): self.world.step(render=not self.headless)
+        
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
 
@@ -344,6 +347,9 @@ class IsaacPickPlaceEnv:
         # Sync initial state to RMPFlow
         if self.rmpflow:
             self.rmpflow.set_robot_base_pose(*self.robot_articulation.get_world_pose())
+            
+        # Ensure cameras have a chance to render before observation
+        for _ in range(10): self.world.step(render=render)
             
         return self._get_observation()
 

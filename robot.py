@@ -109,10 +109,17 @@ class SO100Robot:
                         drive.CreateMaxForceAttr().Set(100.0)
                         break
     
-    def create_wrist_camera(self):
-        """Create a camera attached to the robot's wrist."""
-        wrist_camera_path = f"{self.prim_path}/gripper/wrist_camera_sensor"
-        
+        # Verify that the parent link exists
+        stage = get_context().get_stage()
+        parent_prim = stage.GetPrimAtPath(f"{self.prim_path}/gripper")
+        if not parent_prim.IsValid():
+            print(f"[WARN] Wrist camera parent link '/gripper' not found at {self.prim_path}. Checking children...")
+            for child in stage.GetPrimAtPath(self.prim_path).GetChildren():
+                if "gripper" in child.GetName().lower():
+                    wrist_camera_path = f"{child.GetPath()}/wrist_camera_sensor"
+                    print(f"[INFO] Using child link for camera: {child.GetPath()}")
+                    break
+
         self.wrist_camera = Camera(
             prim_path=wrist_camera_path,
             name="wrist_camera",
@@ -122,6 +129,12 @@ class SO100Robot:
         
         self.world.scene.add(self.wrist_camera)
         self.wrist_camera.initialize()
+        
+        # Warm up the camera sensor
+        for _ in range(5):
+            self.world.step(render=True)
+            if hasattr(self.world, "app"): # Some versions of Isaac Sim have this
+                self.world.app.update()
         
         stage = get_context().get_stage()
         camera_prim = stage.GetPrimAtPath(wrist_camera_path)
