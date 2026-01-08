@@ -109,6 +109,10 @@ class SO100Robot:
                         drive.CreateMaxForceAttr().Set(100.0)
                         break
     
+    def create_wrist_camera(self):
+        """Create a camera attached to the robot's wrist."""
+        wrist_camera_path = f"{self.prim_path}/gripper/wrist_camera_sensor"
+        
         # Verify that the parent link exists
         stage = get_context().get_stage()
         parent_prim = stage.GetPrimAtPath(f"{self.prim_path}/gripper")
@@ -130,19 +134,18 @@ class SO100Robot:
         self.world.scene.add(self.wrist_camera)
         self.wrist_camera.initialize()
         
-        # Warm up the camera sensor
+        # Force some updates for camera stability
         for _ in range(5):
             self.world.step(render=True)
-            if hasattr(self.world, "app"): # Some versions of Isaac Sim have this
+            if hasattr(self.world, "app"):
                 self.world.app.update()
         
-        stage = get_context().get_stage()
         camera_prim = stage.GetPrimAtPath(wrist_camera_path)
-        
-        camera_schema = UsdGeom.Camera(camera_prim)
-        camera_schema.GetFocalLengthAttr().Set(18.0)
-        camera_schema.GetHorizontalApertureAttr().Set(2.0955)
-        camera_schema.GetVerticalApertureAttr().Set(2.0955)
+        if camera_prim.IsValid():
+            camera_schema = UsdGeom.Camera(camera_prim)
+            camera_schema.GetFocalLengthAttr().Set(18.0)
+            camera_schema.GetHorizontalApertureAttr().Set(2.0955)
+            camera_schema.GetVerticalApertureAttr().Set(2.0955)
     
     def update_wrist_camera_position(self, verbose=False):
         """Update the wrist camera position relative to the gripper.

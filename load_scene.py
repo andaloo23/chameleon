@@ -303,8 +303,12 @@ class IsaacPickPlaceEnv:
         self._configure_gripper_drive()
         self.robot.configure_drives() # Set up PD controllers for arm
         
-        # Increased warm-up for camera/synthetic data stability
-        for _ in range(20): self.world.step(render=not self.headless)
+        # Robust warm-up for synthetic data stabilization
+        print("[INFO] Warming up simulation and synthetic data pipeline...")
+        for i in range(50):
+            self.world.step(render=(i > 20))
+            if self.simulation_app and i % 5 == 0:
+                self.simulation_app.update()
         
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
@@ -547,10 +551,15 @@ class IsaacPickPlaceEnv:
         for k, c in cams.items():
             processed = None
             if c:
-                try:
-                    processed = self._prepare_camera_frame(c.get_rgba(), k)
-                    if processed is not None: self._last_camera_frames[k], self._camera_failure_logged[k] = processed, False
-                except Exception: self._camera_failure_logged[k] = True
+                # Skip rgba capture for very first few frames to avoid syntheticdata race conditions
+                if self._step_counter < 10:
+                    processed = None
+                else:
+                    try:
+                        processed = self._prepare_camera_frame(c.get_rgba(), k)
+                        if processed is not None: self._last_camera_frames[k], self._camera_failure_logged[k] = processed, False
+                    except Exception: 
+                        self._camera_failure_logged[k] = True
             if processed is None:
                 cached = self._last_camera_frames.get(k)
                 processed = cached if cached is not None else self._allocate_empty_camera_frame(c, k)
