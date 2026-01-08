@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from omni.isaac.core.articulations import Articulation
+from omni.isaac.core.utils.types import ArticulationAction
 from isaacsim.asset.importer.urdf import _urdf
 import omni.kit.commands
 from omni.usd import get_context
@@ -206,10 +207,10 @@ class SO100Robot:
         
         Args:
             positions: Array or list of joint positions
-            use_targets: If True, uses PD control targets. If False, snaps immediately.
+            use_targets: If True, uses PD control targets via apply_action. If False, snaps immediately.
         """
         if use_targets:
-            self.robot.set_joint_position_targets(np.array(positions))
+            self.robot.apply_action(ArticulationAction(joint_positions=np.array(positions)))
         else:
             self.robot.set_joint_positions(np.array(positions))
     
