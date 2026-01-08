@@ -449,11 +449,32 @@ class IsaacPickPlaceEnv:
 
     def close(self):
         if self.gripper_weld: self.gripper_weld.release()
+        
+        # Explicitly remove cameras from the scene to avoid shutdown crashes
+        if self.world and self.world.scene:
+            try:
+                for name in ["top_camera", "side_camera", "wrist_camera"]:
+                    if self.world.scene.object_exists(name):
+                        self.world.scene.remove_object(name)
+            except Exception: pass
+            
         if self.world: self.world.clear()
+        
+        self.robot = None
+        self.robot_articulation = None
+        self.top_camera = None
+        self.side_camera = None
 
     def shutdown(self):
+        print("[INFO] Shutting down simulation...")
+        if self.world:
+            try: self.world.pause()
+            except Exception: pass
         self.close()
-        if self.simulation_app: self.simulation_app.close()
+        if self.simulation_app: 
+            self.simulation_app.close()
+            global _SIMULATION_APP
+            _SIMULATION_APP = None
 
 
     def _sample_object_positions(self):
@@ -724,6 +745,8 @@ def run_demo():
     env.reset()
     try:
         for _ in range(100): env.step(env.robot.get_random_joint_positions(), render=True)
-    finally: env.shutdown()
+    finally: 
+        env.shutdown()
+        del env
 
 if __name__ == "__main__": run_demo()
