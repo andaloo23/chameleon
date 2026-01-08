@@ -167,7 +167,7 @@ class IsaacPickPlaceEnv:
             from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
             
             # Scaled URDF and split config paths
-            urdf_path = os.path.join(self.current_dir, "scaled_so100.urdf")
+            urdf_path = os.path.join(self.current_dir, "so100.urdf")
             robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
             rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
             
@@ -224,7 +224,7 @@ class IsaacPickPlaceEnv:
         except Exception as e:
             print(f"[warn] Could not configure physics: {e}")
 
-        self.robot = SO100Robot(self.world, os.path.join(self.current_dir, "scaled_so100.urdf"))
+        self.robot = SO100Robot(self.world, os.path.join(self.current_dir, "so100.urdf"))
         self.robot_articulation = self.robot.get_robot()
         
         self._base_fixture_pose = None
