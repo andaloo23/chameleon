@@ -140,6 +140,9 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
         
+        self.rmpflow = None
+        self.motion_policy = None
+        
         # Intelligent physics weld
         self.gripper_weld = IntelligentGripperWeld(
             env=self,
@@ -162,35 +165,7 @@ class IsaacPickPlaceEnv:
         self.reward_engine.initialize()
         self.reward_engine.reset()
         
-        # Initialize RMPFlow Controller
-        try:
-            from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
-            
-            # Scaled URDF and split config paths
-            urdf_path = os.path.join(self.current_dir, "so100.urdf")
-            robot_description_path = os.path.join(self.current_dir, "robot_description.yaml")
-            rmpflow_config_path = os.path.join(self.current_dir, "rmpflow_config.yaml")
-            
-            # Initialize RMPFlow
-            self.rmpflow = RmpFlow(
-                robot_description_path=robot_description_path,
-                urdf_path=urdf_path,
-                rmpflow_config_path=rmpflow_config_path,
-                end_effector_frame_name="gripper",
-                maximum_substep_size=0.0033
-            )
-            
-            # Define articulation policy
-            self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow)
-            
-            # Sync initial base pose
-            p, o = self.robot_articulation.get_world_pose()
-            self.rmpflow.set_robot_base_pose(p, o)
-            
-            print("[INFO] RMPFlow Controller initialized with scaled assets and base pose synced.")
-        except Exception as e:
-            print(f"[CRITICAL] Failed to initialize RMPFlow: {e}")
-            raise
+        # RMPFlow Controller removed per user request
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -335,10 +310,7 @@ class IsaacPickPlaceEnv:
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        # Sync robot base pose to RMPFlow after reset
-        if self.rmpflow:
-            p, o = self.robot_articulation.get_world_pose()
-            self.rmpflow.set_robot_base_pose(p, o)
+        # RMPFlow sync removed
             
         for i in range(5): self.world.step(render=(render if i == 4 else False))
         self._apply_domain_randomization()
@@ -348,9 +320,7 @@ class IsaacPickPlaceEnv:
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         
-        # Sync initial state to RMPFlow
-        if self.rmpflow:
-            self.rmpflow.set_robot_base_pose(*self.robot_articulation.get_world_pose())
+        # RMPFlow sync removed
             
         # Ensure cameras have a chance to render before observation
         for _ in range(10): self.world.step(render=render)
@@ -465,10 +435,7 @@ class IsaacPickPlaceEnv:
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
 
-        # RMPFlow doesn't strictly need a "publish" step here as it queries state when calculate_joint_command is called
-        # but we ensure the base pose is up to date if the robot moves
-        if self.rmpflow:
-            self.rmpflow.set_robot_base_pose(*self.robot_articulation.get_world_pose())
+        # RMPFlow sync removed
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
