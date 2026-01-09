@@ -33,7 +33,7 @@ ArticulationMotionPolicy = None
 def _ensure_isaac_sim(headless=False):
     """Create the SimulationApp and late-import Isaac APIs on first use."""
     global _SIMULATION_APP, _SIM_HEADLESS_FLAG
-    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, Usd, SO100Robot
+    global World, DynamicCuboid, get_context, Camera, Gf, UsdGeom, UsdPhysics, Usd, SO100Robot, RmpFlow, ArticulationMotionPolicy
 
     if _SIMULATION_APP is None:
         _SIMULATION_APP = SimulationApp({
@@ -323,7 +323,10 @@ class IsaacPickPlaceEnv:
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        # RMPFlow sync removed
+        # RMPFlow sync
+        if self.rmpflow:
+            self.rmpflow.set_ignore_state_updates(True)
+            self.rmpflow.visualize_collision_spheres()
             
         for i in range(5): self.world.step(render=(render if i == 4 else False))
         self._apply_domain_randomization()
@@ -333,7 +336,9 @@ class IsaacPickPlaceEnv:
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         
-        # RMPFlow sync removed
+        # RMPFlow sync
+        if self.rmpflow:
+            self.rmpflow.set_ignore_state_updates(False)
             
         # Ensure cameras have a chance to render before observation
         for _ in range(10): self.world.step(render=render)
@@ -448,7 +453,9 @@ class IsaacPickPlaceEnv:
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
 
-        # RMPFlow sync removed
+        # RMPFlow sync
+        if self.rmpflow:
+            self.rmpflow.update_robot_state()
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
