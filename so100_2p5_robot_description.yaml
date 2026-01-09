@@ -1,0 +1,39 @@
+# so100_2p5_robot_description.yaml
+# Robot description for Lula / RMPflow based on your URDF
+
+format: "xrdf"
+
+robot:
+  # Point this to wherever your URDF is on disk
+  urdf_path: "/Users/andrewliu/Documents/chameleon/so100.urdf"
+
+  # Base and end-effector frames must match link names in the URDF
+  base_link: "base"
+
+  # Use the gripper link as the EE frame (stable). "jaw" moves due to the gripper joint.
+  end_effector_link: "gripper"
+
+  # Joints to be controlled by RMPflow (exclude the jaw joint for planning)
+  cspace:
+    joint_names:
+      - "shoulder_pan"
+      - "shoulder_lift"
+      - "elbow_flex"
+      - "wrist_flex"
+      - "wrist_roll"
+
+    # A reasonable neutral pose (must be within your limits)
+    # shoulder_pan:   [-1.57079,  1.57079]
+    # shoulder_lift:  [ 0.0,      3.5]
+    # elbow_flex:     [-3.14158,  0.0]
+    # wrist_flex:     [-2.5,      1.2]
+    # wrist_roll:     [-3.14158,  3.14158]
+    default_q:
+      - 0.0
+      - 1.2
+      - -1.4
+      - 0.2
+      - 0.0
+
+  # Optional: if you want a TCP offset, add a tool frame in the URDF ideally.
+  # If you can’t, you can conceptually treat "gripper" as your TCP.

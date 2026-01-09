@@ -1,0 +1,99 @@
+# so100_2p5_rmpflow_config.yaml
+# First-pass RMPflow tuning for your SO100 (2.5x) arm
+
+# Buffer away from hard joint limits (radians)
+joint_limit_buffers: [0.05, 0.05, 0.05, 0.05, 0.05]
+
+# RMP parameters
+rmp_params:
+  # Pull joints toward a target configuration (helps stability)
+  cspace_target_rmp:
+    metric_scalar: 50.0
+    position_gain: 120.0
+    damping_gain: 40.0
+    robust_position_term_thresh: 0.5
+    inertia: 1.0
+
+  # Avoid joint limits
+  joint_limit_rmp:
+    metric_scalar: 1200.0
+    metric_length_scale: 0.02
+    metric_exploder_eps: 1.0e-3
+    metric_velocity_gate_length_scale: 0.02
+    accel_damper_gain: 300.0
+    accel_potential_gain: 1.0
+    accel_potential_exploder_length_scale: 0.12
+    accel_potential_exploder_eps: 1.0e-2
+
+  # Cap joint speeds (helps with oscillation)
+  joint_velocity_cap_rmp:
+    max_velocity: 2.5
+    velocity_damping_region: 1.2
+    damping_gain: 800.0
+    metric_weight: 120.0
+
+  # Cartesian target behavior (end-effector attractor)
+  # If your Isaac version uses slightly different key names,
+  # keep the structure but match the template your Isaac install provides.
+  target_rmp:
+    accel_p_gain: 140.0
+    accel_d_gain: 35.0
+    metric_alpha_length_scale: 0.15
+    metric_scalar: 60.0
+
+  # Collision avoidance (spheres below)
+  collision_rmp:
+    metric_scalar: 3000.0
+    metric_length_scale: 0.08
+    damping_gain: 60.0
+    repulsion_gain: 0.015
+    repulsion_std_dev: 0.10
+    # The 2.5x scale increases link lengths, so std_dev can be a bit larger.
+
+# Collision spheres (approximate)
+# You will refine these once you visualize spheres in Isaac.
+# Positions are in each sphere's parent link frame.
+collision_spheres:
+  - link: "base"
+    spheres:
+      - center: [0.0, 0.0, 0.05]
+        radius: 0.09
+
+  - link: "shoulder"
+    spheres:
+      - center: [0.0, 0.10, 0.06]
+        radius: 0.06
+      - center: [0.0, 0.20, 0.06]
+        radius: 0.06
+
+  - link: "upper_arm"
+    spheres:
+      - center: [0.0, 0.08, 0.02]
+        radius: 0.05
+      - center: [0.0, 0.18, 0.02]
+        radius: 0.05
+      - center: [0.0, 0.28, 0.03]
+        radius: 0.045
+
+  - link: "lower_arm"
+    spheres:
+      - center: [0.0, 0.05, 0.06]
+        radius: 0.045
+      - center: [0.0, 0.05, 0.18]
+        radius: 0.045
+      - center: [0.0, 0.05, 0.30]
+        radius: 0.04
+
+  - link: "wrist"
+    spheres:
+      - center: [0.0, -0.06, 0.0]
+        radius: 0.05
+      - center: [0.0, -0.12, 0.0]
+        radius: 0.045
+
+  - link: "gripper"
+    spheres:
+      - center: [0.02, -0.04, 0.0]
+        radius: 0.04
+      - center: [0.06, -0.08, 0.0]
+        radius: 0.035

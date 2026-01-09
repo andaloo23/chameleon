@@ -21,11 +21,9 @@ World = None
 DynamicCuboid = None
 get_context = None
 Camera = None
-Gf = None
-UsdGeom = None
-UsdPhysics = None
-Usd = None
-SO100Robot = None
+from pxr import Gf, UsdGeom, UsdPhysics, Usd
+from robot import SO100Robot
+from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
 
 
 def _ensure_isaac_sim(headless=False):
@@ -165,7 +163,15 @@ class IsaacPickPlaceEnv:
         self.reward_engine.initialize()
         self.reward_engine.reset()
         
-        # RMPFlow Controller removed per user request
+        # RMPFlow Controller Initialization
+        self.rmpflow = RmpFlow(
+            robot_description_path=os.path.join(self.current_dir, "so100_2p5_robot_description.yaml"),
+            rmpflow_config_path=os.path.join(self.current_dir, "so100_2p5_rmpflow_config.yaml"),
+            urdf_path=os.path.join(self.current_dir, "so100.urdf"),
+            end_effector_frame_name="gripper",
+            maximum_substep_size=1.0 / 60.0
+        )
+        self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow, 1.0 / 60.0)
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
