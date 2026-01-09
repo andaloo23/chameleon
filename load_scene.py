@@ -21,9 +21,13 @@ World = None
 DynamicCuboid = None
 get_context = None
 Camera = None
-from pxr import Gf, UsdGeom, UsdPhysics, Usd
-from robot import SO100Robot
-from omni.isaac.motion_generation import RmpFlow, ArticulationMotionPolicy
+Gf = None
+UsdGeom = None
+UsdPhysics = None
+Usd = None
+SO100Robot = None
+RmpFlow = None
+ArticulationMotionPolicy = None
 
 
 def _ensure_isaac_sim(headless=False):
@@ -43,6 +47,7 @@ def _ensure_isaac_sim(headless=False):
         from omni.isaac.sensor import Camera as _Camera
         from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics, Usd as _Usd
         from robot import SO100Robot as _SO100Robot
+        from omni.isaac.motion_generation import RmpFlow as _RmpFlow, ArticulationMotionPolicy as _ArticulationMotionPolicy
 
         World = _World
         DynamicCuboid = _DynamicCuboid
@@ -53,6 +58,8 @@ def _ensure_isaac_sim(headless=False):
         UsdPhysics = _UsdPhysics
         Usd = _Usd
         SO100Robot = _SO100Robot
+        RmpFlow = _RmpFlow
+        ArticulationMotionPolicy = _ArticulationMotionPolicy
         initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
     elif headless != _SIM_HEADLESS_FLAG:
