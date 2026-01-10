@@ -6,6 +6,7 @@ joint_limit_buffers: [0.05, 0.05, 0.05, 0.05, 0.05]
 
 # RMP parameters
 rmp_params:
+  # Pull joints toward a target configuration (helps stability)
   cspace_target_rmp:
     metric_scalar: 50.0
     position_gain: 120.0
@@ -13,6 +14,7 @@ rmp_params:
     robust_position_term_thresh: 0.5
     inertia: 1.0
 
+  # Avoid joint limits
   joint_limit_rmp:
     metric_scalar: 1200.0
     metric_length_scale: 0.02
@@ -23,18 +25,22 @@ rmp_params:
     accel_potential_exploder_length_scale: 0.12
     accel_potential_exploder_eps: 1.0e-2
 
+  # Cap joint speeds (helps with oscillation)
   joint_velocity_cap_rmp:
     max_velocity: 2.5
     velocity_damping_region: 1.2
     damping_gain: 800.0
     metric_weight: 120.0
 
-  target_rmp:
+  # Cartesian target behavior (end-effector attractor)
+  # Renamed from target_rmp to attractor_rmp to fix canonical_resolve errors
+  attractor_rmp:
     accel_p_gain: 140.0
     accel_d_gain: 35.0
     metric_alpha_length_scale: 0.15
     metric_scalar: 60.0
 
+  # Collision avoidance (spheres defined in robot_description.yaml)
   collision_rmp:
     metric_scalar: 3000.0
     metric_length_scale: 0.08

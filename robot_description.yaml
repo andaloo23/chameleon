@@ -4,8 +4,8 @@ api_version: 1.0
 # The name of the robot in the URDF (so_arm100)
 robot_name: "so_arm100"
 
-# Lula/Rmpflow active joints
-active_joints:
+# Lula/Rmpflow coordinate space
+cspace:
   - shoulder_pan
   - shoulder_lift
   - elbow_flex
