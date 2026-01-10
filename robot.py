@@ -30,6 +30,11 @@ class SO100Robot:
             "2": { "gripper": 0.0, "wrist_roll": 90.0, "wrist_flex": 0.0, "elbow_flex": 45.0, "shoulder_lift": 45.0, "shoulder_pan": 90.0 },
             "3": { "gripper": 40.0, "wrist_roll": 90.0, "wrist_flex": 90.0, "elbow_flex": 45.0, "shoulder_lift": 45.0, "shoulder_pan": 90.0 },
             "4": { "gripper": 40.0, "wrist_roll": 90.0, "wrist_flex": -60.0, "elbow_flex": 20.0, "shoulder_lift": 80.0, "shoulder_pan": 90.0 },
+        },
+        "MOVEMENT_CONSTANTS": {
+            "DEGREES_PER_STEP": 1.5,           # Degrees per interpolation step
+            "MAX_INTERPOLATION_STEPS": 150,    # Maximum number of interpolation steps
+            "STEP_DELAY_SECONDS": 0.01,        # Delay between interpolation steps (100Hz)
         }
     }
 
@@ -323,6 +328,39 @@ class SO100Robot:
         positions = [joint_dict[name] for name in self.joint_names]
         self.set_joint_positions(positions)
         return True
+
+    def move_interpolated(self, target_positions, render=True):
+        """Move to target positions using interpolation constants.
+        
+        Args:
+            target_positions: Final joint positions (radians)
+            render: Whether to render simulation steps
+        """
+        current_positions = np.array(self.robot.get_joint_positions())
+        target_positions = np.array(target_positions)
+        
+        diff = target_positions - current_positions
+        max_diff_deg = np.max(np.abs(np.rad2deg(diff)))
+        
+        constants = self.CONFIG["MOVEMENT_CONSTANTS"]
+        num_steps = int(min(
+            constants["MAX_INTERPOLATION_STEPS"],
+            max(1, max_diff_deg / constants["DEGREES_PER_STEP"])
+        ))
+        
+        for i in range(1, num_steps + 1):
+            interp_pos = current_positions + (diff * (i / num_steps))
+            self.set_joint_positions(interp_pos, use_targets=True)
+            self.world.step(render=render)
+            
+            # Optional: Simulate hardware delay
+            # time.sleep(constants["STEP_DELAY_SECONDS"]) 
+            # Note: time.sleep might block Isaac Sim execution, 
+            # so we rely on world.step() for simulation time.
+        
+        # Ensure we reached the target exactly at the end
+        self.set_joint_positions(target_positions, use_targets=True)
+        self.world.step(render=render)
     
     def get_robot(self):
         """Get the underlying Isaac Sim Robot object.
