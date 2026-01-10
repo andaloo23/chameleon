@@ -189,11 +189,11 @@
   </link>
 
 
-  <!-- Joint from base to shoulder. Combined height to shoulder_lift should be ~120mm -->
+  <!-- Joint from base to shoulder -->
   <joint name="shoulder_pan" type="revolute">
     <parent link="base"/>
     <child link="shoulder"/>
-    <origin xyz="0 -0.0452 0.0435" rpy="1.57079 0 0"/>
+    <origin xyz="0 -0.0452 0.0165" rpy="1.57079 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-1.57079" upper="1.57079" effort="35" velocity="1"/>
   </joint>
