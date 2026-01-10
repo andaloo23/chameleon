@@ -238,7 +238,7 @@
   <joint name="gripper" type="revolute">
     <parent link="gripper"/>
     <child link="jaw"/>
-    <origin xyz="-0.0505 -0.061 0" rpy="0 3.14158 0"/>
+    <origin xyz="-0.0202 -0.0244 0" rpy="0 3.14158 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-0.2" upper="2.0" effort="35" velocity="1"/>
   </joint>
