@@ -20,3 +20,51 @@ default_q:
 
   # Optional: if you want a TCP offset, add a tool frame in the URDF ideally.
   # If you can’t, you can conceptually treat "gripper" as your TCP.
+
+# Collision spheres (approximate)
+# You will refine these once you visualize spheres in Isaac.
+# Positions are in each sphere's parent link frame.
+collision_spheres:
+  - link: "base"
+    spheres:
+      - center: [0.0, 0.0, 0.05]
+        radius: 0.09
+
+  - link: "shoulder"
+    spheres:
+      - center: [0.0, 0.10, 0.06]
+        radius: 0.06
+      - center: [0.0, 0.20, 0.06]
+        radius: 0.06
+
+  - link: "upper_arm"
+    spheres:
+      - center: [0.0, 0.08, 0.02]
+        radius: 0.05
+      - center: [0.0, 0.18, 0.02]
+        radius: 0.05
+      - center: [0.0, 0.28, 0.03]
+        radius: 0.045
+
+  - link: "lower_arm"
+    spheres:
+      - center: [0.0, 0.05, 0.06]
+        radius: 0.045
+      - center: [0.0, 0.05, 0.18]
+        radius: 0.045
+      - center: [0.0, 0.05, 0.30]
+        radius: 0.04
+
+  - link: "wrist"
+    spheres:
+      - center: [0.0, -0.06, 0.0]
+        radius: 0.05
+      - center: [0.0, -0.12, 0.0]
+        radius: 0.045
+
+  - link: "gripper"
+    spheres:
+      - center: [0.02, -0.04, 0.0]
+        radius: 0.04
+      - center: [0.06, -0.08, 0.0]
+        radius: 0.035
