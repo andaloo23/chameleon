@@ -81,7 +81,7 @@ class IsaacPickPlaceEnv:
         self.use_weld_gripper = True
 
         # Physics parameters
-        self.cube_mass = 0.08
+        self.cube_mass = 0.02
         self._cube_friction = 2.2
         self._gripper_friction = 2.2
         self._gripper_drive_stiffness = 6000.0
@@ -105,10 +105,10 @@ class IsaacPickPlaceEnv:
         self.cup_xform = None
         self.cube = None
 
-        self.cube_scale = np.array([0.075, 0.075, 0.075], dtype=float)
-        self.cup_height = 0.18
-        self.cup_outer_radius_top = 0.11
-        self.cup_outer_radius_bottom = 0.085
+        self.cube_scale = np.array([0.04, 0.04, 0.04], dtype=float)
+        self.cup_height = 0.072
+        self.cup_outer_radius_top = 0.044
+        self.cup_outer_radius_bottom = 0.034
         self.cup_wall_thickness = 0.012
         self.cup_inner_radius_top = max(self.cup_outer_radius_top - self.cup_wall_thickness,
                                         self.cup_outer_radius_top * 0.55)
