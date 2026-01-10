@@ -264,8 +264,8 @@ class IsaacPickPlaceEnv:
         self._capture_base_fixture_pose()
         self._resolve_link_paths()
         
-        tp, to = np.array([0.0, 0.0, 1.2]), np.array([0, 0.7071, 0.7071, 0]) # Looking straight down
-        sp, so = np.array([1.0, 0.0, 0.5]), np.array([0.5, -0.5, -0.5, 0.5]) # Side view looking towards origin
+        tp, to = np.array([0.0, 0.0, 1.2]), np.array([1.0, 0.0, 0.0, 0.0]) # Identity: looking straight down from +Z
+        sp, so = np.array([0.0, 1.0, 0.5]), np.array([0.7071, 0.7071, 0.0, 0.0]) # 90 deg X: looking along -Y towards origin
         self.top_camera.set_world_pose(position=tp, orientation=to)
         self.side_camera.set_world_pose(position=sp, orientation=so)
         self._fixed_camera_poses = {"top": (tp, to), "side": (sp, so)}

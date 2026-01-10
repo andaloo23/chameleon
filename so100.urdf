@@ -21,19 +21,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Base.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Base_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Base_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Base.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -47,19 +47,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Rotation_Pitch.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Rotation_Pitch_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Rotation_Pitch.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -73,19 +73,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Upper_Arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Upper_Arm.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Upper_Arm_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Upper_Arm_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Upper_Arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Upper_Arm.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -99,19 +99,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Lower_Arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Lower_Arm.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Lower_Arm_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Lower_Arm_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Lower_Arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Lower_Arm.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -125,19 +125,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Wrist_Pitch_Roll_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -151,19 +151,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Fixed_Jaw.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw_Motor.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Fixed_Jaw_Motor.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Fixed_Jaw.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
@@ -177,13 +177,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Moving_Jaw.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Moving_Jaw.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Moving_Jaw.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="assets/Moving_Jaw.stl" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
