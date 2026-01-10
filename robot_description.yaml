@@ -1,8 +1,18 @@
 # robot_description.yaml
 api_version: 1.0
-# Robot description for Lula / RMPflow based on your URDF
 
-# Joints to be controlled by RMPflow (exclude the jaw joint for planning)
+# The name of the robot in the URDF (so_arm100)
+robot_name: "so_arm100"
+
+# Lua/Rmpflow active joints
+active_joints:
+  - shoulder_pan
+  - shoulder_lift
+  - elbow_flex
+  - wrist_flex
+  - wrist_roll
+
+# Legacy fallback for cspace
 cspace:
   - shoulder_pan
   - shoulder_lift
@@ -10,7 +20,7 @@ cspace:
   - wrist_flex
   - wrist_roll
 
-# A reasonable neutral pose (must be within your limits)
+# A reasonable neutral pose
 default_q:
   - 0.0
   - 1.2
@@ -18,53 +28,42 @@ default_q:
   - 0.2
   - 0.0
 
-  # Optional: if you want a TCP offset, add a tool frame in the URDF ideally.
-  # If you can’t, you can conceptually treat "gripper" as your TCP.
-
-# Collision spheres (approximate)
-# You will refine these once you visualize spheres in Isaac.
-# Positions are in each sphere's parent link frame.
+# Collision spheres (Dictionary format to avoid consolidation warnings)
 collision_spheres:
-  - link: "base"
-    spheres:
-      - center: [0.0, 0.0, 0.05]
-        radius: 0.09
+  base:
+    - center: [0.0, 0.0, 0.05]
+      radius: 0.09
+  
+  shoulder:
+    - center: [0.0, 0.10, 0.06]
+      radius: 0.06
+    - center: [0.0, 0.20, 0.06]
+      radius: 0.06
 
-  - link: "shoulder"
-    spheres:
-      - center: [0.0, 0.10, 0.06]
-        radius: 0.06
-      - center: [0.0, 0.20, 0.06]
-        radius: 0.06
+  upper_arm:
+    - center: [0.0, 0.08, 0.02]
+      radius: 0.05
+    - center: [0.0, 0.18, 0.02]
+      radius: 0.05
+    - center: [0.0, 0.28, 0.03]
+      radius: 0.045
 
-  - link: "upper_arm"
-    spheres:
-      - center: [0.0, 0.08, 0.02]
-        radius: 0.05
-      - center: [0.0, 0.18, 0.02]
-        radius: 0.05
-      - center: [0.0, 0.28, 0.03]
-        radius: 0.045
+  lower_arm:
+    - center: [0.0, 0.05, 0.06]
+      radius: 0.045
+    - center: [0.0, 0.05, 0.18]
+      radius: 0.045
+    - center: [0.0, 0.05, 0.30]
+      radius: 0.04
 
-  - link: "lower_arm"
-    spheres:
-      - center: [0.0, 0.05, 0.06]
-        radius: 0.045
-      - center: [0.0, 0.05, 0.18]
-        radius: 0.045
-      - center: [0.0, 0.05, 0.30]
-        radius: 0.04
+  wrist:
+    - center: [0.0, -0.06, 0.0]
+      radius: 0.05
+    - center: [0.0, -0.12, 0.0]
+      radius: 0.045
 
-  - link: "wrist"
-    spheres:
-      - center: [0.0, -0.06, 0.0]
-        radius: 0.05
-      - center: [0.0, -0.12, 0.0]
-        radius: 0.045
-
-  - link: "gripper"
-    spheres:
-      - center: [0.02, -0.04, 0.0]
-        radius: 0.04
-      - center: [0.06, -0.08, 0.0]
-        radius: 0.035
+  gripper:
+    - center: [0.02, -0.04, 0.0]
+      radius: 0.04
+    - center: [0.06, -0.08, 0.0]
+      radius: 0.035

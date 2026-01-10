@@ -1,6 +1,5 @@
 # rmpflow_config.yaml
 api_version: 1.0
-# First-pass RMPflow tuning for your SO100 (2.5x) arm
 
 # Buffer away from hard joint limits (radians)
 joint_limit_buffers: [0.05, 0.05, 0.05, 0.05, 0.05]
@@ -34,19 +33,17 @@ rmp_params:
     metric_weight: 120.0
 
   # Cartesian target behavior (end-effector attractor)
-  # If your Isaac version uses slightly different key names,
-  # keep the structure but match the template your Isaac install provides.
+  # Trying 'attractor_rmp' as well in case of strict Lula 1.0 key checks
   target_rmp:
     accel_p_gain: 140.0
     accel_d_gain: 35.0
     metric_alpha_length_scale: 0.15
     metric_scalar: 60.0
 
-  # Collision avoidance (spheres below)
+  # Collision avoidance (spheres defined in robot_description.yaml)
   collision_rmp:
     metric_scalar: 3000.0
     metric_length_scale: 0.08
     damping_gain: 60.0
     repulsion_gain: 0.015
     repulsion_std_dev: 0.10
-    # The 2.5x scale increases link lengths, so std_dev can be a bit larger.
