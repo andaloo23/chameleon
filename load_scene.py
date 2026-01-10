@@ -26,8 +26,6 @@ UsdGeom = None
 UsdPhysics = None
 Usd = None
 SO100Robot = None
-RmpFlow = None
-ArticulationMotionPolicy = None
 
 
 def _ensure_isaac_sim(headless=False):
@@ -47,7 +45,6 @@ def _ensure_isaac_sim(headless=False):
         from omni.isaac.sensor import Camera as _Camera
         from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdPhysics as _UsdPhysics, Usd as _Usd
         from robot import SO100Robot as _SO100Robot
-        from omni.isaac.motion_generation import RmpFlow as _RmpFlow, ArticulationMotionPolicy as _ArticulationMotionPolicy
 
         World = _World
         DynamicCuboid = _DynamicCuboid
@@ -58,8 +55,6 @@ def _ensure_isaac_sim(headless=False):
         UsdPhysics = _UsdPhysics
         Usd = _Usd
         SO100Robot = _SO100Robot
-        RmpFlow = _RmpFlow
-        ArticulationMotionPolicy = _ArticulationMotionPolicy
         initialize_usd_modules(Gf, UsdGeom, UsdPhysics)
         _SIM_HEADLESS_FLAG = headless
     elif headless != _SIM_HEADLESS_FLAG:
@@ -145,9 +140,13 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
         
-        self.rmpflow = None
-        self.motion_policy = None
-        
+        self.reward_engine = RewardEngine(self)
+        self.domain_randomizer = DomainRandomizer(self)
+        self.last_validation_result = {"ok": True, "issues": [], "flags": {}}
+        self._force_terminate = False
+        self._termination_reason = None
+        self._cup_upright_threshold_rad = np.deg2rad(25.0)
+
         # Intelligent physics weld
         self.gripper_weld = IntelligentGripperWeld(
             env=self,
@@ -169,16 +168,6 @@ class IsaacPickPlaceEnv:
         self._build_scene()
         self.reward_engine.initialize()
         self.reward_engine.reset()
-        
-        # RMPFlow Controller Initialization
-        self.rmpflow = RmpFlow(
-            robot_description_path=os.path.join(self.current_dir, "robot_description.yaml"),
-            rmpflow_config_path=os.path.join(self.current_dir, "rmpflow_config.yaml"),
-            urdf_path=os.path.join(self.current_dir, "so100.urdf"),
-            end_effector_frame_name="gripper",
-            maximum_substep_size=1.0 / 60.0
-        )
-        self.motion_policy = ArticulationMotionPolicy(self.robot_articulation, self.rmpflow, 1.0 / 60.0)
 
     def _reset_temp_dir(self):
         if os.path.exists(self.temp_dir):
@@ -323,11 +312,6 @@ class IsaacPickPlaceEnv:
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        # RMPFlow sync
-        if self.rmpflow:
-            self.rmpflow.set_ignore_state_updates(True)
-            self.rmpflow.visualize_collision_spheres()
-            
         for i in range(5): self.world.step(render=(render if i == 4 else False))
         self._apply_domain_randomization()
         self.reward_engine.reset()
@@ -336,10 +320,6 @@ class IsaacPickPlaceEnv:
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         
-        # RMPFlow sync
-        if self.rmpflow:
-            self.rmpflow.set_ignore_state_updates(False)
-            
         # Ensure cameras have a chance to render before observation
         for _ in range(10): self.world.step(render=render)
             
@@ -452,10 +432,6 @@ class IsaacPickPlaceEnv:
                 gripper_body_path=self._gripper_prim_path or "/World/Robot/gripper",
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
-
-        # RMPFlow sync
-        if self.rmpflow:
-            self.rmpflow.update_robot_state()
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()

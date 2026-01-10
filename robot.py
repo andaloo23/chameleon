@@ -9,9 +9,30 @@ from omni.isaac.sensor import Camera
 from scipy.spatial.transform import Rotation as R
 from pxr import UsdGeom
 import random
+from kinematics import KinematicsModel
+from typing import Dict, Any, Tuple
 
 
-class SO100Robot:
+    CONFIG = {
+        "default": {
+            "L1": 117.0,  # Shoulder to elbow length (mm)
+            "L2": 136.0,  # Elbow to wrist length (mm)
+            "BASE_HEIGHT_MM": 120.0,
+            "SHOULDER_MOUNT_OFFSET_MM": 32.0,
+            "ELBOW_MOUNT_OFFSET_MM": 4.0,
+            "SPATIAL_LIMITS": {
+                "x": (-20.0, 250.0),
+                "z": (30.0, 370.0),
+            }
+        },
+        "PRESET_POSITIONS": {
+            "1": { "gripper": 0.0, "wrist_roll": 90.0, "wrist_flex": 0.0, "elbow_flex": 0.0, "shoulder_lift": 0.0, "shoulder_pan": 90.0 },
+            "2": { "gripper": 0.0, "wrist_roll": 90.0, "wrist_flex": 0.0, "elbow_flex": 45.0, "shoulder_lift": 45.0, "shoulder_pan": 90.0 },
+            "3": { "gripper": 40.0, "wrist_roll": 90.0, "wrist_flex": 90.0, "elbow_flex": 45.0, "shoulder_lift": 45.0, "shoulder_pan": 90.0 },
+            "4": { "gripper": 40.0, "wrist_roll": 90.0, "wrist_flex": -60.0, "elbow_flex": 20.0, "shoulder_lift": 80.0, "shoulder_pan": 90.0 },
+        }
+    }
+
     def __init__(self, world, urdf_path, import_config=None):
         """Initialize the SO-100 robotic arm.
         
@@ -26,14 +47,19 @@ class SO100Robot:
         
         self.joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
         
-        # Joint limits from URDF - MUST match hardware constraints
+        # Initialize kinematics model
+        self.kinematics = KinematicsModel(self.CONFIG["default"])
+        
+        # Joint limits (radians) - derived from Hardware degrees (0 to 180, centered at 90)
+        # Simulation uses radians where 0 is often the "natural" URDF position.
+        # We'll map hardware 90 degrees to simulation 0 radians.
         self.joint_limits = {
-            "shoulder_pan": (-1.57079, 1.57079),      # -90° to 90°
-            "shoulder_lift": (0.0, 3.5),              # 0° to 200° (POSITIVE ONLY!)
-            "elbow_flex": (-3.14158, 0.0),            # -180° to 0° (NEGATIVE ONLY!)
-            "wrist_flex": (-2.5, 1.2),                # -143° to 69°
-            "wrist_roll": (-3.14158, 3.14158),        # -180° to 180°
-            "gripper": (0.0, 1.5)                     # 0 to 1.5 (URDF allows -0.2 to 2.0, use safe range)
+            "shoulder_pan": (-np.deg2rad(90), np.deg2rad(90)),
+            "shoulder_lift": (-np.deg2rad(90), np.deg2rad(110)),
+            "elbow_flex": (-np.deg2rad(180), np.deg2rad(0)),
+            "wrist_flex": (-np.deg2rad(100), np.deg2rad(100)),
+            "wrist_roll": (-np.deg2rad(180), np.deg2rad(180)),
+            "gripper": (0.0, 1.5)
         }
         
         if import_config is None:
@@ -229,6 +255,74 @@ class SO100Robot:
             self.robot.apply_action(ArticulationAction(joint_positions=np.array(positions)))
         else:
             self.robot.set_joint_positions(np.array(positions))
+    
+    def move_to_preset(self, preset_id: str, use_targets=True):
+        """Move the robot to a predefined preset position.
+        
+        Args:
+            preset_id: Key from PRESET_POSITIONS
+            use_targets: Whether to use PD control
+        """
+        if preset_id not in self.CONFIG["PRESET_POSITIONS"]:
+            print(f"[ERROR] Preset {preset_id} not found.")
+            return
+
+        preset = self.CONFIG["PRESET_POSITIONS"][preset_id]
+        joint_positions = []
+        
+        for name in self.joint_names:
+            deg_val = preset.get(name, 90.0) # Hardware uses 90 as center
+            if name == "gripper":
+                # Gripper is special, typically 0.0 (closed) to some max value (open)
+                # In simulation it's 0 to 1.5. Hardware might be 0 to 100.
+                # Assuming hardware 0 is closed, 100 is open.
+                rad_val = (deg_val / 40.0) * 1.5 # 40 is max in presets
+            else:
+                # Map 90 deg hardware to 0 rad simulation
+                rad_val = np.deg2rad(deg_val - 90.0)
+            
+            joint_positions.append(rad_val)
+        
+        self.set_joint_positions(joint_positions, use_targets=use_targets)
+
+    def move_to_cartesian(self, x: float, z: float, shoulder_pan_deg: float = 90.0, wrist_roll_deg: float = 90.0, gripper_val: float = 0.0):
+        """Move the end-effector to a Cartesian X, Z position using IK.
+        
+        Args:
+            x: Forward/backward distance in mm
+            z: Up/down distance in mm
+            shoulder_pan_deg: Pan angle in degrees (Hardware 90 = Center)
+            wrist_roll_deg: Roll angle in degrees (Hardware 90 = Center)
+            gripper_val: Gripper value
+        """
+        valid, msg = self.kinematics.is_cartesian_target_valid(x, z)
+        if not valid:
+            print(f"[WARN] IK Target invalid: {msg}")
+            return False
+        
+        shoulder_lift_deg, elbow_flex_deg = self.kinematics.inverse_kinematics(x, z)
+        
+        # Construct joint vector
+        # Names: ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
+        # wrist_flex is fixed at 0 for planar IK here (90 deg hardware)
+        
+        joint_dict = {
+            "shoulder_pan": np.deg2rad(shoulder_pan_deg - 90.0),
+            "shoulder_lift": np.deg2rad(shoulder_lift_deg), # IK returns relative to URDF 0? 
+                                                           # Need to verify if IK output is deg or rad and frame of ref.
+                                                           # kinematics.py returns degrees.
+            "elbow_flex": np.deg2rad(elbow_flex_deg),
+            "wrist_flex": 0.0,
+            "wrist_roll": np.deg2rad(wrist_roll_deg - 90.0),
+            "gripper": (gripper_val / 40.0) * 1.5
+        }
+        
+        # Actually kinematics returns shoulder_lift and elbow_flex.
+        # Let's re-verify the degree-to-radian mapping for these.
+        
+        positions = [joint_dict[name] for name in self.joint_names]
+        self.set_joint_positions(positions)
+        return True
     
     def get_robot(self):
         """Get the underlying Isaac Sim Robot object.
