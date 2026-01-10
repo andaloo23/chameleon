@@ -12,7 +12,7 @@ import random
 from kinematics import KinematicsModel
 from typing import Dict, Any, Tuple
 
-
+class SO100Robot:
     CONFIG = {
         "default": {
             "L1": 117.0,  # Shoulder to elbow length (mm)
