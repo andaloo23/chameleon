@@ -21,19 +21,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Base.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Base_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Base_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Base.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -42,24 +42,24 @@
   <link name="shoulder">
     <inertial>
       <mass value="0.119226"/>
-      <origin xyz="-0.00022697 0.147743 0.0777225" rpy="0 0 0"/>
+      <origin xyz="-0.00009 0.0591 0.0311" rpy="0 0 0"/>
       <inertia ixx="5.94278e-05" ixy="0" ixz="0" iyy="5.89975e-05" iyz="0" izz="3.13712e-05"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Rotation_Pitch.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Rotation_Pitch_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Rotation_Pitch.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Rotation_Pitch.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -68,24 +68,24 @@
   <link name="upper_arm">
     <inertial>
       <mass value="0.162409"/>
-      <origin xyz="-4.3e-05 0.17545 0.00776" rpy="0 0 0"/>
+      <origin xyz="-0.000017 0.07018 0.003104" rpy="0 0 0"/>
       <inertia ixx="0.000213312" ixy="0" ixz="0" iyy="0.000167164" iyz="0" izz="7.01522e-05"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Upper_Arm.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Upper_Arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Upper_Arm_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Upper_Arm_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Upper_Arm.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Upper_Arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -94,24 +94,24 @@
   <link name="lower_arm">
     <inertial>
       <mass value="0.147968"/>
-      <origin xyz="-0.00849 0.00344 0.192" rpy="0 0 0"/>
+      <origin xyz="-0.0034 0.00138 0.0768" rpy="0 0 0"/>
       <inertia ixx="0.000138803" ixy="0" ixz="0" iyy="0.000107748" iyz="0" izz="4.84242e-05"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Lower_Arm.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Lower_Arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Lower_Arm_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Lower_Arm_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Lower_Arm.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Lower_Arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -120,24 +120,24 @@
   <link name="wrist">
     <inertial>
       <mass value="0.0661321"/>
-      <origin xyz="-0.021316 -0.08807 -5.8e-05" rpy="0 0 0"/>
+      <origin xyz="-0.00853 -0.03523 -0.00002" rpy="0 0 0"/>
       <inertia ixx="3.45403e-05" ixy="0" ixz="0" iyy="2.39041e-05" iyz="0" izz="1.94704e-05"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Wrist_Pitch_Roll_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Wrist_Pitch_Roll.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -146,24 +146,24 @@
   <link name="gripper">
     <inertial>
       <mass value="0.0929859"/>
-      <origin xyz="0.0138 -0.07 0.0012" rpy="0 0 0"/>
+      <origin xyz="0.00552 -0.028 0.00048" rpy="0 0 0"/>
       <inertia ixx="5.03136e-05" ixy="0" ixz="0" iyy="4.64098e-05" iyz="0" izz="2.72961e-05"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Fixed_Jaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw_Motor.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Fixed_Jaw_Motor.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Fixed_Jaw.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Fixed_Jaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -172,18 +172,18 @@
   <link name="jaw">
     <inertial>
       <mass value="0.0202444"/>
-      <origin xyz="-0.004 -0.0758 0.0011" rpy="0 0 0"/>
-      <inertia ixx="1.11265e-05" ixy="0" ixz="0" iyy="8.99651e-06" iyz="0" izz="2.99548e-06"/>
+      <origin xyz="-0.0016 -0.03032 0.00044" rpy="0 0 0"/>
+      <inertia ixx="1.11265e-06" ixy="0" ixz="0" iyy="8.99651e-07" iyz="0" izz="2.99548e-07"/>
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="assets/Moving_Jaw.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Moving_Jaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="assets/Moving_Jaw.stl" scale="1.0 1.0 1.0"/>
+        <mesh filename="assets/Moving_Jaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -193,7 +193,7 @@
   <joint name="shoulder_pan" type="revolute">
     <parent link="base"/>
     <child link="shoulder"/>
-    <origin xyz="0 -0.0452 0.0165" rpy="1.57079 0 0"/>
+    <origin xyz="0 -0.0452 0.01875" rpy="1.57079 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-1.57079" upper="1.57079" effort="35" velocity="1"/>
   </joint>
@@ -202,7 +202,7 @@
   <joint name="shoulder_lift" type="revolute">
     <parent link="shoulder"/>
     <child link="upper_arm"/>
-    <origin xyz="0 0.1025 0.0306" rpy="-1.8 0 0"/>
+    <origin xyz="0 0.1025 0.10125" rpy="-1.8 0 0"/>
     <axis xyz="1 0 0"/>
     <limit lower="0" upper="3.5" effort="35" velocity="1"/>
   </joint>
@@ -211,7 +211,7 @@
   <joint name="elbow_flex" type="revolute">
     <parent link="upper_arm"/>
     <child link="lower_arm"/>
-    <origin xyz="0 0.11257 0.028" rpy="1.57079 0 0"/>
+    <origin xyz="0 0.1135 0.0282" rpy="1.57079 0 0"/>
     <axis xyz="1 0 0"/>
     <limit lower="-3.14158" upper="0" effort="35" velocity="1"/>
   </joint>
@@ -220,7 +220,7 @@
   <joint name="wrist_flex" type="revolute">
     <parent link="lower_arm"/>
     <child link="wrist"/>
-    <origin xyz="0 0.0052 0.1349" rpy="-1 0 0"/>
+    <origin xyz="0 0.0052 0.1359" rpy="-1 0 0"/>
     <axis xyz="1 0 0"/>
     <limit lower="-2.5" upper="1.2" effort="35" velocity="1"/>
   </joint>
