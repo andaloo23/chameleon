@@ -1,4 +1,5 @@
-# so100_2p5_robot_description.yaml
+# robot_description.yaml
+api_version: 1.0
 # Robot description for Lula / RMPflow based on your URDF
 
 # Joints to be controlled by RMPflow (exclude the jaw joint for planning)

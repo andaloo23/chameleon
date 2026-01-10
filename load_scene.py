@@ -172,8 +172,8 @@ class IsaacPickPlaceEnv:
         
         # RMPFlow Controller Initialization
         self.rmpflow = RmpFlow(
-            robot_description_path=os.path.join(self.current_dir, "so100_2p5_robot_description.yaml"),
-            rmpflow_config_path=os.path.join(self.current_dir, "so100_2p5_rmpflow_config.yaml"),
+            robot_description_path=os.path.join(self.current_dir, "robot_description.yaml"),
+            rmpflow_config_path=os.path.join(self.current_dir, "rmpflow_config.yaml"),
             urdf_path=os.path.join(self.current_dir, "so100.urdf"),
             end_effector_frame_name="gripper",
             maximum_substep_size=1.0 / 60.0

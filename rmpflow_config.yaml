@@ -1,4 +1,5 @@
-# so100_2p5_rmpflow_config.yaml
+# rmpflow_config.yaml
+api_version: 1.0
 # First-pass RMPflow tuning for your SO100 (2.5x) arm
 
 # Buffer away from hard joint limits (radians)
