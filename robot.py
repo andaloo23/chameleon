@@ -322,7 +322,7 @@ class SO100Robot:
             "shoulder_pan": np.deg2rad(shoulder_pan_deg - 90.0),
             "shoulder_lift": np.deg2rad(shoulder_lift_deg),
             "elbow_flex": np.deg2rad(elbow_flex_deg),
-            "wrist_flex": np.deg2rad(wrist_flex_deg - 90.0),
+            "wrist_flex": np.deg2rad(wrist_flex_deg - 90.0) + 1.0, # Offset to compensate for URDF rpy="-1 0 0"
             "wrist_roll": np.deg2rad(wrist_roll_deg - 90.0),
             "gripper": (gripper_val / 40.0) * 1.5
         }

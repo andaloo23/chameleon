@@ -443,8 +443,28 @@ class IsaacPickPlaceEnv:
         if self.capture_images and (self._step_counter % self.image_interval == 0): self._capture_images()
         return obs, reward, done, info
 
+    def _auto_move(self, target_joints, render=True):
+        """Internal helper for smooth automated movement using env.step()."""
+        if target_joints is None: return
+        target_joints = np.array(target_joints)
+        current_joints = np.array(self.robot_articulation.get_joint_positions())
+        
+        diff = target_joints - current_joints
+        max_diff_deg = np.max(np.abs(np.rad2deg(diff)))
+        
+        # Use robot's movement constants
+        constants = self.robot.CONFIG["MOVEMENT_CONSTANTS"]
+        num_steps = int(min(
+            constants["MAX_INTERPOLATION_STEPS"],
+            max(1, max_diff_deg / constants["DEGREES_PER_STEP"])
+        ))
+        
+        for i in range(1, num_steps + 1):
+            interp_pos = current_joints + (diff * (i / num_steps))
+            self.step(interp_pos, render=render)
+
     def pick_up_cube(self):
-        """Automated pick-and-place sequence using KinematicsModel."""
+        """Automated pick-and-place sequence using KinematicsModel and env.step()."""
         print("[INFO] Starting pick-up sequence...")
         
         # 1. Get cube world pose
@@ -452,45 +472,43 @@ class IsaacPickPlaceEnv:
         
         # 2. Open gripper fully
         print("[INFO] Opening gripper...")
-        self.robot.move_to_preset("3") # Preset 3 is open
-        for _ in range(30): self.world.step(render=True)
+        open_joints = self.robot.get_ik_joints(150, 200, gripper_val=40.0) # Arbitrary safe pos
+        if open_joints:
+            self._auto_move(open_joints)
         
         # 3. Pre-grasp position (above cube)
-        target_world = np.array([cp[0], cp[1], cp[2] + 0.10]) # 10cm above
+        target_world = np.array([cp[0], cp[1], cp[2] + 0.08]) # 8cm above
         x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
         print(f"[INFO] Moving to pre-grasp: X={x_mm:.1f}, Z={z_mm:.1f}, Pan={pan_deg:.1f}")
         
         pre_grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
-        if pre_grasp_joints:
-            self.robot.move_interpolated(pre_grasp_joints)
+        self._auto_move(pre_grasp_joints)
         
-        # 4. Grasp position (at cube)
-        # We target the center of the cube, but L2 now includes the gripper length
-        # so target_world SHOULD lead the gripper center to cp.
-        target_world = np.array([cp[0], cp[1], cp[2]]) 
+        # 4. Grasp position (at cube center or slightly below)
+        target_world = np.array([cp[0], cp[1], cp[2] - 0.005]) 
         x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
         print(f"[INFO] Moving to grasp: X={x_mm:.1f}, Z={z_mm:.1f}")
         
         grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
-        if grasp_joints:
-            self.robot.move_interpolated(grasp_joints)
+        self._auto_move(grasp_joints)
             
         # 5. Close gripper
         print("[INFO] Grasping...")
         closed_joints = grasp_joints.copy()
         closed_joints[-1] = 0.0 # Close it
-        self.robot.set_joint_positions(closed_joints) # Direct set to ensure clamp
-        for _ in range(50): self.world.step(render=True) # Give it time to weld
+        # Step multiple times with closed command to allow weld and physics to settle
+        for _ in range(30):
+            self.step(closed_joints, render=True)
         
         # 6. Lift
         print("[INFO] Lifting...")
-        target_world = np.array([cp[0], cp[1], cp[2] + 0.15])
+        target_world = np.array([cp[0], cp[1], cp[2] + 0.20]) # Lift higher (20cm)
         x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
         lift_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=0.0)
-        if lift_joints:
-            self.robot.move_interpolated(lift_joints)
+        self._auto_move(lift_joints)
             
         print("[INFO] Pick-up sequence complete.")
+
 
     def close(self):
         if self.gripper_weld: self.gripper_weld.release()
@@ -516,18 +534,22 @@ class IsaacPickPlaceEnv:
             try:
                 if self.gripper_weld: self.gripper_weld.release()
                 self.world.pause()
-                # Step once to process release
-                self.world.step(render=False)
             except Exception: pass
             
         self.close()
         
         # Final flush for rendering pipeline
         if self.simulation_app:
-            for _ in range(5): self.simulation_app.update()
+            try:
+                from omni.usd import get_context
+                get_context().close_stage()
+            except Exception: pass
+            
             self.simulation_app.close()
             global _SIMULATION_APP
             _SIMULATION_APP = None
+            global _SIM_HEADLESS_FLAG
+            _SIM_HEADLESS_FLAG = None
 
 
     def _sample_object_positions(self):
