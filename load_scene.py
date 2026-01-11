@@ -465,7 +465,9 @@ class IsaacPickPlaceEnv:
             self.robot.move_interpolated(pre_grasp_joints)
         
         # 4. Grasp position (at cube)
-        target_world = np.array([cp[0], cp[1], cp[2] + 0.02]) # 2cm above center
+        # We target the center of the cube, but L2 now includes the gripper length
+        # so target_world SHOULD lead the gripper center to cp.
+        target_world = np.array([cp[0], cp[1], cp[2]]) 
         x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
         print(f"[INFO] Moving to grasp: X={x_mm:.1f}, Z={z_mm:.1f}")
         
@@ -477,8 +479,8 @@ class IsaacPickPlaceEnv:
         print("[INFO] Grasping...")
         closed_joints = grasp_joints.copy()
         closed_joints[-1] = 0.0 # Close it
-        self.robot.move_interpolated(closed_joints)
-        for _ in range(20): self.world.step(render=True)
+        self.robot.set_joint_positions(closed_joints) # Direct set to ensure clamp
+        for _ in range(50): self.world.step(render=True) # Give it time to weld
         
         # 6. Lift
         print("[INFO] Lifting...")
@@ -511,10 +513,18 @@ class IsaacPickPlaceEnv:
     def shutdown(self):
         print("[INFO] Shutting down simulation...")
         if self.world:
-            try: self.world.pause()
+            try:
+                if self.gripper_weld: self.gripper_weld.release()
+                self.world.pause()
+                # Step once to process release
+                self.world.step(render=False)
             except Exception: pass
+            
         self.close()
-        if self.simulation_app: 
+        
+        # Final flush for rendering pipeline
+        if self.simulation_app:
+            for _ in range(5): self.simulation_app.update()
             self.simulation_app.close()
             global _SIMULATION_APP
             _SIMULATION_APP = None

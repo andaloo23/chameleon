@@ -16,13 +16,13 @@ class SO100Robot:
     CONFIG = {
         "default": {
             "L1": 117.0,  # Shoulder to elbow length (mm)
-            "L2": 136.0,  # Elbow to wrist length (mm)
+            "L2": 223.0,  # Elbow to wrist + gripper length (mm) - 136 + 87
             "BASE_HEIGHT_MM": 120.0,
             "SHOULDER_MOUNT_OFFSET_MM": 32.0,
             "ELBOW_MOUNT_OFFSET_MM": 4.0,
             "SPATIAL_LIMITS": {
-                "x": (-20.0, 250.0),
-                "z": (30.0, 370.0),
+                "x": (-20.0, 350.0),
+                "z": (10.0, 450.0),
             }
         },
         "PRESET_POSITIONS": {
@@ -346,14 +346,12 @@ class SO100Robot:
         # URDF Base Height is ~120mm = 0.120m
         height_m = wz 
         
-        # Pan angle: atan2(y, x). Hardware 90 is center (facing -Y)
-        # In this env, -Y is forward. 
-        # So atan2(x, -y) or similar. Let's stick to simple:
-        # If cube is at (0, -0.2), pan is 90 deg.
-        # If cube is at (0.2, 0), pan is 0 deg? 
-        # Let's align with the kinematics model's expectations.
-        pan_rad = np.arctan2(wx, -wy) # 0 is straight ahead (-Y)
+        # Pan angle: atan2(x, -y). Hardware 90 is center (facing -Y)
+        pan_rad = np.arctan2(wx, -wy) 
         pan_deg = 90.0 + np.rad2deg(pan_rad)
+        
+        # Clamp pan to reachable range (0-180 for hardware)
+        pan_deg = np.clip(pan_deg, 0.0, 180.0)
         
         return dist_m * 1000.0, height_m * 1000.0, pan_deg
 
