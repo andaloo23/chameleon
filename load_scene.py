@@ -443,6 +443,53 @@ class IsaacPickPlaceEnv:
         if self.capture_images and (self._step_counter % self.image_interval == 0): self._capture_images()
         return obs, reward, done, info
 
+    def pick_up_cube(self):
+        """Automated pick-and-place sequence using KinematicsModel."""
+        print("[INFO] Starting pick-up sequence...")
+        
+        # 1. Get cube world pose
+        cp, _ = self.cube.get_world_pose()
+        
+        # 2. Open gripper fully
+        print("[INFO] Opening gripper...")
+        self.robot.move_to_preset("3") # Preset 3 is open
+        for _ in range(30): self.world.step(render=True)
+        
+        # 3. Pre-grasp position (above cube)
+        target_world = np.array([cp[0], cp[1], cp[2] + 0.10]) # 10cm above
+        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
+        print(f"[INFO] Moving to pre-grasp: X={x_mm:.1f}, Z={z_mm:.1f}, Pan={pan_deg:.1f}")
+        
+        pre_grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
+        if pre_grasp_joints:
+            self.robot.move_interpolated(pre_grasp_joints)
+        
+        # 4. Grasp position (at cube)
+        target_world = np.array([cp[0], cp[1], cp[2] + 0.02]) # 2cm above center
+        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
+        print(f"[INFO] Moving to grasp: X={x_mm:.1f}, Z={z_mm:.1f}")
+        
+        grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
+        if grasp_joints:
+            self.robot.move_interpolated(grasp_joints)
+            
+        # 5. Close gripper
+        print("[INFO] Grasping...")
+        closed_joints = grasp_joints.copy()
+        closed_joints[-1] = 0.0 # Close it
+        self.robot.move_interpolated(closed_joints)
+        for _ in range(20): self.world.step(render=True)
+        
+        # 6. Lift
+        print("[INFO] Lifting...")
+        target_world = np.array([cp[0], cp[1], cp[2] + 0.15])
+        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
+        lift_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=0.0)
+        if lift_joints:
+            self.robot.move_interpolated(lift_joints)
+            
+        print("[INFO] Pick-up sequence complete.")
+
     def close(self):
         if self.gripper_weld: self.gripper_weld.release()
         

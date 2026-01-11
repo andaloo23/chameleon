@@ -300,34 +300,62 @@ class SO100Robot:
             wrist_roll_deg: Roll angle in degrees (Hardware 90 = Center)
             gripper_val: Gripper value
         """
+    def get_ik_joints(self, x, z, shoulder_pan_deg=90.0, wrist_roll_deg=90.0, wrist_flex_deg=90.0, gripper_val=0.0):
+        """Calculate joint positions for a Cartesian target (X, Z) in mm.
+        
+        Args:
+            x: Horizontal distance from base (mm)
+            z: Vertical height from base (mm)
+            shoulder_pan_deg: Rotation of base (Hardware 90 = Center)
+            wrist_roll_deg: Roll angle (Hardware 90 = Center)
+            wrist_flex_deg: Pitch angle (Hardware 90 = Center)
+            gripper_val: Hardware gripper value (0-40)
+        """
         valid, msg = self.kinematics.is_cartesian_target_valid(x, z)
         if not valid:
             print(f"[WARN] IK Target invalid: {msg}")
-            return False
+            return None
         
         shoulder_lift_deg, elbow_flex_deg = self.kinematics.inverse_kinematics(x, z)
         
-        # Construct joint vector
-        # Names: ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
-        # wrist_flex is fixed at 0 for planar IK here (90 deg hardware)
-        
         joint_dict = {
             "shoulder_pan": np.deg2rad(shoulder_pan_deg - 90.0),
-            "shoulder_lift": np.deg2rad(shoulder_lift_deg), # IK returns relative to URDF 0? 
-                                                           # Need to verify if IK output is deg or rad and frame of ref.
-                                                           # kinematics.py returns degrees.
+            "shoulder_lift": np.deg2rad(shoulder_lift_deg),
             "elbow_flex": np.deg2rad(elbow_flex_deg),
-            "wrist_flex": 0.0,
+            "wrist_flex": np.deg2rad(wrist_flex_deg - 90.0),
             "wrist_roll": np.deg2rad(wrist_roll_deg - 90.0),
             "gripper": (gripper_val / 40.0) * 1.5
         }
         
-        # Actually kinematics returns shoulder_lift and elbow_flex.
-        # Let's re-verify the degree-to-radian mapping for these.
+        return [joint_dict[name] for name in self.joint_names]
+
+    def move_to_cartesian(self, x, z, shoulder_pan_deg=90.0, wrist_roll_deg=90.0, gripper_val=0.0):
+        positions = self.get_ik_joints(x, z, shoulder_pan_deg, wrist_roll_deg, 90.0, gripper_val)
+        if positions:
+            self.set_joint_positions(positions)
+            return True
+        return False
+
+    def calculate_ik_from_world(self, world_pos):
+        """Map world (X, Y, Z) in meters to robot-relative (x_mm, z_mm, pan_deg)."""
+        wx, wy, wz = world_pos
+        # Robot is at origin (0, 0, 0)
+        # Horizontal dist in meters
+        dist_m = np.sqrt(wx**2 + wy**2)
+        # Height from base in meters
+        # URDF Base Height is ~120mm = 0.120m
+        height_m = wz 
         
-        positions = [joint_dict[name] for name in self.joint_names]
-        self.set_joint_positions(positions)
-        return True
+        # Pan angle: atan2(y, x). Hardware 90 is center (facing -Y)
+        # In this env, -Y is forward. 
+        # So atan2(x, -y) or similar. Let's stick to simple:
+        # If cube is at (0, -0.2), pan is 90 deg.
+        # If cube is at (0.2, 0), pan is 0 deg? 
+        # Let's align with the kinematics model's expectations.
+        pan_rad = np.arctan2(wx, -wy) # 0 is straight ahead (-Y)
+        pan_deg = 90.0 + np.rad2deg(pan_rad)
+        
+        return dist_m * 1000.0, height_m * 1000.0, pan_deg
 
     def move_interpolated(self, target_positions, render=True):
         """Move to target positions using interpolation constants.
