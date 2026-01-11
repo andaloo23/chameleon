@@ -464,50 +464,71 @@ class IsaacPickPlaceEnv:
             self.step(interp_pos, render=render)
 
     def pick_up_cube(self):
-        """Automated pick-and-place sequence using KinematicsModel and env.step()."""
-        print("[INFO] Starting pick-up sequence...")
+        """Automated pick-and-place sequence with orientation alignment and pure vertical approach."""
+        print("[INFO] Starting optimized pick-up sequence...")
         
-        # 1. Get cube world pose
-        cp, _ = self.cube.get_world_pose()
+        # 1. Get cube world pose and calculate orientation
+        cp, co = self.cube.get_world_pose()
+        # quaternion: [w, x, y, z] in Isaac Sim
+        w, x, y, z = co
+        # Calculate Yaw (rotation around Z)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        cube_yaw_rad = np.arctan2(siny_cosp, cosy_cosp)
+        cube_yaw_deg = np.rad2deg(cube_yaw_rad)
         
-        # 2. Open gripper fully
-        print("[INFO] Opening gripper...")
-        open_joints = self.robot.get_ik_joints(150, 200, gripper_val=40.0) # Arbitrary safe pos
-        if open_joints:
-            self._auto_move(open_joints)
+        # We want the gripper (facing -Y in its local frame) to align with cube faces.
+        # Robot pan also affects global orientation.
+        _, _, pan_deg = self.robot.calculate_ik_from_world(cp)
         
-        # 3. Pre-grasp position (above cube)
-        target_world = np.array([cp[0], cp[1], cp[2] + 0.08]) # 8cm above
-        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
-        print(f"[INFO] Moving to pre-grasp: X={x_mm:.1f}, Z={z_mm:.1f}, Pan={pan_deg:.1f}")
+        # Wrist roll should compensate for pan and align with cube yaw
+        # Target wrist_roll = base_90 + (cube_yaw - (pan - 90)) or similar.
+        # More simply: The gripper should be parallel to one of the cube's axes.
+        # Since the cube is a square, we can add multiples of 90 deg.
+        target_roll_deg = 90.0 + (cube_yaw_deg - (pan_deg - 90.0))
+        # Keep it within reachable bounds (0-180)
+        while target_roll_deg < 0: target_roll_deg += 90
+        while target_roll_deg > 180: target_roll_deg -= 90
         
-        pre_grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
+        print(f"[INFO] Cube Yaw: {cube_yaw_deg:.1f}°, Pan: {pan_deg:.1f}°, Target Wrist Roll: {target_roll_deg:.1f}°")
+        
+        # 2. Open gripper fully at a safe distance
+        print("[INFO] Opening gripper and aligning orientation...")
+        # Move to a neutral "above workspace" position first to align YAW/PAN without hitting anything
+        neutral_joints = self.robot.get_ik_joints(150, 200, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
+        self._auto_move(neutral_joints)
+        
+        # 3. Horizontal alignment (move to XY above cube)
+        print("[INFO] Aligning XY above cube...")
+        target_world_xy = np.array([cp[0], cp[1], cp[2] + 0.12]) # 12cm above for clearance
+        x_mm, z_mm, _ = self.robot.calculate_ik_from_world(target_world_xy)
+        pre_grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
         self._auto_move(pre_grasp_joints)
         
-        # 4. Grasp position (at cube center or slightly below)
-        target_world = np.array([cp[0], cp[1], cp[2] - 0.005]) 
-        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
-        print(f"[INFO] Moving to grasp: X={x_mm:.1f}, Z={z_mm:.1f}")
+        # 4. Pure vertical descent
+        print("[INFO] Vertical descent...")
+        target_world_grasp = np.array([cp[0], cp[1], cp[2] - 0.005]) # Slightly below center for better wrap
+        x_mm, z_mm, _ = self.robot.calculate_ik_from_world(target_world_grasp)
+        grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
         
-        grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=40.0)
+        # Move slower for the final descent (increase steps)
         self._auto_move(grasp_joints)
             
         # 5. Close gripper
         print("[INFO] Grasping...")
         closed_joints = grasp_joints.copy()
         closed_joints[-1] = 0.0 # Close it
-        # Step multiple times with closed command to allow weld and physics to settle
-        for _ in range(30):
+        for _ in range(50):
             self.step(closed_joints, render=True)
         
         # 6. Lift
         print("[INFO] Lifting...")
-        target_world = np.array([cp[0], cp[1], cp[2] + 0.20]) # Lift higher (20cm)
-        x_mm, z_mm, pan_deg = self.robot.calculate_ik_from_world(target_world)
-        lift_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, gripper_val=0.0)
+        target_world_lift = np.array([cp[0], cp[1], cp[2] + 0.20])
+        x_mm, z_mm, _ = self.robot.calculate_ik_from_world(target_world_lift)
+        lift_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=0.0)
         self._auto_move(lift_joints)
             
-        print("[INFO] Pick-up sequence complete.")
+        print("[INFO] Optimized pick-up sequence complete.")
 
 
     def close(self):
