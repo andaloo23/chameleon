@@ -35,14 +35,25 @@ class KinematicsModel:
         z_adj = target_z - self.BASE_HEIGHT_MM
         d_sq = target_x**2 + z_adj**2
         d = math.sqrt(d_sq)
+        
+        # Law of Cosines for the interior angle at the shoulder
+        # We want the "elbow up" solution for a "concave down" look.
+        # phi1: angle to the target point
         phi1 = math.atan2(z_adj, target_x)
+        # phi2: angle between L1 and the line to target
         phi2 = math.acos(min(1.0, max(-1.0, (self.L1**2 + d_sq - self.L2**2) / (2 * self.L1 * d))))
+        
+        # Consistent "elbow up" solution:
+        # shoulder_lift = 180 - (phi1 + phi2) in some frames,
+        # but for SO-100 hardware, we want the arch.
         shoulder_lift_deg = 180.0 - math.degrees(phi1 + phi2) - math.degrees(self.SHOULDER_OFFSET_ANGLE_RAD)
+        
         alpha1 = math.radians(shoulder_lift_deg) + self.SHOULDER_OFFSET_ANGLE_RAD
         cos2_arg = min(1.0, max(-1.0, (target_x + self.L1 * math.cos(alpha1)) / self.L2))
         sin2_arg = min(1.0, max(-1.0, (z_adj - self.L1 * math.sin(alpha1)) / self.L2))
         ang2 = math.atan2(sin2_arg, cos2_arg)
         elbow_flex_deg = math.degrees(ang2 + math.radians(shoulder_lift_deg)) - math.degrees(self.ELBOW_OFFSET_ANGLE_RAD)
+        
         return shoulder_lift_deg, elbow_flex_deg
 
     def is_cartesian_target_valid(self, x: float, z: float) -> tuple[bool, str]:

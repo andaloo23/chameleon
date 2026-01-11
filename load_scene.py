@@ -492,18 +492,23 @@ class IsaacPickPlaceEnv:
         
         print(f"[INFO] Cube Yaw: {cube_yaw_deg:.1f}°, Pan: {pan_deg:.1f}°, Target Wrist Roll: {target_roll_deg:.1f}°")
         
-        # 2. Open gripper fully at a safe distance
-        print("[INFO] Opening gripper and aligning orientation...")
-        # Move to a neutral "above workspace" position first to align YAW/PAN without hitting anything
-        neutral_joints = self.robot.get_ik_joints(150, 200, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
-        self._auto_move(neutral_joints)
+        # 2. Lift to safe transition height
+        print("[INFO] Arching up for transition...")
+        # Get current distance to estimate apex
+        curr_pos, _ = self.robot_articulation.get_world_pose()
+        curr_dist_m = np.sqrt(curr_pos[0]**2 + curr_pos[1]**2)
+        dist_m = np.sqrt(cp[0]**2 + cp[1]**2)
         
-        # 3. Horizontal alignment (move to XY above cube)
-        print("[INFO] Aligning XY above cube...")
-        target_world_xy = np.array([cp[0], cp[1], cp[2] + 0.12]) # 12cm above for clearance
-        x_mm, z_mm, _ = self.robot.calculate_ik_from_world(target_world_xy)
-        pre_grasp_joints = self.robot.get_ik_joints(x_mm, z_mm, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
-        self._auto_move(pre_grasp_joints)
+        # Apex is high (350mm) and midway horizontally
+        apex_dist_mm = ((curr_dist_m + dist_m) / 2.0) * 1000.0
+        apex_joints = self.robot.get_ik_joints(apex_dist_mm, 350.0, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
+        if apex_joints:
+            self._auto_move(apex_joints)
+        
+        # 3. Move horizontally at high altitude to above cube
+        print("[INFO] Moving above cube at high altitude...")
+        above_joints = self.robot.get_ik_joints(dist_m * 1000.0, 350.0, shoulder_pan_deg=pan_deg, wrist_roll_deg=target_roll_deg, gripper_val=40.0)
+        self._auto_move(above_joints)
         
         # 4. Pure vertical descent
         print("[INFO] Vertical descent...")
