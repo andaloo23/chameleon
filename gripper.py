@@ -241,6 +241,12 @@ class GraspDetector:
 # Gripper Interface
 # -------------------------
 
+@dataclass
+class GripperDebug:
+    closing: bool
+    stall: bool
+    finger_gap: Optional[float]
+    gap_range: Optional[float]
     near_object: bool
     moving_contact: bool
     stationary_contact: bool
