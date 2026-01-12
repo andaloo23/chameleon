@@ -193,19 +193,14 @@ class SO100Robot:
         try:
             local_translation = np.array([0.0, 0.05, -0.08])
 
-            wrist_rot = R.from_matrix(np.array([
-                [1, 0, 0],           # X-axis: right
-                [0, 0, 1],           # Y-axis: forward  
-                [0, -1, 0]           # Z-axis: down
-            ]))
-
-            gripper_frame_adjustment = R.from_euler('y', np.pi)
-
-            local_rotation = gripper_frame_adjustment.inv() * wrist_rot * R.from_euler('z', -0.785398163) * R.from_euler('yz', [np.pi, np.pi])
-            local_quat = local_rotation.as_quat()
+            # Simplify: Rotate 90 degrees around X to face towards -Y (gripper forward)
+            local_rotation = R.from_euler('x', -90, degrees=True)
+            local_quat = local_rotation.as_quat() # returns [x, y, z, w]
+            
+            # Camera orientation in Isaac Sim is [w, x, y, z]
             self.wrist_camera.set_local_pose(
                 translation=local_translation,
-                orientation=np.array([local_quat[0], local_quat[1], local_quat[2], local_quat[3]])
+                orientation=np.array([local_quat[3], local_quat[0], local_quat[1], local_quat[2]])
             )
             
             if verbose:
