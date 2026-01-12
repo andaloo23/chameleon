@@ -36,7 +36,8 @@ def main():
     
     input_state = {
         "plus": [False] * 6,
-        "minus": [False] * 6
+        "minus": [False] * 6,
+        "is_running": True
     }
     
     mapping = {
@@ -48,8 +49,6 @@ def main():
         carb.input.KeyboardInput.D: (2, "minus"),
         carb.input.KeyboardInput.R: (3, "plus"),
         carb.input.KeyboardInput.F: (3, "minus"),
-        carb.input.KeyboardInput.I: (3, "plus"), # Alternative for F
-        carb.input.KeyboardInput.K: (3, "minus"), # Alternative for F
         carb.input.KeyboardInput.T: (4, "plus"),
         carb.input.KeyboardInput.G: (4, "minus"),
         carb.input.KeyboardInput.Y: (5, "plus"),
@@ -58,7 +57,9 @@ def main():
 
     def on_keyboard_event(event):
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
-            if event.input in mapping:
+            if event.input == carb.input.KeyboardInput.ESCAPE:
+                input_state["is_running"] = False
+            elif event.input in mapping:
                 idx, field = mapping[event.input]
                 input_state[field][idx] = True
         elif event.type == carb.input.KeyboardEventType.KEY_RELEASE:
@@ -68,9 +69,10 @@ def main():
         return True
 
     # Register keyboard listener
+    input_interface = carb.input.acquire_input_interface()
     appwindow = omni.appwindow.get_default_app_window()
     keyboard = appwindow.get_keyboard()
-    _sub = carb.input.acquire_input_interface().subscribe_to_keyboard_events(keyboard, on_keyboard_event)
+    _sub = input_interface.subscribe_to_keyboard_events(keyboard, on_keyboard_event)
 
     print("\nControls:")
     print("  Shoulder Pan:  Q / A")
@@ -82,13 +84,7 @@ def main():
     print("  Press ESC to Exit")
 
     try:
-        is_running = True
-        while is_running:
-            # Check for ESC to exit
-            if keyboard.get_key_value(carb.input.KeyboardInput.ESCAPE):
-                is_running = False
-                break
-            
+        while input_state["is_running"]:
             changed = False
             for i in range(6):
                 step = GRIPPER_STEP if i == 5 else STEP_SIZE
@@ -103,17 +99,25 @@ def main():
             # Use env.step to handle kinematics, physics, and rendering
             env.step(joint_positions, render=True)
             
-            # Update local current positions to prevent drift if physics restricts movement
-            # Actually, we want to accumulate 'targets' so we can override physics
-            # But let's stay within limits
+            # Update local current positions to prevent drift
             joint_positions = env._clip_action(joint_positions)
+            
+            # Optional: Add a small delay for smoother manual control
+            # But world.step usually handles timing sufficiently
             
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
         print("[INFO] Shutting down...")
-        carb.input.acquire_input_interface().unsubscribe_to_keyboard_events(keyboard, _sub)
-        env.close()
+        try:
+            input_interface.unsubscribe_to_keyboard_events(keyboard, _sub)
+        except Exception: pass
+        
+        # Explicit shutdown sequence to prevent crashes
+        try:
+            env.shutdown()
+        except Exception as e:
+            print(f"[WARN] Shutdown error: {e}")
 
 if __name__ == "__main__":
     main()
