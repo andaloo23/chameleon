@@ -35,37 +35,35 @@ def main():
     # 5: gripper (Y/H)
     
     input_state = {
-        "plus": [False] * 6,
-        "minus": [False] * 6,
         "is_running": True
     }
     
     mapping = {
-        carb.input.KeyboardInput.Q: (0, "plus"),
-        carb.input.KeyboardInput.A: (0, "minus"),
-        carb.input.KeyboardInput.W: (1, "plus"),
-        carb.input.KeyboardInput.S: (1, "minus"),
-        carb.input.KeyboardInput.E: (2, "plus"),
-        carb.input.KeyboardInput.D: (2, "minus"),
-        carb.input.KeyboardInput.R: (3, "plus"),
-        carb.input.KeyboardInput.F: (3, "minus"),
-        carb.input.KeyboardInput.T: (4, "plus"),
-        carb.input.KeyboardInput.G: (4, "minus"),
-        carb.input.KeyboardInput.Y: (5, "plus"),
-        carb.input.KeyboardInput.H: (5, "minus"),
+        carb.input.KeyboardInput.Q: (0, 1),   # index, direction
+        carb.input.KeyboardInput.A: (0, -1),
+        carb.input.KeyboardInput.W: (1, 1),
+        carb.input.KeyboardInput.S: (1, -1),
+        carb.input.KeyboardInput.E: (2, 1),
+        carb.input.KeyboardInput.D: (2, -1),
+        carb.input.KeyboardInput.R: (3, 1),
+        carb.input.KeyboardInput.F: (3, -1),
+        carb.input.KeyboardInput.T: (4, 1),
+        carb.input.KeyboardInput.G: (4, -1),
+        carb.input.KeyboardInput.Y: (5, 1),
+        carb.input.KeyboardInput.H: (5, -1),
     }
 
     def on_keyboard_event(event):
+        nonlocal joint_positions
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if event.input == carb.input.KeyboardInput.ESCAPE:
                 input_state["is_running"] = False
             elif event.input in mapping:
-                idx, field = mapping[event.input]
-                input_state[field][idx] = True
-        elif event.type == carb.input.KeyboardEventType.KEY_RELEASE:
-            if event.input in mapping:
-                idx, field = mapping[event.input]
-                input_state[field][idx] = False
+                idx, direction = mapping[event.input]
+                step = GRIPPER_STEP if idx == 5 else STEP_SIZE
+                joint_positions[idx] += direction * step
+                # Clip immediately to prevent invalid targets
+                joint_positions = env._clip_action(joint_positions)
         return True
 
     # Register keyboard listener
@@ -74,7 +72,7 @@ def main():
     keyboard = appwindow.get_keyboard()
     _sub = input_interface.subscribe_to_keyboard_events(keyboard, on_keyboard_event)
 
-    print("\nControls:")
+    print("\nControls (Discrete Steps):")
     print("  Shoulder Pan:  Q / A")
     print("  Shoulder Lift: W / S")
     print("  Elbow Flex:    E / D")
@@ -85,25 +83,9 @@ def main():
 
     try:
         while input_state["is_running"]:
-            changed = False
-            for i in range(6):
-                step = GRIPPER_STEP if i == 5 else STEP_SIZE
-                if input_state["plus"][i]:
-                    joint_positions[i] += step
-                    changed = True
-                if input_state["minus"][i]:
-                    joint_positions[i] -= step
-                    changed = True
-            
-            # Step simulation
-            # Use env.step to handle kinematics, physics, and rendering
+            # Step simulation with current targets
+            # This maintains the robot's pose and updates physics/rendering
             env.step(joint_positions, render=True)
-            
-            # Update local current positions to prevent drift
-            joint_positions = env._clip_action(joint_positions)
-            
-            # Optional: Add a small delay for smoother manual control
-            # But world.step usually handles timing sufficiently
             
     except Exception as e:
         print(f"[ERROR] {e}")
