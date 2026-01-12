@@ -147,17 +147,14 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
 
-        # Intelligent physics weld
+        # Behavioral Grasp Detection
         self.gripper_weld = IntelligentGripperWeld(
             env=self,
             dt=1.0 / 120.0,
-            stall_time_s=0.25,
-            stall_gap_range_m=1.5e-3,
-            near_distance_m=0.30,
-            close_command_margin=1e-3,
-            open_release_threshold=0.65,
+            stall_threshold_m=0.001,
+            contact_limit_m=0.005,
+            distance_stability_threshold=0.002,
             debug=True,
-            joint_path="/World/GripperWeldJoint",
         )
         self._gripper_pose_fallback_warned = False
         self._prev_gripper_value = None
@@ -423,24 +420,27 @@ class IsaacPickPlaceEnv:
             if self._step_counter % 100 == 0: print(f"[ENV] Approx jaw with gripper")
             jwp = gwp.copy()
         
-        gripper_debug = None
+        # Calculate if any arm joint (0-4) is moving
+        arm_moving = False
+        try:
+            jv = self.robot_articulation.get_joint_velocities()
+            if jv is not None:
+                # Joints 0-4 are arm joints, 5 is gripper
+                arm_moving = bool(np.any(np.abs(jv[:5]) > 0.01))
+        except Exception: pass
+
+        is_grasped = False
         if self.gripper_weld:
-            gripper_debug = self.gripper_weld.update(
+            is_grasped = self.gripper_weld.update(
                 gripper_value=agp, target_gripper=self._latest_target_gripper,
-                gripper_world_pos=gwp, gripper_world_orient=gwo, jaw_world_pos=jwp,
-                object_world_pos=cp, object_world_orient=co,
-                object_prim_path=getattr(self.cube, "prim_path", "/World/Cube"),
-                gripper_body_path=self._gripper_prim_path or "/World/Robot/gripper",
-                jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
+                gripper_world_pos=gwp, jaw_world_pos=jwp,
+                object_world_pos=cp,
+                arm_moving=arm_moving
             )
 
-        if gripper_debug:
-            status = f"Moving contact: {gripper_debug.moving_contact}, Stationary contact: {gripper_debug.stationary_contact}, Grasp Detection: {self.gripper_weld.is_grasping}"
-            if self.gripper_weld.is_grasping:
-                status += " -> Sticky mode activated"
-            print(f"\r[STATUS] {status}", end="", flush=True)
-            if self._step_counter % 50 == 0:
-                print() # New line occasionally for clear history
+        print(f"\r[STATUS] Grasp Detection: {is_grasped}    ", end="", flush=True)
+        if self._step_counter % 50 == 0:
+            print() # New line occasionally for clear history
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
