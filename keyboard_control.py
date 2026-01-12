@@ -46,7 +46,7 @@ def main():
         carb.input.KeyboardInput.E: (2, 1),
         carb.input.KeyboardInput.D: (2, -1),
         carb.input.KeyboardInput.R: (3, 1),
-        carb.input.KeyboardInput.F: (3, -1),
+        carb.input.KeyboardInput.V: (3, -1),
         carb.input.KeyboardInput.T: (4, 1),
         carb.input.KeyboardInput.G: (4, -1),
         carb.input.KeyboardInput.Y: (5, 1),
@@ -76,7 +76,7 @@ def main():
     print("  Shoulder Pan:  Q / A")
     print("  Shoulder Lift: W / S")
     print("  Elbow Flex:    E / D")
-    print("  Wrist Flex:    R / F")
+    print("  Wrist Flex:    R / V")
     print("  Wrist Roll:    T / G")
     print("  Gripper:       Y / U")
     print("  Press ESC to Exit")
