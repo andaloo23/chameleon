@@ -264,7 +264,7 @@ class IsaacPickPlaceEnv:
         # Quaternion [w,x,y,z]: rotate +90° around X to look down, then 90° CW around local Z
         tp, to = np.array([0.0, -0.15, 2]), np.array([0.5, 0.5, 0.5, -0.5])
         # Side camera: positioned at +X, looking toward origin, properly oriented
-        sp, so = np.array([1.75, -0.2, 0.15]), np.array([0.0, 0.0, 0.0, 1.0])
+        sp, so = np.array([3.7, -0.2, 0.15]), np.array([0.0, 0.0, 0.0, 1.0])
         self.top_camera.set_world_pose(position=tp, orientation=to)
         self.side_camera.set_world_pose(position=sp, orientation=so)
         self._fixed_camera_poses = {"top": (tp, to), "side": (sp, so)}
