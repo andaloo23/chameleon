@@ -230,13 +230,13 @@ class IsaacPickPlaceEnv:
                 material_api.CreateRestitutionAttr().Set(0.0)
         except Exception: pass
 
-        # cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
-        # self.cup_xform = create_cup_prim(
-        #     self.stage_context.get_stage(), prim_path="/World/Cup", position=cup_translation,
-        #     outer_radius_top=self.cup_outer_radius_top, outer_radius_bottom=self.cup_outer_radius_bottom,
-        #     inner_radius_top=self.cup_inner_radius_top, inner_radius_bottom=self.cup_inner_radius_bottom,
-        #     height=self.cup_height, bottom_thickness=self.cup_bottom_thickness, color=self.cup_color, mass=self.cup_mass
-        # )
+        cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
+        self.cup_xform = create_cup_prim(
+            self.stage_context.get_stage(), prim_path="/World/Cup", position=cup_translation,
+            outer_radius_top=self.cup_outer_radius_top, outer_radius_bottom=self.cup_outer_radius_bottom,
+            inner_radius_top=self.cup_inner_radius_top, inner_radius_bottom=self.cup_inner_radius_bottom,
+            height=self.cup_height, bottom_thickness=self.cup_bottom_thickness, color=self.cup_color, mass=self.cup_mass
+        )
 
         self.top_camera = Camera(prim_path="/World/top_camera", name="top_camera", position=np.array([0, 0, 1.5]), resolution=(128, 128))
         self.side_camera = Camera(prim_path="/World/side_camera", name="side_camera", position=np.array([1.0, 0, 0.5]), resolution=(128, 128))
