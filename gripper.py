@@ -241,13 +241,9 @@ class GraspDetector:
 # Gripper Interface
 # -------------------------
 
-@dataclass
-class GripperDebug:
-    closing: bool
-    stall: bool
-    finger_gap: Optional[float]
-    gap_range: Optional[float]
     near_object: bool
+    moving_contact: bool
+    stationary_contact: bool
     distance: Optional[float]
 
 
@@ -320,12 +316,12 @@ class Gripper:
             if self.debug:
                 print(f"[GRIPPER] Release: gripper opened (val={gripper_value:.3f} > {self.open_release_threshold})")
             self.release()
-            return GripperDebug(False, False, None, None, False, None)
+            return GripperDebug(False, False, None, None, False, False, False, None)
 
         if gripper_world_pos is None or jaw_world_pos is None or object_world_pos is None:
             self._stall_accum_s = 0.0
             self._gap_history.clear()
-            return GripperDebug(False, False, None, None, False, None)
+            return GripperDebug(False, False, None, None, False, False, False, None)
 
         gap = float(np.linalg.norm(np.asarray(gripper_world_pos) - np.asarray(jaw_world_pos)))
         
@@ -333,10 +329,21 @@ class Gripper:
         if gripper_value is not None and target_gripper is not None:
             closing = bool(target_gripper < gripper_value - self.close_command_margin)
 
-        distance = float(np.linalg.norm(0.5 * (np.asarray(gripper_world_pos) + np.asarray(jaw_world_pos)) - np.asarray(object_world_pos)))
+        dist_stationary = float(np.linalg.norm(np.asarray(gripper_world_pos) - np.asarray(object_world_pos)))
+        dist_moving = float(np.linalg.norm(np.asarray(jaw_world_pos) - np.asarray(object_world_pos)))
         
         effective_near_m = self.near_distance_m if gap > 0.001 else 0.08
-        near_object = bool(distance <= effective_near_m)
+        
+        # We consider contact if the part is within the near threshold of the cube
+        # The cube half-size is ~0.02, and the gripper center to tip is some distance.
+        # near_distance_m is default 0.30 in load_scene, which is quite large.
+        # Let's use a tighter threshold for "contact" if near_distance_m is meant to be spatial gating.
+        # But for "contact", we want it to be very close.
+        contact_threshold = 0.045 # Adjusted for 4cm cube + some margin
+        
+        moving_contact = bool(dist_moving <= contact_threshold)
+        stationary_contact = bool(dist_stationary <= contact_threshold)
+        near_object = moving_contact and stationary_contact
 
         window_n = max(2, int(round(self.stall_time_s / max(self.dt, 1e-6))))
         self._gap_history.append(gap)
@@ -373,9 +380,9 @@ class Gripper:
             self._is_welded = True
             self._grasped_object_path = object_prim_path
             if self.debug:
-                print(f"[GRIPPER] ★★★ Weld created (stall confirmed, gap={gap:.4f})")
+                print(f"[GRIPPER] ★★★ Weld created (stall confirmed, dual-contact, gap={gap:.4f})")
 
-        return GripperDebug(closing, stall, gap, gap_range, near_object, distance)
+        return GripperDebug(closing, stall, gap, gap_range, near_object, moving_contact, stationary_contact, dist_moving)
 
     def release(self) -> None:
         try:

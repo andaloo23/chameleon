@@ -86,7 +86,7 @@ class IsaacPickPlaceEnv:
         self._gripper_friction = 2.2
         self._gripper_drive_stiffness = 10000.0
         self._gripper_drive_damping = 800.0
-        self._gripper_drive_max_force = 200.0
+        self._gripper_drive_max_force = 600.0
         self._contact_offset = 0.001
         self._rest_offset = 0.0001
 
@@ -423,8 +423,9 @@ class IsaacPickPlaceEnv:
             if self._step_counter % 100 == 0: print(f"[ENV] Approx jaw with gripper")
             jwp = gwp.copy()
         
+        gripper_debug = None
         if self.gripper_weld:
-            self.gripper_weld.update(
+            gripper_debug = self.gripper_weld.update(
                 gripper_value=agp, target_gripper=self._latest_target_gripper,
                 gripper_world_pos=gwp, gripper_world_orient=gwo, jaw_world_pos=jwp,
                 object_world_pos=cp, object_world_orient=co,
@@ -432,6 +433,14 @@ class IsaacPickPlaceEnv:
                 gripper_body_path=self._gripper_prim_path or "/World/Robot/gripper",
                 jaw_body_path=self._jaw_prim_path or "/World/Robot/jaw"
             )
+
+        if gripper_debug:
+            status = f"Moving contact: {gripper_debug.moving_contact}, Stationary contact: {gripper_debug.stationary_contact}, Grasp Detection: {self.gripper_weld.is_grasping}"
+            if self.gripper_weld.is_grasping:
+                status += " -> Sticky mode activated"
+            print(f"\r[STATUS] {status}", end="", flush=True)
+            if self._step_counter % 50 == 0:
+                print() # New line occasionally for clear history
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
