@@ -117,6 +117,7 @@ class Gripper:
         stall_threshold_m: float = 0.001,
         contact_limit_m: float = 0.005,
         distance_stability_threshold: float = 0.002,
+        ground_z_threshold: float = 0.025, # Center Z of 4cm cube is 0.02 on ground
         history_len: int = 15,
         debug: bool = True,
     ) -> None:
@@ -125,6 +126,7 @@ class Gripper:
         self.stall_threshold_m = stall_threshold_m
         self.contact_limit_m = contact_limit_m
         self.distance_stability_threshold = distance_stability_threshold
+        self.ground_z_threshold = ground_z_threshold
         self.debug = bool(debug)
 
         self._gap_history: deque = deque(maxlen=history_len)
@@ -176,9 +178,17 @@ class Gripper:
             dist_std = np.std(self._distance_history)
             is_dist_constant = dist_std < self.distance_stability_threshold
             
-            if is_dist_constant and arm_moving and (is_contacting or self._is_grasped):
+            # Grasp requires:
+            # 1. Constant distance between jaws and cube center
+            # 2. Arm is moving (lifting)
+            # 3. Cube Z has lifted off the ground
+            # 4. Currently contacting or already grasped
+            cube_is_lifted = object_world_pos[2] > self.ground_z_threshold
+            
+            if is_dist_constant and arm_moving and cube_is_lifted and (is_contacting or self._is_grasped):
                 self._is_grasped = True
             else:
+                # Release if arm is moving but cube isn't with us, or gripper is opened
                 if (arm_moving and not is_dist_constant) or (gripper_value is not None and gripper_value > 0.6):
                     self._is_grasped = False
 

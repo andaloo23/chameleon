@@ -154,6 +154,7 @@ class IsaacPickPlaceEnv:
             stall_threshold_m=0.001,
             contact_limit_m=0.005,
             distance_stability_threshold=0.002,
+            ground_z_threshold=0.025, # Center Z of 4cm cube is 0.02 on ground
             debug=True,
         )
         self._gripper_pose_fallback_warned = False
@@ -416,7 +417,6 @@ class IsaacPickPlaceEnv:
             res = self._compute_gripper_pose_from_camera()
             if res: gwp, gwo = res; self._last_gripper_pose = (gwp, gwo)
         if jwp is None and gwp is not None:
-            if self._step_counter % 100 == 0: print(f"[ENV] Approx jaw with gripper")
             jwp = gwp.copy()
         
         # Calculate if any arm joint (0-4) is moving
