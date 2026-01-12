@@ -50,7 +50,7 @@ def main():
         carb.input.KeyboardInput.T: (4, 1),
         carb.input.KeyboardInput.G: (4, -1),
         carb.input.KeyboardInput.Y: (5, 1),
-        carb.input.KeyboardInput.H: (5, -1),
+        carb.input.KeyboardInput.U: (5, -1),
     }
 
     def on_keyboard_event(event):
@@ -78,7 +78,7 @@ def main():
     print("  Elbow Flex:    E / D")
     print("  Wrist Flex:    R / F")
     print("  Wrist Roll:    T / G")
-    print("  Gripper:       Y / H")
+    print("  Gripper:       Y / U")
     print("  Press ESC to Exit")
 
     try:
