@@ -200,7 +200,7 @@ class SO100Robot:
             }
             
         try:
-            local_translation = np.array([0, 0.1, -5])
+            local_translation = np.array([0, 0.15, -5])
 
             if cycle_rotations:
                 import time
