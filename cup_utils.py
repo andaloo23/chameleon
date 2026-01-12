@@ -99,6 +99,18 @@ def build_cup_mesh(outer_radius_top, outer_radius_bottom, height,
         ob_next = next_i
         add_triangle(ob_i, bottom_center_bottom_idx, ob_next)
 
+    # Added: Connecting outer top ring to inner top ring to create a "thickness" rim
+    for i in segments_range:
+        next_i = (i + 1) % segments
+        ot_i = outer_top_offset + i
+        ot_next = outer_top_offset + next_i
+        it_i = inner_top_offset + i
+        it_next = inner_top_offset + next_i
+        # Triangle 1
+        add_triangle(ot_i, it_i, ot_next)
+        # Triangle 2
+        add_triangle(it_i, it_next, ot_next)
+
     return points, face_counts, face_indices
 
 
