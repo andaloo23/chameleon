@@ -441,18 +441,7 @@ class IsaacPickPlaceEnv:
         print(f"\r[STATUS] Grasp Detection: {is_grasped}    ", end="", flush=True)
         if self._step_counter % 50 == 0:
             print() # New line occasionally for clear history
-        
-        # Debug: Print wrist camera pose every 100 steps so user can manually position and capture values
-        # Also cycle through rotation configurations every 3 seconds
-        self.robot.update_wrist_camera_position(verbose=False, cycle_rotations=True)
-        if self._step_counter % 100 == 0:
-            wrist_cam = getattr(self.robot, "wrist_camera", None)
-            if wrist_cam:
-                try:
-                    wc_pos, wc_orient = wrist_cam.get_world_pose()
-                    print(f"\n[DEBUG] Wrist Camera - Position: {list(wc_pos)}, Orientation: {list(wc_orient)}")
-                except Exception:
-                    pass
+
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()

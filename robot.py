@@ -237,8 +237,8 @@ class SO100Robot:
                     
                 local_rotation = R.from_euler('xyz', [x_angle, y_angle, z_angle], degrees=True)
             else:
-                # Default rotation
-                local_rotation = R.from_euler('xyz', [-90, 90, 90], degrees=True)
+                # Default rotation: X=90°, Y=-90°, Z=0°
+                local_rotation = R.from_euler('xyz', [90, -90, 0], degrees=True)
             
             local_quat = local_rotation.as_quat() # returns [x, y, z, w]
             
