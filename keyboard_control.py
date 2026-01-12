@@ -1,13 +1,15 @@
 import numpy as np
-import carb
 from load_scene import IsaacPickPlaceEnv
-import omni.appwindow
 
 def main():
     print("--- Starting Keyboard Control for SO-100 ---")
     
-    # Initialize environment
+    # Initialize environment FIRST to ensure SimulationApp is running
+    # This is required for omni.* and carb imports to work
     env = IsaacPickPlaceEnv(headless=False)
+    
+    import carb
+    import omni.appwindow
     
     # Reset to starting state
     print("[INFO] Resetting environment...")
