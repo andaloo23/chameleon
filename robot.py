@@ -191,7 +191,7 @@ class SO100Robot:
             return None, None
             
         try:
-            local_translation = np.array([0.1, 0.1, 5])
+            local_translation = np.array([0.1, 0.1, -5])
 
             # Rotate -90° around X to face towards -Y (gripper forward), then -45° around Z (clockwise roll)
             local_rotation = R.from_euler('xz', [90, 0], degrees=True)
