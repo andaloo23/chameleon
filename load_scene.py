@@ -443,6 +443,8 @@ class IsaacPickPlaceEnv:
             print() # New line occasionally for clear history
         
         # Debug: Print wrist camera pose every 100 steps so user can manually position and capture values
+        # Also cycle through rotation configurations every 3 seconds
+        self.robot.update_wrist_camera_position(verbose=False, cycle_rotations=True)
         if self._step_counter % 100 == 0:
             wrist_cam = getattr(self.robot, "wrist_camera", None)
             if wrist_cam:

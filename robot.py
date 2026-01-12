@@ -178,23 +178,68 @@ class SO100Robot:
             camera_schema.GetHorizontalApertureAttr().Set(2.0955)
             camera_schema.GetVerticalApertureAttr().Set(2.0955)
     
-    def update_wrist_camera_position(self, verbose=False):
+    def update_wrist_camera_position(self, verbose=False, cycle_rotations=False):
         """Update the wrist camera position relative to the gripper.
         
         Args:
             verbose: Whether to print debug information
+            cycle_rotations: If True, cycles through all rotation configurations
             
         Returns:
             Tuple of (world_position, world_orientation) or (None, None) if failed
         """
         if self.wrist_camera is None:
             return None, None
+        
+        # Initialize rotation cycling state if needed
+        if not hasattr(self, '_rotation_cycle_state'):
+            self._rotation_cycle_state = {
+                'index': 0,
+                'last_change_time': None,
+                'angles': [0, 90, 180, -90]
+            }
             
         try:
             local_translation = np.array([0.1, 0.1, -5])
 
-            # Rotate -90° around X to face towards -Y (gripper forward), then -45° around Z (clockwise roll)
-            local_rotation = R.from_euler('xyz', [-90, 90, 90], degrees=True)
+            if cycle_rotations:
+                import time
+                angles = self._rotation_cycle_state['angles']
+                current_time = time.time()
+                
+                # Change configuration every 3 seconds
+                if (self._rotation_cycle_state['last_change_time'] is None or 
+                    current_time - self._rotation_cycle_state['last_change_time'] >= 3.0):
+                    
+                    self._rotation_cycle_state['last_change_time'] = current_time
+                    idx = self._rotation_cycle_state['index']
+                    
+                    # Calculate x, y, z indices from flat index (4^3 = 64 combinations)
+                    x_idx = idx % 4
+                    y_idx = (idx // 4) % 4
+                    z_idx = (idx // 16) % 4
+                    
+                    x_angle = angles[x_idx]
+                    y_angle = angles[y_idx]
+                    z_angle = angles[z_idx]
+                    
+                    print(f"\n[CAMERA ROTATION] Config {idx+1}/64: X={x_angle}°, Y={y_angle}°, Z={z_angle}°")
+                    
+                    # Advance to next configuration
+                    self._rotation_cycle_state['index'] = (idx + 1) % 64
+                    self._rotation_cycle_state['current_angles'] = (x_angle, y_angle, z_angle)
+                
+                # Use the current angles from state
+                if 'current_angles' in self._rotation_cycle_state:
+                    x_angle, y_angle, z_angle = self._rotation_cycle_state['current_angles']
+                else:
+                    x_angle, y_angle, z_angle = 0, 0, 0
+                    
+                local_rotation = R.from_euler('xyz', [x_angle, y_angle, z_angle], degrees=True)
+            else:
+                # Default rotation
+                local_rotation = R.from_euler('xyz', [-90, 90, 90], degrees=True)
+            
             local_quat = local_rotation.as_quat() # returns [x, y, z, w]
             
             # Camera orientation in Isaac Sim is [w, x, y, z]
