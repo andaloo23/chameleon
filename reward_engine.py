@@ -124,51 +124,9 @@ class RewardEngine:
         if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            if weld_grasp_detected:
-                print(f"[GRASP] ✓ Weld-based grasp detected!")
-            else:
-                print(f"[GRASP] ✓ Pressure-based grasp detected!")
-            print(f"[GRASP]   Distance: {gripper_cube_distance:.3f}m, Gripper pos: {gripper_value:.3f}")
-            if grasp_state is not None:
-                print(f"[GRASP]   Stable frames: {grasp_state.stable_frames}, Confidence: {grasp_state.confidence:.2f}")
+            # print(f"[GRASP] ✓ Grasp detected!")
         else:
             components["grasp_bonus"] = 0.0
-            # Debug output - show grasp detection status
-            if gripper_cube_distance is not None and gripper_cube_distance < 0.5 and grasp_state is not None:
-                status_parts = []
-                
-                if pressure_grasp_detected:
-                    status_parts.append(f"pressure grasp ✓")
-                else:
-                    status_parts.append(f"stable_frames={grasp_state.stable_frames}/{self.grasp_detector.min_stable_frames}")
-                    
-                    # Show was_closing state
-                    if grasp_state.was_closing:
-                        status_parts.append("was_closing ✓")
-                    else:
-                        status_parts.append("not_closing_yet")
-                    
-                    # Show position stability
-                    if grasp_state.position_stable:
-                        status_parts.append("stalled ✓")
-                    else:
-                        status_parts.append("still_moving")
-                    
-                    # Show blocked state
-                    if grasp_state.position_blocked:
-                        status_parts.append("blocked ✓")
-                    else:
-                        status_parts.append(f"not_blocked(pos={gripper_value:.3f})")
-                
-                if near_cube:
-                    status_parts.append(f"near cube ✓ ({gripper_cube_distance:.3f}m)")
-                else:
-                    status_parts.append(f"far from cube ({gripper_cube_distance:.3f}m > {distance_threshold:.3f}m)")
-                
-                if self.stage_flags.get("grasped"):
-                    status_parts.append("already grasped ✓")
-                
-                print(f"[GRASP DEBUG] {' | '.join(status_parts)}")
 
         if (self.stage_flags.get("grasped") and not self.stage_flags.get("lifted") and
                 cube_height is not None and cube_height >= self.env.cup_height + 0.02):
@@ -344,10 +302,9 @@ class RewardEngine:
         # Legacy threshold-based closure check (kept for backward compatibility)
         state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
         
-        # Pressure-based grasp detection state
-        # This is more reliable as it detects stable position under closing pressure
+        # Behavioral grasp detection state
         state["pressure_grasp"] = self.grasp_detector.is_grasped
-        state["grasp_position"] = self.grasp_detector.grasp_position
+        state["grasp_position"] = None
         
         # Constraint-based (sticky) grasp state - most reliable method
         sticky_gripper = getattr(self.env, "sticky_gripper", None)
