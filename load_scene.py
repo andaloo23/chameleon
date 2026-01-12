@@ -442,13 +442,15 @@ class IsaacPickPlaceEnv:
         if self._step_counter % 50 == 0:
             print() # New line occasionally for clear history
         
-        # Debug: Print side camera pose every 100 steps so user can manually position and capture values
-        if self._step_counter % 100 == 0 and self.side_camera:
-            try:
-                sc_pos, sc_orient = self.side_camera.get_world_pose()
-                print(f"\n[DEBUG] Side Camera - Position: {list(sc_pos)}, Orientation: {list(sc_orient)}")
-            except Exception:
-                pass
+        # Debug: Print wrist camera pose every 100 steps so user can manually position and capture values
+        if self._step_counter % 100 == 0:
+            wrist_cam = getattr(self.robot, "wrist_camera", None)
+            if wrist_cam:
+                try:
+                    wc_pos, wc_orient = wrist_cam.get_world_pose()
+                    print(f"\n[DEBUG] Wrist Camera - Position: {list(wc_pos)}, Orientation: {list(wc_orient)}")
+                except Exception:
+                    pass
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
