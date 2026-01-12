@@ -93,7 +93,7 @@ class RewardEngine:
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
         gripper_value = state.get("gripper_joint")
-        sticky_gripper = getattr(self.env, "sticky_gripper", None)
+        gripper_weld = getattr(self.env, "gripper_weld", None)
 
         # Pressure-based grasp detection using GraspDetector
         # Detects when gripper is trying to close but position is stable (blocked by object)
@@ -188,9 +188,9 @@ class RewardEngine:
                                 gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
             # Use sticky gripper (constraint-based) or pressure-based for drop detection
-            still_grasping_sticky = sticky_gripper is not None and sticky_gripper.is_grasping
+            still_grasping_weld = gripper_weld is not None and gripper_weld.is_grasping
             still_grasping_pressure = grasp_state is not None and grasp_state.grasped
-            still_grasping = still_grasping_sticky or still_grasping_pressure
+            still_grasping = still_grasping_weld or still_grasping_pressure
             if low_height and (not still_grasping or not close_to_gripper):
                 drop_triggered = True
 
@@ -306,9 +306,9 @@ class RewardEngine:
         state["pressure_grasp"] = self.grasp_detector.is_grasped
         state["grasp_position"] = None
         
-        # Constraint-based (sticky) grasp state - most reliable method
-        sticky_gripper = getattr(self.env, "sticky_gripper", None)
-        state["sticky_grasp"] = sticky_gripper.is_grasping if sticky_gripper else False
-        state["grasped_object"] = sticky_gripper.grasped_object if sticky_gripper else None
+        # Behavioral grasp state
+        gripper_weld = getattr(self.env, "gripper_weld", None)
+        state["sticky_grasp"] = gripper_weld.is_grasping if gripper_weld else False
+        state["grasped_object"] = None # No longer tracked via welds
 
         self.task_state = state

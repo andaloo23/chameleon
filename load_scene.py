@@ -290,7 +290,6 @@ class IsaacPickPlaceEnv:
     def reset(self, render=None):
         self._step_counter = 0
         render = not self.headless if render is None else bool(render)
-        if self.gripper_weld: self.gripper_weld.release()
         cube_xy, cup_xy = self._sample_object_positions()
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self.world.reset()
@@ -546,7 +545,7 @@ class IsaacPickPlaceEnv:
 
 
     def close(self):
-        if self.gripper_weld: self.gripper_weld.release()
+        if self.gripper_weld: pass
         
         # Explicitly remove cameras from the scene to avoid shutdown crashes
         if self.world and self.world.scene:
@@ -567,7 +566,7 @@ class IsaacPickPlaceEnv:
         print("[INFO] Shutting down simulation...")
         if self.world:
             try:
-                if self.gripper_weld: self.gripper_weld.release()
+                if self.gripper_weld: pass
                 self.world.pause()
             except Exception: pass
             
