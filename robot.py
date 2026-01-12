@@ -60,10 +60,10 @@ class SO100Robot:
         # We'll map hardware 90 degrees to simulation 0 radians.
         self.joint_limits = {
             "shoulder_pan": (-np.deg2rad(90), np.deg2rad(90)),
-            "shoulder_lift": (-np.deg2rad(90), np.deg2rad(110)),
-            "elbow_flex": (-np.deg2rad(180), np.deg2rad(0)),
-            "wrist_flex": (-np.deg2rad(100), np.deg2rad(100)),
-            "wrist_roll": (-np.deg2rad(180), np.deg2rad(180)),
+            "shoulder_lift": (0.0, 3.5),
+            "elbow_flex": (-3.14159, 0.0),
+            "wrist_flex": (-2.5, 1.2),
+            "wrist_roll": (-3.14159, 3.14159),
             "gripper": (0.0, 1.5)
         }
         
