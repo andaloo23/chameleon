@@ -260,7 +260,9 @@ class IsaacPickPlaceEnv:
         self._capture_base_fixture_pose()
         self._resolve_link_paths()
         
-        tp, to = np.array([0.0, -0.1, 1.5]), np.array([0.0, 0.0, 0.0, 1.0])
+        # Top camera: looking down (-Z), rotated 90° clockwise (when viewed from above)
+        # Quaternion [w,x,y,z]: rotate 90° around X to look down, then 90° around local Z for clockwise rotation
+        tp, to = np.array([0.0, -0.1, 1.5]), np.array([0.5, -0.5, -0.5, -0.5])
         sp, so = np.array([1.2, 0.0, 0.5]), np.array([0.5, 0.5, 0.5, 0.5])
         self.top_camera.set_world_pose(position=tp, orientation=to)
         self.side_camera.set_world_pose(position=sp, orientation=so)
