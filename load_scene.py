@@ -10,7 +10,7 @@ from cup_utils import create_cup_prim, initialize_usd_modules
 from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
-from gripper_weld import IntelligentGripperWeld, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
+from gripper import Gripper as IntelligentGripperWeld, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 

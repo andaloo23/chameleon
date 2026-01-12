@@ -1,5 +1,5 @@
 import numpy as np
-from grasp_detector import GraspDetector
+from gripper import GraspDetector
 
 REACH_DISTANCE_MAX = 1.0
 REACHING_WEIGHT = 1.0
