@@ -81,12 +81,12 @@ class IsaacPickPlaceEnv:
         self.use_weld_gripper = True
 
         # Physics parameters
-        self.cube_mass = 0.02
+        self.cube_mass = 0.05
         self._cube_friction = 2.2
         self._gripper_friction = 2.2
-        self._gripper_drive_stiffness = 6000.0
-        self._gripper_drive_damping = 400.0
-        self._gripper_drive_max_force = 100.0
+        self._gripper_drive_stiffness = 10000.0
+        self._gripper_drive_damping = 800.0
+        self._gripper_drive_max_force = 200.0
         self._contact_offset = 0.001
         self._rest_offset = 0.0001
 
@@ -218,7 +218,7 @@ class IsaacPickPlaceEnv:
             scale=self.cube_scale,
             size=1.0,
             color=np.array([1, 0, 0]),
-            mass=2.0, # Increased mass for stability
+            mass=self.cube_mass,
         )
         self.world.scene.add(self.cube)
         

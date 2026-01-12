@@ -96,7 +96,7 @@ class IntelligentGripperWeld:
         env,
         *,
         dt: float = 1.0 / 120.0,
-        stall_time_s: float = 1.0,
+        stall_time_s: float = 1.5,
         stall_gap_range_m: float = 0.0015,
         near_distance_m: float = 0.09,
         close_command_margin: float = 1e-3,
