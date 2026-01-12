@@ -194,7 +194,7 @@ class SO100Robot:
             local_translation = np.array([0.1, 0.1, -5])
 
             # Rotate -90° around X to face towards -Y (gripper forward), then -45° around Z (clockwise roll)
-            local_rotation = R.from_euler('xz', [90, 180], degrees=True)
+            local_rotation = R.from_euler('xyz', [90, 90], degrees=True)
             local_quat = local_rotation.as_quat() # returns [x, y, z, w]
             
             # Camera orientation in Isaac Sim is [w, x, y, z]
