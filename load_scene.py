@@ -296,21 +296,31 @@ class IsaacPickPlaceEnv:
         cube_xy, cup_xy = self._cube_xy, self._cup_xy
         self.world.reset()
         
-        # Set object positions AFTER world.reset()
-        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
-        print(f"[DEBUG] Setting cube world pose to: {pos}")
-        self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
+        # Move cube/cup out of the way temporarily (high up so no collision)
+        self.cube.set_world_pose(position=np.array([0, 0, 10.0]), orientation=np.array([1, 0, 0, 0]))
         if self.cup_xform:
             from pxr import Gf, UsdGeom
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(0.0, 0.0, 10.0))
 
+        # Apply robot default positions and let it stabilize FIRST
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        for i in range(5): self.world.step(render=(render if i == 4 else False))
+        # Let robot arm settle into position without cube interference
+        for i in range(30): self.world.step(render=False)
+        
+        # NOW place cube and cup at their intended positions (robot is stable)
+        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
+        self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
+        # Zero out any velocity from being moved
+        self.cube.set_linear_velocity(np.array([0, 0, 0]))
+        self.cube.set_angular_velocity(np.array([0, 0, 0]))
+        if self.cup_xform:
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
+        
         self._apply_domain_randomization()
         self.reward_engine.reset()
         if self.gripper_weld: self.gripper_weld.reset()
@@ -318,7 +328,7 @@ class IsaacPickPlaceEnv:
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
         
-        # Ensure cameras have a chance to render before observation
+        # Final stabilization with objects in place
         for _ in range(10): self.world.step(render=render)
             
         return self._get_observation()
