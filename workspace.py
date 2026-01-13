@@ -1,7 +1,7 @@
 import numpy as np
 
 # Workspace limits - conservative to ensure robot can reach all positions
-WORKSPACE_RADIUS_RANGE = (0.15, 1.5)  # Slightly reduced max radius for safety
+WORKSPACE_RADIUS_RANGE = (0.15, 0.75)  # Slightly reduced max radius for safety
 WORKSPACE_ANGLE_RANGE_CUBE = (-np.deg2rad(80), np.deg2rad(80))  # ±80 degrees for cube
 WORKSPACE_ANGLE_RANGE_CUP = (-np.deg2rad(65), np.deg2rad(65))   # ±65 degrees for cup
 MIN_OBJECT_SEPARATION = 0.06
