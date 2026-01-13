@@ -597,13 +597,13 @@ class IsaacPickPlaceEnv:
 
     def _sample_object_positions(self):
         # Random positions within workspace (only called once during scene build)
-        from workspace import sample_workspace_xy
+        from workspace import sample_workspace_xy, WORKSPACE_ANGLE_RANGE_CUP
         import random
         
         rng = np.random.RandomState(random.randint(0, 10000))
         
-        cube_xy = sample_workspace_xy(rng)
-        cup_xy = sample_workspace_xy(rng, existing=[cube_xy])
+        cube_xy = sample_workspace_xy(rng)  # Uses default ±80° range
+        cup_xy = sample_workspace_xy(rng, existing=[cube_xy], angle_range=WORKSPACE_ANGLE_RANGE_CUP)  # ±65°
         
         print(f"[INFO] _sample_object_positions: cube={cube_xy}, cup={cup_xy}")
         return cube_xy, cup_xy
