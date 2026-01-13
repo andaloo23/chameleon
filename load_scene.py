@@ -710,17 +710,14 @@ class IsaacPickPlaceEnv:
         except Exception: return None
 
     def _compute_default_joint_positions(self):
-        # Default "home" position: arm raised and ready
-        # Based on empirical testing:
-        # - Lower lift + more bent elbow = arm raised/retracted
-        # - Higher lift + straighter elbow = arm extended forward/down
+        # Default "home" position: arm fully folded/compact, resting on itself
         d = {
-            "shoulder_pan": 0.0,      # Centered
-            "shoulder_lift": 2.0,     # Moderate - arm not fully raised
-            "elbow_flex": -1.0,       # Bent elbow (retracted)
-            "wrist_flex": -0.5,       # Wrist angled
-            "wrist_roll": 0.0,        # No roll
-            "gripper": 1.0            # Gripper open
+            "shoulder_pan": 0.0,       # Centered
+            "shoulder_lift": 3.5,      # At limit - arm tilted fully back
+            "elbow_flex": -3.14,       # Fully bent (folded tight)
+            "wrist_flex": -2.0,        # Tucked in
+            "wrist_roll": 0.0,         # No roll
+            "gripper": 0.0             # Closed
         }
         return np.asarray([float(np.clip(d.get(n, 0.0), *self.robot.joint_limits[n])) for n in self.robot.joint_names], dtype=np.float32)
 
