@@ -250,12 +250,7 @@ class IsaacPickPlaceEnv:
 
         self.world.reset()
         
-        # Set object positions AFTER world.reset() to prevent them being snapped back to defaults
-        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
-        if self.cup_xform:
-            from pxr import Gf, UsdGeom
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
-
+        # Apply robot default positions FIRST (before placing cube)
         self._apply_default_joint_positions()
         self._capture_base_fixture_pose()
         self._resolve_link_paths()
@@ -279,12 +274,20 @@ class IsaacPickPlaceEnv:
         self._configure_gripper_drive()
         self.robot.configure_drives() # Set up PD controllers for arm
         
-        # Robust warm-up for synthetic data stabilization
+        # Warm-up for robot stabilization (cube not placed yet, so no collision)
         print("[INFO] Warming up simulation and synthetic data pipeline...")
         for i in range(50):
             self.world.step(render=(i > 20))
             if self.simulation_app and i % 5 == 0:
                 self.simulation_app.update()
+        
+        # NOW place cube and cup AFTER robot has stabilized
+        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
+        self.cube.set_linear_velocity(np.array([0, 0, 0]))
+        self.cube.set_angular_velocity(np.array([0, 0, 0]))
+        if self.cup_xform:
+            from pxr import Gf, UsdGeom
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
