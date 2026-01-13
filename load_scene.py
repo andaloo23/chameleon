@@ -292,8 +292,8 @@ class IsaacPickPlaceEnv:
     def reset(self, render=None):
         self._step_counter = 0
         render = not self.headless if render is None else bool(render)
-        cube_xy, cup_xy = self._sample_object_positions()
-        self._cube_xy, self._cup_xy = cube_xy, cup_xy
+        # Reuse existing positions from scene build (don't re-sample)
+        cube_xy, cup_xy = self._cube_xy, self._cup_xy
         self.world.reset()
         
         # Set object positions AFTER world.reset()
@@ -589,7 +589,7 @@ class IsaacPickPlaceEnv:
 
 
     def _sample_object_positions(self):
-        # Use the workspace sampling logic to ensure reachable positions
+        # Random positions within workspace (only called once during scene build)
         from workspace import sample_workspace_xy
         import random
         
