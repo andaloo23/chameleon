@@ -296,45 +296,27 @@ class IsaacPickPlaceEnv:
         cube_xy, cup_xy = self._cube_xy, self._cup_xy
         self.world.reset()
         
-        # Disable physics on cube during robot stabilization
-        try:
-            cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
-            if cube_prim.IsValid():
-                rb_api = UsdPhysics.RigidBodyAPI(cube_prim)
-                rb_api.GetRigidBodyEnabledAttr().Set(False)
-        except Exception:
-            pass
+        # Step once to reinitialize physics views after world.reset()
+        self.world.step(render=False)
         
-        # Place cube at final position immediately (physics disabled, won't move)
-        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
-        self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
-        if self.cup_xform:
-            from pxr import Gf, UsdGeom
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
-
-        # Apply robot default positions and let it stabilize
+        # Apply robot default positions first
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        # Let robot arm settle into position (cube physics still disabled)
+        # Let robot arm settle into position
         for i in range(30): self.world.step(render=False)
         
-        # Re-enable cube physics and ensure it's stationary
-        try:
-            cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
-            if cube_prim.IsValid():
-                rb_api = UsdPhysics.RigidBodyAPI(cube_prim)
-                rb_api.GetRigidBodyEnabledAttr().Set(True)
-        except Exception:
-            pass
-        
-        # Reset cube pose one more time and zero velocities
+        # Now place cube and cup at their intended positions (after robot is stable)
+        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
         self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
         self.cube.set_linear_velocity(np.array([0, 0, 0]))
         self.cube.set_angular_velocity(np.array([0, 0, 0]))
+        if self.cup_xform:
+            from pxr import Gf, UsdGeom
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         
         self._apply_domain_randomization()
         self.reward_engine.reset()
