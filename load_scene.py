@@ -207,10 +207,11 @@ class IsaacPickPlaceEnv:
         cube_xy, cup_xy = self._sample_object_positions()
         cube_position = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
 
+        # Create cube at its final position from the start (not [0,0,0])
         self.cube = DynamicCuboid(
             prim_path="/World/Cube",
             name="cube",
-            position=np.array([0, 0, 0]),
+            position=cube_position,
             scale=self.cube_scale,
             size=1.0,
             color=np.array([1, 0, 0]),
@@ -281,13 +282,9 @@ class IsaacPickPlaceEnv:
             if self.simulation_app and i % 5 == 0:
                 self.simulation_app.update()
         
-        # NOW place cube and cup AFTER robot has stabilized
-        self.cube.set_world_pose(position=np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0]), orientation=np.array([1, 0, 0, 0]))
+        # Ensure cube is stationary after warm-up (position is already correct from creation)
         self.cube.set_linear_velocity(np.array([0, 0, 0]))
         self.cube.set_angular_velocity(np.array([0, 0, 0]))
-        if self.cup_xform:
-            from pxr import Gf, UsdGeom
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         
         self._cube_xy, self._cup_xy = cube_xy, cup_xy
         self._apply_domain_randomization()
