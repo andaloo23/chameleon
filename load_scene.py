@@ -296,30 +296,45 @@ class IsaacPickPlaceEnv:
         cube_xy, cup_xy = self._cube_xy, self._cup_xy
         self.world.reset()
         
-        # Move cube/cup out of the way temporarily (high up so no collision)
-        self.cube.set_world_pose(position=np.array([0, 0, 10.0]), orientation=np.array([1, 0, 0, 0]))
+        # Disable physics on cube during robot stabilization
+        try:
+            cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
+            if cube_prim.IsValid():
+                rb_api = UsdPhysics.RigidBodyAPI(cube_prim)
+                rb_api.GetRigidBodyEnabledAttr().Set(False)
+        except Exception:
+            pass
+        
+        # Place cube at final position immediately (physics disabled, won't move)
+        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
+        self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
         if self.cup_xform:
             from pxr import Gf, UsdGeom
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(0.0, 0.0, 10.0))
+            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
 
-        # Apply robot default positions and let it stabilize FIRST
+        # Apply robot default positions and let it stabilize
         self._apply_default_joint_positions()
         self._restore_base_fixture_pose()
         self._restore_fixed_camera_poses()
         self.robot.update_wrist_camera_position(verbose=False)
         self._resolve_link_paths()
         
-        # Let robot arm settle into position without cube interference
+        # Let robot arm settle into position (cube physics still disabled)
         for i in range(30): self.world.step(render=False)
         
-        # NOW place cube and cup at their intended positions (robot is stable)
-        pos = np.array([cube_xy[0], cube_xy[1], self.cube_scale[2] / 2.0])
+        # Re-enable cube physics and ensure it's stationary
+        try:
+            cube_prim = self.world.stage.GetPrimAtPath("/World/Cube")
+            if cube_prim.IsValid():
+                rb_api = UsdPhysics.RigidBodyAPI(cube_prim)
+                rb_api.GetRigidBodyEnabledAttr().Set(True)
+        except Exception:
+            pass
+        
+        # Reset cube pose one more time and zero velocities
         self.cube.set_world_pose(position=pos, orientation=np.array([1, 0, 0, 0]))
-        # Zero out any velocity from being moved
         self.cube.set_linear_velocity(np.array([0, 0, 0]))
         self.cube.set_angular_velocity(np.array([0, 0, 0]))
-        if self.cup_xform:
-            UsdGeom.XformCommonAPI(self.cup_xform).SetTranslate(Gf.Vec3d(float(cup_xy[0]), float(cup_xy[1]), 0.0))
         
         self._apply_domain_randomization()
         self.reward_engine.reset()
