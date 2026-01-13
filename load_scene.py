@@ -713,9 +713,9 @@ class IsaacPickPlaceEnv:
         # Default "home" position: arm fully folded/compact, resting on itself
         d = {
             "shoulder_pan": 0.0,       # Centered
-            "shoulder_lift": 3.5,      # At limit - arm tilted fully back
-            "elbow_flex": -3.14,       # Fully bent (folded tight)
-            "wrist_flex": -2.0,        # Tucked in
+            "shoulder_lift": 0.0,      # At min - arm folded back
+            "elbow_flex": 0.0,         # At max - forearm folded against upper arm
+            "wrist_flex": 1.0,         # Tucked
             "wrist_roll": 0.0,         # No roll
             "gripper": 0.0             # Closed
         }
