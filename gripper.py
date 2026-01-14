@@ -210,6 +210,9 @@ class Gripper:
         gripper_contact = self._check_contact(self._gripper_path, self._cube_path)
         jaw_contact = self._check_contact(self._jaw_path, self._cube_path)
         
+        if self.debug:
+            print(f"[GRASP DEBUG] gripper_contact={gripper_contact}, jaw_contact={jaw_contact}")
+        
         # Grasp = both parts touching the cube
         self._is_grasped = gripper_contact and jaw_contact
         
