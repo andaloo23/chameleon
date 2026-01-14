@@ -192,18 +192,14 @@ class Gripper:
             dist_std = np.std(self._distance_history)
             is_dist_constant = dist_std < self.distance_stability_threshold
             
-            # Grasp requires:
-            # 1. Constant distance between jaws and cube center
-            # 2. Arm is moving (lifting)
-            # 3. Cube Z has lifted off the ground
-            # 4. Currently contacting or already grasped
             cube_is_lifted = object_world_pos[2] > self.ground_z_threshold
             
-            if is_dist_constant and arm_moving and cube_is_lifted and (is_contacting or self._is_grasped):
+            # Check release condition FIRST (takes priority)
+            # Release if: (arm_moving OR cube_moving) AND distance is NOT constant
+            if self._is_grasped and (arm_moving or cube_moving) and not is_dist_constant:
+                self._is_grasped = False
+            # Check grasp SET condition
+            elif is_dist_constant and arm_moving and cube_is_lifted and (is_contacting or self._is_grasped):
                 self._is_grasped = True
-            else:
-                # Release if: (arm_moving OR cube_moving) AND NOT is_dist_constant
-                if (arm_moving or cube_moving) and not is_dist_constant:
-                    self._is_grasped = False
 
         return self._is_grasped
