@@ -117,6 +117,7 @@ class Gripper:
         stall_threshold_m: float = 0.001,
         contact_limit_m: float = 0.005,
         distance_stability_threshold: float = 0.002,
+        cube_movement_threshold: float = 0.003,  # 3mm movement = cube is moving
         ground_z_threshold: float = 0.025, # Center Z of 4cm cube is 0.02 on ground
         history_len: int = 15,
         debug: bool = True,
@@ -126,11 +127,13 @@ class Gripper:
         self.stall_threshold_m = stall_threshold_m
         self.contact_limit_m = contact_limit_m
         self.distance_stability_threshold = distance_stability_threshold
+        self.cube_movement_threshold = cube_movement_threshold
         self.ground_z_threshold = ground_z_threshold
         self.debug = bool(debug)
 
         self._gap_history: deque = deque(maxlen=history_len)
         self._distance_history: deque = deque(maxlen=5) 
+        self._cube_pos_history: deque = deque(maxlen=5)  # Track cube positions
         self._is_grasped: bool = False
 
     @property
@@ -140,6 +143,7 @@ class Gripper:
     def reset(self) -> None:
         self._gap_history.clear()
         self._distance_history.clear()
+        self._cube_pos_history.clear()
         self._is_grasped = False
 
     def update(
@@ -173,6 +177,16 @@ class Gripper:
         gripper_center = 0.5 * (np.asarray(gripper_world_pos) + np.asarray(jaw_world_pos))
         dist_to_obj = float(np.linalg.norm(gripper_center - np.asarray(object_world_pos)))
         self._distance_history.append(dist_to_obj)
+        
+        # Track cube position for movement detection
+        self._cube_pos_history.append(np.asarray(object_world_pos).copy())
+        
+        # Detect if cube is moving
+        cube_moving = False
+        if len(self._cube_pos_history) >= 3:
+            positions = list(self._cube_pos_history)
+            movement = np.linalg.norm(positions[-1] - positions[0])
+            cube_moving = movement > self.cube_movement_threshold
 
         if len(self._distance_history) >= 5:
             dist_std = np.std(self._distance_history)
@@ -188,8 +202,8 @@ class Gripper:
             if is_dist_constant and arm_moving and cube_is_lifted and (is_contacting or self._is_grasped):
                 self._is_grasped = True
             else:
-                # Release if arm is moving but cube isn't with us, or gripper is opened
-                if (arm_moving and not is_dist_constant) or (gripper_value is not None and gripper_value > 0.6):
+                # Release if: (arm_moving OR cube_moving) AND NOT is_dist_constant
+                if (arm_moving or cube_moving) and not is_dist_constant:
                     self._is_grasped = False
 
         return self._is_grasped
