@@ -143,7 +143,8 @@ def create_cup_prim(stage, prim_path, position,
     xform_prim = xform.GetPrim()
     rigid_api = _UsdPhysics.RigidBodyAPI.Apply(xform_prim)
     rigid_api.CreateRigidBodyEnabledAttr(True)
-    rigid_api.CreateKinematicEnabledAttr(False)
+    # Make cup kinematic - it won't be pushed around and won't trap the gripper
+    rigid_api.CreateKinematicEnabledAttr(True)
     mass_api = _UsdPhysics.MassAPI.Apply(xform_prim)
     mass_attr = mass_api.GetMassAttr()
     if not mass_attr:
