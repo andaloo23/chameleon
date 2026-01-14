@@ -16,13 +16,13 @@ class SO100Robot:
     CONFIG = {
         "default": {
             "L1": 117.0,  # Shoulder to elbow length (mm)
-            "L2": 223.0,  # Elbow to wrist + gripper length (mm) - 136 + 87
+            "L2": 136.0,  # Elbow to wrist length (mm)
             "BASE_HEIGHT_MM": 120.0,
             "SHOULDER_MOUNT_OFFSET_MM": 32.0,
             "ELBOW_MOUNT_OFFSET_MM": 4.0,
             "SPATIAL_LIMITS": {
-                "x": (-20.0, 350.0),
-                "z": (10.0, 450.0),
+                "x": (-20.0, 250.0),  # Max reach ~250mm
+                "z": (30.0, 370.0),
             }
         },
         "PRESET_POSITIONS": {
