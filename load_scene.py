@@ -107,8 +107,8 @@ class IsaacPickPlaceEnv:
 
         self.cube_scale = np.array([0.04, 0.04, 0.04], dtype=float)
         self.cup_height = 0.10 # 10cm
-        self.cup_outer_radius_top = 0.038 # 3.8cm (7.6cm diameter)
-        self.cup_outer_radius_bottom = 0.030 # 3.0cm
+        self.cup_outer_radius_top = 0.057 # 5.7cm (1.5x original)
+        self.cup_outer_radius_bottom = 0.045 # 4.5cm (1.5x original)
         self.cup_wall_thickness = 0.005 # 5mm
         self.cup_inner_radius_top = self.cup_outer_radius_top - self.cup_wall_thickness
         self.cup_inner_radius_bottom = self.cup_outer_radius_bottom - self.cup_wall_thickness
