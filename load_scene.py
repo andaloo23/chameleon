@@ -605,7 +605,14 @@ class IsaacPickPlaceEnv:
         cube_xy = sample_workspace_xy(rng)  # Uses default ±80° range
         cup_xy = sample_workspace_xy(rng, existing=[cube_xy], angle_range=WORKSPACE_ANGLE_RANGE_CUP)  # ±65°
         
-        print(f"[INFO] _sample_object_positions: cube={cube_xy}, cup={cup_xy}")
+        # Debug: show actual radius and angle
+        cube_radius = np.linalg.norm(cube_xy)
+        cup_radius = np.linalg.norm(cup_xy)
+        cube_angle = np.rad2deg(np.arctan2(cube_xy[0], -cube_xy[1]))  # Angle from -Y axis
+        cup_angle = np.rad2deg(np.arctan2(cup_xy[0], -cup_xy[1]))
+        print(f"[INFO] Cube: pos={cube_xy}, radius={cube_radius*1000:.0f}mm, angle={cube_angle:.1f}°")
+        print(f"[INFO] Cup:  pos={cup_xy}, radius={cup_radius*1000:.0f}mm, angle={cup_angle:.1f}°")
+        
         return cube_xy, cup_xy
 
     def _clip_action(self, action):
