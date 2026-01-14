@@ -64,7 +64,7 @@ class SO100Robot:
             "elbow_flex": (-3.14159, 0.0),
             "wrist_flex": (-2.5, 1.2),
             "wrist_roll": (-3.14159, 3.14159),
-            "gripper": (0.0, 1.5)
+            "gripper": (-0.5, 1.5)  # Negative min allows continuous closing pressure
         }
         
         if import_config is None:
