@@ -58,9 +58,6 @@ def main():
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if event.input == carb.input.KeyboardInput.ESCAPE:
                 input_state["is_running"] = False
-            elif event.input == carb.input.KeyboardInput.Y:
-                # Open gripper fully
-                joint_positions[5] = 1.5
             elif event.input == carb.input.KeyboardInput.U:
                 # Close gripper with continuous pressure (target beyond physical limit)
                 joint_positions[5] = -0.5
