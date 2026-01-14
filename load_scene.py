@@ -82,11 +82,11 @@ class IsaacPickPlaceEnv:
 
         # Physics parameters
         self.cube_mass = 0.05
-        self._cube_friction = 2.2
+        self._cube_friction = 0.5  # Lower friction for natural tipping behavior
         self._gripper_friction = 2.2
-        self._gripper_drive_stiffness = 10000.0
-        self._gripper_drive_damping = 800.0
-        self._gripper_drive_max_force = 600.0
+        self._gripper_drive_stiffness = 50000.0  # High stiffness for continuous pressure
+        self._gripper_drive_damping = 1000.0
+        self._gripper_drive_max_force = 2000.0   # High force to maintain grip
         self._contact_offset = 0.001
         self._rest_offset = 0.0001
 
@@ -224,9 +224,9 @@ class IsaacPickPlaceEnv:
             if cube_prim and cube_prim.IsValid():
                 UsdPhysics.CollisionAPI.Apply(cube_prim)
                 material_api = UsdPhysics.MaterialAPI.Apply(cube_prim)
-                material_api.CreateStaticFrictionAttr().Set(2.0) # High friction
-                material_api.CreateDynamicFrictionAttr().Set(2.0)
-                material_api.CreateRestitutionAttr().Set(0.0)
+                material_api.CreateStaticFrictionAttr().Set(self._cube_friction)
+                material_api.CreateDynamicFrictionAttr().Set(self._cube_friction)
+                material_api.CreateRestitutionAttr().Set(0.1)  # Slight bounce for natural behavior
         except Exception: pass
 
         cup_translation = np.array([cup_xy[0], cup_xy[1], 0.0])
