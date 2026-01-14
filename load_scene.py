@@ -145,14 +145,10 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
 
-        # Behavioral Grasp Detection
+        # Physics-Based Grasp Detection
         self.gripper_weld = IntelligentGripperWeld(
             env=self,
             dt=1.0 / 120.0,
-            stall_threshold_m=0.001,
-            contact_limit_m=0.005,
-            distance_stability_threshold=0.002,
-            ground_z_threshold=0.025, # Center Z of 4cm cube is 0.02 on ground
             debug=True,
         )
         self._gripper_pose_fallback_warned = False

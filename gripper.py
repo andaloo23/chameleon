@@ -107,99 +107,110 @@ class GraspDetector:
 # -------------------------
 
 class Gripper:
-    """Gripper class handling behavioral grasp detection."""
+    """Gripper class handling physics-based grasp detection using contact reporting."""
 
     def __init__(
         self,
         env,
         *,
         dt: float = 1.0 / 120.0,
-        stall_threshold_m: float = 0.001,
-        contact_limit_m: float = 0.005,
-        distance_stability_threshold: float = 0.002,
-        cube_movement_threshold: float = 0.003,  # 3mm movement = cube is moving
-        ground_z_threshold: float = 0.025, # Center Z of 4cm cube is 0.02 on ground
-        history_len: int = 15,
         debug: bool = True,
     ) -> None:
         self.env = env
         self.dt = float(dt)
-        self.stall_threshold_m = stall_threshold_m
-        self.contact_limit_m = contact_limit_m
-        self.distance_stability_threshold = distance_stability_threshold
-        self.cube_movement_threshold = cube_movement_threshold
-        self.ground_z_threshold = ground_z_threshold
         self.debug = bool(debug)
-
-        self._gap_history: deque = deque(maxlen=history_len)
-        self._distance_history: deque = deque(maxlen=5) 
-        self._cube_pos_history: deque = deque(maxlen=5)  # Track cube positions
         self._is_grasped: bool = False
+        self._contact_reporter = None
+        self._gripper_path = None
+        self._jaw_path = None
+        self._cube_path = "/World/Cube"
+
+    def _ensure_contact_reporter(self):
+        """Lazily initialize the contact reporter."""
+        if self._contact_reporter is not None:
+            return True
+            
+        try:
+            from omni.physx import get_physx_scene_query_interface
+            self._contact_reporter = get_physx_scene_query_interface()
+            
+            # Find gripper and jaw paths
+            robot_path = getattr(self.env.robot, 'prim_path', '/World/so_arm100')
+            self._gripper_path = f"{robot_path}/gripper"
+            self._jaw_path = f"{robot_path}/jaw"
+            return True
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Could not initialize contact reporter: {e}")
+            return False
+
+    def _check_contact(self, link_path: str, target_path: str) -> bool:
+        """Check if link_path is in contact with target_path using overlap detection."""
+        try:
+            # Use bounding box overlap as a simpler contact check
+            stage = self.env.world.stage
+            link_prim = stage.GetPrimAtPath(link_path)
+            target_prim = stage.GetPrimAtPath(target_path)
+            
+            if not link_prim.IsValid() or not target_prim.IsValid():
+                return False
+            
+            from pxr import UsdGeom, Gf
+            
+            # Get world bounds for both prims
+            link_bbox = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_]).ComputeWorldBound(link_prim)
+            target_bbox = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_]).ComputeWorldBound(target_prim)
+            
+            link_range = link_bbox.GetBox()
+            target_range = target_bbox.GetBox()
+            
+            if link_range.IsEmpty() or target_range.IsEmpty():
+                return False
+            
+            # Expand boxes slightly for contact margin
+            margin = 0.001  # 1mm contact margin
+            link_min = link_range.GetMin() - Gf.Vec3d(margin, margin, margin)
+            link_max = link_range.GetMax() + Gf.Vec3d(margin, margin, margin)
+            target_min = target_range.GetMin()
+            target_max = target_range.GetMax()
+            
+            # Check AABB overlap
+            overlap = (link_min[0] <= target_max[0] and link_max[0] >= target_min[0] and
+                      link_min[1] <= target_max[1] and link_max[1] >= target_min[1] and
+                      link_min[2] <= target_max[2] and link_max[2] >= target_min[2])
+            
+            return overlap
+            
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Contact check error: {e}")
+            return False
 
     @property
     def is_grasping(self) -> bool:
         return self._is_grasped
 
     def reset(self) -> None:
-        self._gap_history.clear()
-        self._distance_history.clear()
-        self._cube_pos_history.clear()
         self._is_grasped = False
 
     def update(
         self,
         *,
-        gripper_value: Optional[float],
-        target_gripper: Optional[float],
-        gripper_world_pos: Optional[np.ndarray],
-        jaw_world_pos: Optional[np.ndarray],
-        object_world_pos: Optional[np.ndarray],
+        gripper_value: Optional[float] = None,
+        target_gripper: Optional[float] = None,
+        gripper_world_pos: Optional[np.ndarray] = None,
+        jaw_world_pos: Optional[np.ndarray] = None,
+        object_world_pos: Optional[np.ndarray] = None,
         arm_moving: bool = False,
     ) -> bool:
-        if gripper_world_pos is None or jaw_world_pos is None or object_world_pos is None:
-            self._is_grasped = False
-            return False
-
-        gap = float(np.linalg.norm(np.asarray(gripper_world_pos) - np.asarray(jaw_world_pos)))
-        self._gap_history.append(gap)
-
-        stalled = False
-        if len(self._gap_history) >= 5:
-            gap_range = max(self._gap_history) - min(self._gap_history)
-            stalled = gap_range < self.stall_threshold_m
+        """Update grasp state based on physical contact detection."""
+        self._ensure_contact_reporter()
         
-        is_closing_cmd = False
-        if gripper_value is not None and target_gripper is not None:
-            is_closing_cmd = target_gripper < gripper_value - 1e-3
-
-        is_contacting = stalled and is_closing_cmd and gap > self.contact_limit_m
-
-        gripper_center = 0.5 * (np.asarray(gripper_world_pos) + np.asarray(jaw_world_pos))
-        dist_to_obj = float(np.linalg.norm(gripper_center - np.asarray(object_world_pos)))
-        self._distance_history.append(dist_to_obj)
+        # Check if both gripper and jaw are contacting the cube
+        gripper_contact = self._check_contact(self._gripper_path, self._cube_path)
+        jaw_contact = self._check_contact(self._jaw_path, self._cube_path)
         
-        # Track cube position for movement detection
-        self._cube_pos_history.append(np.asarray(object_world_pos).copy())
+        # Grasp = both parts touching the cube
+        self._is_grasped = gripper_contact and jaw_contact
         
-        # Detect if cube is moving
-        cube_moving = False
-        if len(self._cube_pos_history) >= 3:
-            positions = list(self._cube_pos_history)
-            movement = np.linalg.norm(positions[-1] - positions[0])
-            cube_moving = movement > self.cube_movement_threshold
-
-        if len(self._distance_history) >= 5:
-            dist_std = np.std(self._distance_history)
-            is_dist_constant = dist_std < self.distance_stability_threshold
-            
-            cube_is_lifted = object_world_pos[2] > self.ground_z_threshold
-            
-            # Check release condition FIRST (takes priority)
-            # Release if: (arm_moving OR cube_moving) AND distance is NOT constant
-            if self._is_grasped and (arm_moving or cube_moving) and not is_dist_constant:
-                self._is_grasped = False
-            # Check grasp SET condition
-            elif is_dist_constant and arm_moving and cube_is_lifted and (is_contacting or self._is_grasped):
-                self._is_grasped = True
-
         return self._is_grasped
