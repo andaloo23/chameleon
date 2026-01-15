@@ -121,76 +121,65 @@ class Gripper:
         self.debug = bool(debug)
         self._is_grasped: bool = False
         self._contact_reporter = None
-        self._gripper_path = None
-        self._jaw_path = None
+        self._gripper_path = "/World/so_arm100/gripper"
+        self._jaw_path = "/World/so_arm100/jaw"
         self._cube_path = "/World/Cube"
-        self._history_n = 5
+        self._history_n = 10  # Use a longer window for stability
         self._condition_met_frames = 0
         self._condition_failed_frames = 0
-        self._prev_relative_dist = None
+        self._dist_history = deque(maxlen=self._history_n)
         self._lift_threshold = 0.025  # Cube center is at 0.02 when on ground (0.04 height)
-        self._stability_threshold = 0.001  # 1mm
+        self._stability_threshold = 0.0005  # 0.5mm strict stability
 
     def _ensure_contact_reporter(self):
-        """Lazily initialize the contact reporter."""
+        """Lazily initialize the contact sensor interface."""
+        # Sync with environment's resolved paths if available
+        if hasattr(self.env, "_gripper_prim_path") and self.env._gripper_prim_path:
+            self._gripper_path = self.env._gripper_prim_path
+        if hasattr(self.env, "_jaw_prim_path") and self.env._jaw_prim_path:
+            self._jaw_path = self.env._jaw_prim_path
+            
         if self._contact_reporter is not None:
             return True
             
         try:
-            from omni.physx import get_physx_scene_query_interface
-            self._contact_reporter = get_physx_scene_query_interface()
-            
-            # Find gripper and jaw paths
-            robot_path = getattr(self.env.robot, 'prim_path', '/World/so_arm100')
-            self._gripper_path = f"{robot_path}/gripper"
-            self._jaw_path = f"{robot_path}/jaw"
+            from omni.isaac.sensor import _sensor
+            self._contact_reporter = _sensor.acquire_contact_sensor_interface()
             return True
         except Exception as e:
             if self.debug:
-                print(f"[WARN] Could not initialize contact reporter: {e}")
+                print(f"[WARN] Could not initialize contact sensor interface: {e}")
             return False
 
-    def _check_contact(self, link_path: str, target_path: str) -> bool:
-        """Check if link_path is in contact with target_path using overlap detection."""
+    def _check_contact(self, sensor_link_path: str, target_path: str) -> bool:
+        """Check if sensor_link_path is in contact with target_path using contact sensor."""
+        if self._contact_reporter is None:
+            return False
+            
         try:
-            # Use bounding box overlap as a simpler contact check
-            stage = self.env.world.stage
-            link_prim = stage.GetPrimAtPath(link_path)
-            target_prim = stage.GetPrimAtPath(target_path)
+            # Get raw contact data for this link
+            raw_data = self._contact_reporter.get_contact_sensor_raw_data(sensor_link_path)
             
-            if not link_prim.IsValid() or not target_prim.IsValid():
+            if raw_data is None or len(raw_data) == 0:
                 return False
             
-            from pxr import UsdGeom, Gf
+            # Check each contact to see if it involves the target
+            for contact in raw_data:
+                # Decode body names from the contact
+                body0 = self._contact_reporter.decode_body_name(contact.body0)
+                body1 = self._contact_reporter.decode_body_name(contact.body1)
+                
+                # Check if the target path is involved in this contact
+                if target_path in body0 or target_path in body1:
+                    return True
             
-            # Get world bounds for both prims
-            link_bbox = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_]).ComputeWorldBound(link_prim)
-            target_bbox = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_]).ComputeWorldBound(target_prim)
-            
-            link_range = link_bbox.GetBox()
-            target_range = target_bbox.GetBox()
-            
-            if link_range.IsEmpty() or target_range.IsEmpty():
-                return False
-            
-            # Expand boxes slightly for contact margin
-            margin = 0.001  # 1mm contact margin
-            link_min = link_range.GetMin() - Gf.Vec3d(margin, margin, margin)
-            link_max = link_range.GetMax() + Gf.Vec3d(margin, margin, margin)
-            target_min = target_range.GetMin()
-            target_max = target_range.GetMax()
-            
-            # Check AABB overlap
-            overlap = (link_min[0] <= target_max[0] and link_max[0] >= target_min[0] and
-                      link_min[1] <= target_max[1] and link_max[1] >= target_min[1] and
-                      link_min[2] <= target_max[2] and link_max[2] >= target_min[2])
-            
-            return overlap
+            return False
             
         except Exception as e:
             if self.debug:
-                print(f"[WARN] Contact check error: {e}")
+                print(f"[WARN] Contact sensor check error: {e}")
             return False
+
 
     @property
     def is_grasping(self) -> bool:
@@ -198,6 +187,9 @@ class Gripper:
 
     def reset(self) -> None:
         self._is_grasped = False
+        self._dist_history.clear()
+        self._condition_met_frames = 0
+        self._condition_failed_frames = 0
 
     def update(
         self,
@@ -212,19 +204,23 @@ class Gripper:
         """Update grasp state based on physical contact detection and stability."""
         self._ensure_contact_reporter()
         
-        # 1. Check if both gripper and jaw are contacting the cube
+        # 1. Check if both gripper and jaw are contacting the cube using contact sensors
         gripper_contact = self._check_contact(self._gripper_path, self._cube_path)
         jaw_contact = self._check_contact(self._jaw_path, self._cube_path)
         contact_met = gripper_contact and jaw_contact
+
         
-        # 2. Check relative distance stability
+        # 2. Check relative distance stability using a window
         stability_met = False
         if gripper_world_pos is not None and object_world_pos is not None:
             curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
-            if self._prev_relative_dist is not None:
-                dist_diff = abs(curr_dist - self._prev_relative_dist)
-                stability_met = dist_diff < self._stability_threshold
-            self._prev_relative_dist = curr_dist
+            self._dist_history.append(curr_dist)
+            
+            if len(self._dist_history) == self._history_n:
+                # Relative distance is stable if max variation in window is small
+                dists = list(self._dist_history)
+                variation = max(dists) - min(dists)
+                stability_met = variation < self._stability_threshold
         
         # 3. Check if cube is off the ground
         lift_met = False
@@ -241,16 +237,16 @@ class Gripper:
         if not self._is_grasped:
             if all_conditions_met:
                 self._condition_met_frames += 1
-                if self._condition_met_frames >= self._history_n:
+                if self._condition_met_frames >= 5: # Requirement: sustained for 5 frames
                     self._is_grasped = True
                     self._condition_met_frames = 0
             else:
                 self._condition_met_frames = 0
         else:
-            # If already grasped, check if any condition fails
-            if not all_conditions_met:
+            # If already grasped, check if any condition fails (allow some jitter)
+            if not (contact_met or stability_met): # Drop if we lose both contact and stability
                 self._condition_failed_frames += 1
-                if self._condition_failed_frames >= self._history_n:
+                if self._condition_failed_frames >= 5:
                     self._is_grasped = False
                     self._condition_failed_frames = 0
             else:

@@ -802,7 +802,18 @@ class IsaacPickPlaceEnv:
                     rb = PhysxSchema.PhysxRigidBodyAPI.Apply(pr)
                     rb.CreateContactOffsetAttr().Set(float(self._contact_offset))
                     rb.CreateRestOffsetAttr().Set(float(self._rest_offset))
-        except Exception: pass
+                    # Apply contact report API for contact sensor detection
+                    if not pr.HasAPI(PhysxSchema.PhysxContactReportAPI):
+                        PhysxSchema.PhysxContactReportAPI.Apply(pr)
+                    UsdPhysics.CollisionAPI.Apply(pr)
+            # Also apply to the cube
+            cube_prim = stage.GetPrimAtPath("/World/Cube")
+            if cube_prim and cube_prim.IsValid():
+                if not cube_prim.HasAPI(PhysxSchema.PhysxContactReportAPI):
+                    PhysxSchema.PhysxContactReportAPI.Apply(cube_prim)
+        except Exception as e:
+            print(f"[WARN] Could not apply contact report API: {e}")
+
 
     def _configure_gripper_drive(self):
         try:
