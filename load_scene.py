@@ -447,7 +447,10 @@ class IsaacPickPlaceEnv:
         # Concise status line: G=grasp, C=contact, S=stability, L=lift
         state = self.gripper_detector.last_state if self.gripper_detector else {}
         c, s, l = state.get("contact", False), state.get("stability", False), state.get("lift", False)
-        print(f"\r[GRASP] G:{int(is_grasped)} C:{int(c)} S:{int(s)} L:{int(l)}", end="", flush=True)
+        # Print every 30 frames on a new line for visibility
+        if self._step_counter % 30 == 0:
+            print(f"[GRASP] G:{int(is_grasped)} C:{int(c)} S:{int(s)} L:{int(l)}")
+
 
 
 

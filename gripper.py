@@ -233,7 +233,7 @@ class Gripper:
         if not self._is_grasped:
             if all_conditions_met:
                 self._condition_met_frames += 1
-                if self._condition_met_frames >= 5: # Requirement: sustained for 5 frames
+                if self._condition_met_frames >= 30: # Requirement: sustained for 30 frames
                     self._is_grasped = True
                     self._condition_met_frames = 0
             else:
@@ -242,7 +242,7 @@ class Gripper:
             # If already grasped, check if any condition fails (allow some jitter)
             if not (contact_met or stability_met): # Drop if we lose both contact and stability
                 self._condition_failed_frames += 1
-                if self._condition_failed_frames >= 5:
+                if self._condition_failed_frames >= 30:
                     self._is_grasped = False
                     self._condition_failed_frames = 0
             else:
