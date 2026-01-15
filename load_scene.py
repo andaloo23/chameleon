@@ -794,26 +794,17 @@ class IsaacPickPlaceEnv:
             for p in [f"{root}/gripper", f"{root}/jaw"]:
                 pr = stage.GetPrimAtPath(p)
                 if pr.IsValid():
-                    # Apply material properties
+                    # Apply material properties for friction
                     mat = UsdPhysics.MaterialAPI.Apply(pr)
                     mat.CreateStaticFrictionAttr().Set(float(self._gripper_friction))
                     mat.CreateDynamicFrictionAttr().Set(float(self._gripper_friction))
                     ps = PhysxSchema.PhysxMaterialAPI.Apply(pr)
                     ps.CreateFrictionCombineModeAttr().Set("max")
                     
-                    # Apply collision API and contact/rest offsets
-                    UsdPhysics.CollisionAPI.Apply(pr)
-                    try:
-                        collision_api = PhysxSchema.PhysxCollisionAPI.Apply(pr)
-                        collision_api.CreateContactOffsetAttr().Set(float(self._contact_offset))
-                        collision_api.CreateRestOffsetAttr().Set(float(self._rest_offset))
-                    except Exception:
-                        pass  # Contact offset not critical
-                    
                     # Apply contact report API for contact sensor detection
+                    # Note: Don't apply CollisionAPI here as URDF already has collision meshes
                     try:
-                        if not pr.HasAPI(PhysxSchema.PhysxContactReportAPI):
-                            PhysxSchema.PhysxContactReportAPI.Apply(pr)
+                        PhysxSchema.PhysxContactReportAPI.Apply(pr)
                     except Exception as e:
                         print(f"[WARN] Could not apply contact report API to {p}: {e}")
                         
@@ -821,12 +812,12 @@ class IsaacPickPlaceEnv:
             cube_prim = stage.GetPrimAtPath("/World/Cube")
             if cube_prim and cube_prim.IsValid():
                 try:
-                    if not cube_prim.HasAPI(PhysxSchema.PhysxContactReportAPI):
-                        PhysxSchema.PhysxContactReportAPI.Apply(cube_prim)
+                    PhysxSchema.PhysxContactReportAPI.Apply(cube_prim)
                 except Exception as e:
                     print(f"[WARN] Could not apply contact report API to cube: {e}")
         except Exception as e:
             print(f"[WARN] Could not apply gripper friction: {e}")
+
 
 
 
