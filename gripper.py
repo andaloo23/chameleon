@@ -132,52 +132,34 @@ class Gripper:
         self._stability_threshold = 0.0005  # 0.5mm strict stability
 
     def _ensure_contact_reporter(self):
-        """Lazily initialize the contact sensor interface."""
-        # Sync with environment's resolved paths if available
+        """Sync paths with environment."""
         if hasattr(self.env, "_gripper_prim_path") and self.env._gripper_prim_path:
             self._gripper_path = self.env._gripper_prim_path
         if hasattr(self.env, "_jaw_prim_path") and self.env._jaw_prim_path:
             self._jaw_path = self.env._jaw_prim_path
-            
-        if self._contact_reporter is not None:
-            return True
-            
+        return True
+
+    def _check_gripper_contact(self) -> bool:
+        """Check if gripper (fixed jaw) is in contact using ContactSensor."""
+        sensor = getattr(self.env, "gripper_contact_sensor", None)
+        if sensor is None:
+            return False
         try:
-            from omni.isaac.sensor import _sensor
-            self._contact_reporter = _sensor.acquire_contact_sensor_interface()
-            return True
-        except Exception as e:
-            if self.debug:
-                print(f"[WARN] Could not initialize contact sensor interface: {e}")
+            reading = sensor.get_current_frame()
+            # is_valid indicates the sensor detected something
+            return reading.get("in_contact", False) or reading.get("value", 0.0) > 0.0
+        except Exception:
             return False
 
-    def _check_contact(self, sensor_link_path: str, target_path: str) -> bool:
-        """Check if sensor_link_path is in contact with target_path using contact sensor."""
-        if self._contact_reporter is None:
+    def _check_jaw_contact(self) -> bool:
+        """Check if jaw (moving jaw) is in contact using ContactSensor."""
+        sensor = getattr(self.env, "jaw_contact_sensor", None)
+        if sensor is None:
             return False
-            
         try:
-            # Get raw contact data for this link
-            raw_data = self._contact_reporter.get_contact_sensor_raw_data(sensor_link_path)
-            
-            if raw_data is None or len(raw_data) == 0:
-                return False
-            
-            # Check each contact to see if it involves the target
-            for contact in raw_data:
-                # Decode body names from the contact
-                body0 = self._contact_reporter.decode_body_name(contact.body0)
-                body1 = self._contact_reporter.decode_body_name(contact.body1)
-                
-                # Check if the target path is involved in this contact
-                if target_path in body0 or target_path in body1:
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            if self.debug:
-                print(f"[WARN] Contact sensor check error: {e}")
+            reading = sensor.get_current_frame()
+            return reading.get("in_contact", False) or reading.get("value", 0.0) > 0.0
+        except Exception:
             return False
 
 
@@ -185,11 +167,17 @@ class Gripper:
     def is_grasping(self) -> bool:
         return self._is_grasped
 
+    @property
+    def last_state(self) -> dict:
+        """Return last computed state for debugging."""
+        return getattr(self, "_last_state", {})
+
     def reset(self) -> None:
         self._is_grasped = False
         self._dist_history.clear()
         self._condition_met_frames = 0
         self._condition_failed_frames = 0
+        self._last_state = {}
 
     def update(
         self,
@@ -204,10 +192,11 @@ class Gripper:
         """Update grasp state based on physical contact detection and stability."""
         self._ensure_contact_reporter()
         
-        # 1. Check if both gripper and jaw are contacting the cube using contact sensors
-        gripper_contact = self._check_contact(self._gripper_path, self._cube_path)
-        jaw_contact = self._check_contact(self._jaw_path, self._cube_path)
+        # 1. Check if both gripper and jaw are contacting using ContactSensor
+        gripper_contact = self._check_gripper_contact()
+        jaw_contact = self._check_jaw_contact()
         contact_met = gripper_contact and jaw_contact
+
 
         
         # 2. Check relative distance stability using a window
@@ -224,14 +213,21 @@ class Gripper:
         
         # 3. Check if cube is off the ground
         lift_met = False
+        cube_z = 0.0
         if object_world_pos is not None:
-            lift_met = object_world_pos[2] > self._lift_threshold
+            cube_z = float(object_world_pos[2])
+            lift_met = cube_z > self._lift_threshold
+            
+        # Store state for external access
+        self._last_state = {
+            "contact": contact_met,
+            "stability": stability_met,
+            "lift": lift_met,
+            "cube_z": cube_z,
+        }
             
         # Combine conditions
         all_conditions_met = contact_met and stability_met and lift_met
-        
-        if self.debug:
-            print(f"[GRASP DEBUG] contact={contact_met}, stability={stability_met}, lift={lift_met} (Z={object_world_pos[2] if object_world_pos is not None else 'N/A'})")
         
         # Update temporal window
         if not self._is_grasped:
@@ -253,3 +249,4 @@ class Gripper:
                 self._condition_failed_frames = 0
         
         return self._is_grasped
+

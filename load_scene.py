@@ -150,6 +150,10 @@ class IsaacPickPlaceEnv:
         )
         self._gripper_pose_fallback_warned = False
         self._prev_gripper_value = None
+        
+        # Contact sensors for gripper and jaw (will be initialized in _build_scene)
+        self.gripper_contact_sensor = None
+        self.jaw_contact_sensor = None
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -266,7 +270,9 @@ class IsaacPickPlaceEnv:
 
         self._apply_gripper_friction()
         self._configure_gripper_drive()
+        self._create_contact_sensors()  # Create contact sensors for gripper/jaw
         self.robot.configure_drives() # Set up PD controllers for arm
+
         
         # Warm-up for robot stabilization (cube not placed yet, so no collision)
         print("[INFO] Warming up simulation and synthetic data pipeline...")
@@ -438,9 +444,12 @@ class IsaacPickPlaceEnv:
                 arm_moving=arm_moving
             )
 
-        print(f"\r[STATUS] Grasp Detection: {is_grasped}    ", end="", flush=True)
-        if self._step_counter % 50 == 0:
-            print() # New line occasionally for clear history
+        # Concise status line: G=grasp, C=contact, S=stability, L=lift
+        state = self.gripper_detector.last_state if self.gripper_detector else {}
+        c, s, l = state.get("contact", False), state.get("stability", False), state.get("lift", False)
+        print(f"\r[GRASP] G:{int(is_grasped)} C:{int(c)} S:{int(s)} L:{int(l)}", end="", flush=True)
+
+
 
 
         obs = self._get_observation()
@@ -839,6 +848,46 @@ class IsaacPickPlaceEnv:
                 dr.CreateMaxForceAttr().Set(float(self._gripper_drive_max_force))
         except Exception: pass
     
+    def _create_contact_sensors(self):
+        """Create contact sensors on gripper and jaw links."""
+        try:
+            from omni.isaac.sensor import ContactSensor
+            root = getattr(self.robot, "prim_path", "/World/so_arm100")
+            
+            # Create sensor on gripper (fixed jaw)
+            gripper_sensor_path = f"{root}/gripper/contact_sensor"
+            self.gripper_contact_sensor = ContactSensor(
+                prim_path=gripper_sensor_path,
+                name="gripper_contact_sensor",
+                min_threshold=0.0,
+                max_threshold=100000.0,
+                radius=0.03,  # 3cm contact radius
+                translation=np.array([0, -0.03, 0]),  # Position at fingertip
+            )
+            self.world.scene.add(self.gripper_contact_sensor)
+            
+            # Create sensor on jaw (moving jaw)
+            jaw_sensor_path = f"{root}/jaw/contact_sensor"
+            self.jaw_contact_sensor = ContactSensor(
+                prim_path=jaw_sensor_path,
+                name="jaw_contact_sensor",
+                min_threshold=0.0,
+                max_threshold=100000.0,
+                radius=0.03,  # 3cm contact radius
+                translation=np.array([0, -0.03, 0]),  # Position at fingertip
+            )
+            self.world.scene.add(self.jaw_contact_sensor)
+            
+            # Initialize sensors
+            self.gripper_contact_sensor.initialize()
+            self.jaw_contact_sensor.initialize()
+            
+            print(f"[INFO] Contact sensors created: {gripper_sensor_path}, {jaw_sensor_path}")
+        except Exception as e:
+            print(f"[WARN] Could not create contact sensors: {e}")
+            self.gripper_contact_sensor = None
+            self.jaw_contact_sensor = None
+
     def _apply_domain_randomization(self):
         if self.domain_randomizer: self.domain_randomizer.randomize()
 
