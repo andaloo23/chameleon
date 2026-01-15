@@ -10,7 +10,7 @@ from cup_utils import create_cup_prim, initialize_usd_modules
 from domain_randomizer import DomainRandomizer
 from image_utils import write_png
 from reward_engine import RewardEngine
-from gripper import Gripper as IntelligentGripperWeld, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
+from gripper import Gripper, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 from workspace import CUP_CUBE_MIN_DISTANCE, WORKSPACE_RADIUS_RANGE, sample_workspace_xy
 
@@ -67,18 +67,15 @@ def _ensure_isaac_sim(headless=False):
 class IsaacPickPlaceEnv:
     """Isaac Sim environment wrapper for the pick-and-place task."""
 
-    def __init__(self, headless=False, capture_images=False, image_interval=3, random_seed=None, grasp_mode: str = "weld"):
+    def __init__(self, headless=False, capture_images=False, image_interval=3, random_seed=None):
         self.headless = headless
         self.capture_images = capture_images
         self.image_interval = max(1, int(image_interval))
         self.random_seed = random_seed
         self.rng = np.random.default_rng(random_seed)
 
-        # Standardized Intelligent Weld system
-        self.grasp_mode = "weld"
-        self.use_sticky_gripper = False
-        self.use_physics_gripper = False
-        self.use_weld_gripper = True
+        # Behavioral Grasp detection
+        self.grasp_detected = False
 
         # Physics parameters
         self.cube_mass = 0.05
@@ -145,8 +142,8 @@ class IsaacPickPlaceEnv:
         self._termination_reason = None
         self._cup_upright_threshold_rad = np.deg2rad(25.0)
 
-        # Physics-Based Grasp Detection
-        self.gripper_weld = IntelligentGripperWeld(
+        # Behavioral Grasp Detector
+        self.gripper_detector = Gripper(
             env=self,
             dt=1.0 / 120.0,
             debug=True,
@@ -316,7 +313,7 @@ class IsaacPickPlaceEnv:
         
         self._apply_domain_randomization()
         self.reward_engine.reset()
-        if self.gripper_weld: self.gripper_weld.reset()
+        if self.gripper_detector: self.gripper_detector.reset()
         self._force_terminate, self._termination_reason = False, None
         self._latest_target_gripper, self._prev_gripper_value = None, None
         self._last_gripper_pose, self._last_jaw_pos = (None, None), None
@@ -433,8 +430,8 @@ class IsaacPickPlaceEnv:
         except Exception: pass
 
         is_grasped = False
-        if self.gripper_weld:
-            is_grasped = self.gripper_weld.update(
+        if self.gripper_detector:
+            is_grasped = self.gripper_detector.update(
                 gripper_value=agp, target_gripper=self._latest_target_gripper,
                 gripper_world_pos=gwp, jaw_world_pos=jwp,
                 object_world_pos=cp,
@@ -550,7 +547,7 @@ class IsaacPickPlaceEnv:
 
 
     def close(self):
-        if self.gripper_weld: pass
+        if self.gripper_detector: pass
         
         # Explicitly remove cameras from the scene to avoid shutdown crashes
         if self.world and self.world.scene:
@@ -571,7 +568,7 @@ class IsaacPickPlaceEnv:
         print("[INFO] Shutting down simulation...")
         if self.world:
             try:
-                if self.gripper_weld: pass
+                if self.gripper_detector: pass
                 self.world.pause()
             except Exception: pass
             

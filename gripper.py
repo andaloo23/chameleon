@@ -1,8 +1,8 @@
 """gripper.py
 
 Refined gripper logic for Isaac Sim. 
-This version removes physics welds (sticky gripper) and implements a behavioral 
-grasp detection system based on gripper stall and relative distance stability.
+This version implements a behavioral grasp detection system based on 
+bounding box overlap (contact detection).
 """
 
 from __future__ import annotations

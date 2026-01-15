@@ -93,9 +93,9 @@ class RewardEngine:
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
         gripper_value = state.get("gripper_joint")
-        gripper_weld = getattr(self.env, "gripper_weld", None)
+# (Line removed)
 
-        # Pressure-based grasp detection using GraspDetector
+        # Behavioral grasp detection
         # Detects when gripper is trying to close but position is stable (blocked by object)
         # Use a reasonable distance threshold (15cm) to ensure we are near the cube.
         distance_threshold = 0.15 
@@ -108,18 +108,11 @@ class RewardEngine:
                 target_position=self.latest_target_gripper,
             )
         
-        # Grasp detection:
-        # - Prefer an explicit physics weld (IntelligentGripperWeld) if present.
-        # - When using weld mode, ignore pressure-only grasps to avoid lifting without a joint.
-        weld_gripper = getattr(self.env, "gripper_weld", None)
-        weld_grasp_detected = bool(weld_gripper is not None and getattr(weld_gripper, "is_grasping", False))
+        # Grasp detection: use behavioral/pressure detection.
         pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
-        if getattr(self.env, "use_weld_gripper", False):
-            pressure_grasp_detected = False
         near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
         
-        # Prefer explicit weld (most reliable), fallback to pressure-based.
-        grasp_detected = weld_grasp_detected or (pressure_grasp_detected and near_cube)
+        grasp_detected = pressure_grasp_detected and near_cube
         
         if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
@@ -187,10 +180,8 @@ class RewardEngine:
             close_to_gripper = (gripper_cube_distance is not None and
                                 gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
-            # Use sticky gripper (constraint-based) or pressure-based for drop detection
-            still_grasping_weld = gripper_weld is not None and gripper_weld.is_grasping
-            still_grasping_pressure = grasp_state is not None and grasp_state.grasped
-            still_grasping = still_grasping_weld or still_grasping_pressure
+            # Use behavioral/pressure-based for drop detection
+            still_grasping = grasp_state is not None and grasp_state.grasped
             if low_height and (not still_grasping or not close_to_gripper):
                 drop_triggered = True
 
@@ -303,12 +294,7 @@ class RewardEngine:
         state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
         
         # Behavioral grasp detection state
-        state["pressure_grasp"] = self.grasp_detector.is_grasped
+        state["grasp_detected"] = self.grasp_detector.is_grasped
         state["grasp_position"] = None
-        
-        # Behavioral grasp state
-        gripper_weld = getattr(self.env, "gripper_weld", None)
-        state["sticky_grasp"] = gripper_weld.is_grasping if gripper_weld else False
-        state["grasped_object"] = None # No longer tracked via welds
 
         self.task_state = state

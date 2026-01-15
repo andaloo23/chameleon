@@ -60,16 +60,10 @@ class SimulationLoop:
         max_steps: int = 500,
         capture_images: bool = False,
         image_interval: int = 3,
-        random_seed: Optional[int] = None,
-        grasp_mode: str = "weld",
     ) -> None:
         self.max_steps = int(max_steps)
         if self.max_steps <= 0:
             raise ValueError("`max_steps` must be greater than zero.")
-        grasp_mode = (grasp_mode or "sticky").strip().lower()
-        if grasp_mode not in {"sticky", "physics", "weld"}:
-            raise ValueError("grasp_mode must be 'sticky', 'physics', or 'weld'")
-        self.grasp_mode = grasp_mode
 
         if env is None:
             self.env = IsaacPickPlaceEnv(
@@ -77,16 +71,11 @@ class SimulationLoop:
                 capture_images=capture_images,
                 image_interval=image_interval,
                 random_seed=random_seed,
-                grasp_mode=self.grasp_mode,
             )
             self._owns_env = True
         else:
             self.env = env
             self._owns_env = False
-            env_mode = getattr(self.env, "grasp_mode", None)
-            if env_mode is not None and env_mode != self.grasp_mode:
-                print(f"[warn] SimulationLoop grasp_mode={self.grasp_mode} but env.grasp_mode={env_mode}; using env value.")
-                self.grasp_mode = env_mode
 
         self.random_policy = functools.partial(_default_random_policy, self.env)
 

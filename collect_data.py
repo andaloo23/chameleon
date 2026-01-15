@@ -67,19 +67,14 @@ def main():
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to collect.")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode.")
     parser.add_argument("--max_steps", type=int, default=1500, help="Max steps per episode.")
-    parser.add_argument(
-        "--grasp-mode",
-        choices=("sticky", "physics"),
-        default="sticky",
-        help="Choose sticky vs physics-based grasping.",
     )
     args = parser.parse_args()
 
     print(f"[info] Starting data collection for {args.episodes} episodes...")
     
     try:
-        env = IsaacPickPlaceEnv(headless=args.headless, capture_images=False, grasp_mode="weld")
-        loop = SimulationLoop(env=env, headless=args.headless, max_steps=args.max_steps, grasp_mode="weld")
+        env = IsaacPickPlaceEnv(headless=args.headless, capture_images=False)
+        loop = SimulationLoop(env=env, headless=args.headless, max_steps=args.max_steps)
 
         policy = loop.scripted_policy()
         
