@@ -26,16 +26,8 @@ class RewardEngine:
         self.latest_joint_velocities = None
         self.latest_target_gripper = None  # Target gripper position from action
         
-        # Pressure-based grasp detector
-        # Detects stall: gripper was closing, has stalled, but not at min position
-        self.grasp_detector = GraspDetector(
-            history_length=15,
-            stability_threshold=0.015,       # Max range for "stable" position
-            min_stable_frames=5,             # Frames to confirm grasp
-            min_gripper_position=0.005,      # Allow detection even when nearly fully closed
-            max_gripper_for_grasp=1.2,       # Above this = too open for grasp
-            closing_velocity_threshold=0.002, # Min velocity to detect "closing"
-        )
+        # Consolidate with env.gripper_detector (Gripper class)
+        # to ensure reward logic matches simulation status reporting
 
     def initialize(self):
         robot = getattr(self.env, "robot", None)
@@ -59,7 +51,7 @@ class RewardEngine:
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
         self.latest_target_gripper = None
-        self.grasp_detector.reset()
+        # env.gripper_detector.reset() is called by the env itself
 
     def record_joint_state(self, joint_positions, joint_velocities, target_gripper=None):
         """
@@ -95,24 +87,9 @@ class RewardEngine:
         gripper_value = state.get("gripper_joint")
 # (Line removed)
 
-        # Behavioral grasp detection
-        # Detects when gripper is trying to close but position is stable (blocked by object)
-        # Use a reasonable distance threshold (15cm) to ensure we are near the cube.
-        distance_threshold = 0.15 
-        
-        # Update grasp detector with current gripper state
-        grasp_state = None
-        if gripper_value is not None:
-            grasp_state = self.grasp_detector.update(
-                gripper_position=gripper_value,
-                target_position=self.latest_target_gripper,
-            )
-        
-        # Grasp detection: use behavioral/pressure detection.
-        pressure_grasp_detected = grasp_state is not None and grasp_state.grasped
-        near_cube = gripper_cube_distance is not None and gripper_cube_distance <= distance_threshold
-        
-        grasp_detected = pressure_grasp_detected and near_cube
+        # Grasp detection: use the environment's consolidated detector.
+        # This now includes contact, stability, and lift requirements.
+        grasp_detected = getattr(self.env.gripper_detector, "is_grasping", False)
         
         if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
@@ -180,8 +157,8 @@ class RewardEngine:
             close_to_gripper = (gripper_cube_distance is not None and
                                 gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
-            # Use behavioral/pressure-based for drop detection
-            still_grasping = grasp_state is not None and grasp_state.grasped
+            # Use consolidated detector for drop detection
+            still_grasping = getattr(self.env.gripper_detector, "is_grasping", False)
             if low_height and (not still_grasping or not close_to_gripper):
                 drop_triggered = True
 
@@ -294,7 +271,7 @@ class RewardEngine:
         state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
         
         # Behavioral grasp detection state
-        state["grasp_detected"] = self.grasp_detector.is_grasped
+        state["grasp_detected"] = getattr(self.env.gripper_detector, "is_grasping", False)
         state["grasp_position"] = None
 
         self.task_state = state

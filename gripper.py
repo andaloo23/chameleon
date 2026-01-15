@@ -124,6 +124,12 @@ class Gripper:
         self._gripper_path = None
         self._jaw_path = None
         self._cube_path = "/World/Cube"
+        self._history_n = 5
+        self._condition_met_frames = 0
+        self._condition_failed_frames = 0
+        self._prev_relative_dist = None
+        self._lift_threshold = 0.025  # Cube center is at 0.02 when on ground (0.04 height)
+        self._stability_threshold = 0.001  # 1mm
 
     def _ensure_contact_reporter(self):
         """Lazily initialize the contact reporter."""
@@ -203,17 +209,51 @@ class Gripper:
         object_world_pos: Optional[np.ndarray] = None,
         arm_moving: bool = False,
     ) -> bool:
-        """Update grasp state based on physical contact detection."""
+        """Update grasp state based on physical contact detection and stability."""
         self._ensure_contact_reporter()
         
-        # Check if both gripper and jaw are contacting the cube
+        # 1. Check if both gripper and jaw are contacting the cube
         gripper_contact = self._check_contact(self._gripper_path, self._cube_path)
         jaw_contact = self._check_contact(self._jaw_path, self._cube_path)
+        contact_met = gripper_contact and jaw_contact
+        
+        # 2. Check relative distance stability
+        stability_met = False
+        if gripper_world_pos is not None and object_world_pos is not None:
+            curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
+            if self._prev_relative_dist is not None:
+                dist_diff = abs(curr_dist - self._prev_relative_dist)
+                stability_met = dist_diff < self._stability_threshold
+            self._prev_relative_dist = curr_dist
+        
+        # 3. Check if cube is off the ground
+        lift_met = False
+        if object_world_pos is not None:
+            lift_met = object_world_pos[2] > self._lift_threshold
+            
+        # Combine conditions
+        all_conditions_met = contact_met and stability_met and lift_met
         
         if self.debug:
-            print(f"[GRASP DEBUG] gripper_contact={gripper_contact}, jaw_contact={jaw_contact}")
+            print(f"[GRASP DEBUG] contact={contact_met}, stability={stability_met}, lift={lift_met} (Z={object_world_pos[2] if object_world_pos is not None else 'N/A'})")
         
-        # Grasp = both parts touching the cube
-        self._is_grasped = gripper_contact and jaw_contact
+        # Update temporal window
+        if not self._is_grasped:
+            if all_conditions_met:
+                self._condition_met_frames += 1
+                if self._condition_met_frames >= self._history_n:
+                    self._is_grasped = True
+                    self._condition_met_frames = 0
+            else:
+                self._condition_met_frames = 0
+        else:
+            # If already grasped, check if any condition fails
+            if not all_conditions_met:
+                self._condition_failed_frames += 1
+                if self._condition_failed_frames >= self._history_n:
+                    self._is_grasped = False
+                    self._condition_failed_frames = 0
+            else:
+                self._condition_failed_frames = 0
         
         return self._is_grasped
