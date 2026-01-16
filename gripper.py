@@ -110,8 +110,8 @@ class Gripper:
     """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
 
     # Thresholds for grasp detection
-    CLOSED_THRESHOLD = 0.05     # Gripper position below this = closed (0=fully closed, ~1.5=open)
-    LIFT_THRESHOLD = 0.025      # Cube center Z above this = lifted (ground is ~0.02)
+    OPEN_TARGET_THRESHOLD = 0.5  # If target_gripper < this, gripper is commanded to close
+    LIFT_THRESHOLD = 0.025       # Cube center Z above this = lifted (ground is ~0.02)
     FOLLOWING_THRESHOLD = 0.0005 # Max distance variation to be considered "following" (0.5mm)
     
     # Frame counts for temporal filtering
@@ -190,10 +190,10 @@ class Gripper:
             if not following_for_M:
                 grasped = False (dropped or released)
         """
-        # 1. Check if gripper is closed
+        # 1. Check if gripper is commanded to close (based on target, not position)
         closed = False
-        if gripper_value is not None:
-            closed = gripper_value < self.CLOSED_THRESHOLD
+        if target_gripper is not None:
+            closed = target_gripper < self.OPEN_TARGET_THRESHOLD
         
         # 2. Check if cube is lifted off the ground
         lifted = False
