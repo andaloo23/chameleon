@@ -110,13 +110,15 @@ class Gripper:
     """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
 
     # Thresholds for grasp detection
-    OPEN_TARGET_THRESHOLD = 0.5  # If target_gripper < this, gripper is commanded to close
-    LIFT_THRESHOLD = 0.025       # Cube center Z above this = lifted (ground is ~0.02)
-    FOLLOWING_THRESHOLD = 0.0005 # Max distance variation to be considered "following" (0.5mm)
+    CLOSE_COMMAND_THRESHOLD = 0.5  # If target_gripper < this, gripper is commanded to close
+    STALL_THRESHOLD = 0.001        # If gripper position changes less than this, it's stalled
+    LIFT_THRESHOLD = 0.025         # Cube center Z above this = lifted (ground is ~0.02)
+    FOLLOWING_THRESHOLD = 0.0005   # Max distance variation to be considered "following" (0.5mm)
     
     # Frame counts for temporal filtering
     FRAMES_TO_GRASP = 15        # N: frames of following required to confirm grasp
     FRAMES_TO_DROP = 30         # M: frames of not following required to confirm drop
+    STALL_FRAMES = 5            # Frames of no movement to consider gripper stalled
 
     def __init__(
         self,
@@ -133,7 +135,9 @@ class Gripper:
         # History for "following" detection
         self._history_len = 10
         self._dist_history = deque(maxlen=self._history_len)
-        self._gripper_pos_history = deque(maxlen=self._history_len)
+        
+        # History for gripper stall detection
+        self._gripper_value_history = deque(maxlen=self.STALL_FRAMES)
         
         # Frame counters for temporal filtering
         self._following_frames = 0
@@ -151,7 +155,7 @@ class Gripper:
     def reset(self) -> None:
         self._is_grasped = False
         self._dist_history.clear()
-        self._gripper_pos_history.clear()
+        self._gripper_value_history.clear()
         self._following_frames = 0
         self._not_following_frames = 0
         self._last_state = {}
@@ -169,6 +173,14 @@ class Gripper:
         dists = list(self._dist_history)
         dist_variation = max(dists) - min(dists)
         return dist_variation < self.FOLLOWING_THRESHOLD
+
+    def _is_gripper_stalled(self) -> bool:
+        """Check if gripper has stopped moving (stalled on object or limit)."""
+        if len(self._gripper_value_history) < self.STALL_FRAMES:
+            return False
+        vals = list(self._gripper_value_history)
+        variation = max(vals) - min(vals)
+        return variation < self.STALL_THRESHOLD
 
     def update(
         self,
@@ -190,10 +202,17 @@ class Gripper:
             if not following_for_M:
                 grasped = False (dropped or released)
         """
-        # 1. Check if gripper is commanded to close (based on target, not position)
-        closed = False
+        # 1. Check if gripper is closed = commanded to close AND stalled
+        # Default is open. Closed only when close command issued AND gripper stops moving.
+        closing_commanded = False
+        stalled = False
         if target_gripper is not None:
-            closed = target_gripper < self.OPEN_TARGET_THRESHOLD
+            closing_commanded = target_gripper < self.CLOSE_COMMAND_THRESHOLD
+        if gripper_value is not None:
+            self._gripper_value_history.append(float(gripper_value))
+            stalled = self._is_gripper_stalled()
+        
+        closed = closing_commanded and stalled
         
         # 2. Check if cube is lifted off the ground
         lifted = False
@@ -212,6 +231,8 @@ class Gripper:
         # Store state for external debugging
         self._last_state = {
             "closed": closed,
+            "closing_commanded": closing_commanded,
+            "stalled": stalled,
             "lifted": lifted,
             "following": following,
             "cube_z": cube_z,
