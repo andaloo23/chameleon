@@ -107,7 +107,16 @@ class GraspDetector:
 # -------------------------
 
 class Gripper:
-    """Gripper class handling physics-based grasp detection using contact reporting."""
+    """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
+
+    # Thresholds for grasp detection
+    CLOSED_THRESHOLD = 0.3      # Gripper position below this = closed (0=fully closed, 1=open)
+    LIFT_THRESHOLD = 0.025      # Cube center Z above this = lifted (ground is ~0.02)
+    FOLLOWING_THRESHOLD = 0.001 # Max distance variation to be considered "following" (1mm)
+    
+    # Frame counts for temporal filtering
+    FRAMES_TO_GRASP = 15        # N: frames of following required to confirm grasp
+    FRAMES_TO_DROP = 30         # M: frames of not following required to confirm drop
 
     def __init__(
         self,
@@ -120,62 +129,14 @@ class Gripper:
         self.dt = float(dt)
         self.debug = bool(debug)
         self._is_grasped: bool = False
-        self._contact_reporter = None
-        self._gripper_path = "/World/so_arm100/gripper"
-        self._jaw_path = "/World/so_arm100/jaw"
-        self._cube_path = "/World/Cube"
-        self._history_n = 10  # Use a longer window for stability
-        self._condition_met_frames = 0
-        self._condition_failed_frames = 0
-        self._dist_history = deque(maxlen=self._history_n)
-        self._lift_threshold = 0.025  # Cube center is at 0.02 when on ground (0.04 height)
-        self._stability_threshold = 0.0005  # 0.5mm strict stability
-
-    def _ensure_contact_reporter(self):
-        """Initialize contact sensor interface."""
-        if self._contact_reporter is not None:
-            return True
-        try:
-            from omni.isaac.sensor import _sensor
-            self._contact_reporter = _sensor.acquire_contact_sensor_interface()
-            return True
-        except Exception as e:
-            if self.debug:
-                print(f"[WARN] Could not acquire contact sensor interface: {e}")
-            return False
-
-    def _check_gripper_contact(self) -> bool:
-        """Check if gripper (fixed jaw) is in contact using contact sensor interface."""
-        sensor_path = getattr(self.env, "gripper_sensor_path", None)
-        if sensor_path is None or self._contact_reporter is None:
-            return False
-        try:
-            reading = self._contact_reporter.get_sensor_reading(sensor_path)
-            if self.debug and self.env._step_counter % 60 == 0:
-                print(f"[DEBUG] gripper reading: valid={reading.is_valid}, value={reading.value}")
-            return reading.is_valid and reading.value > 0.0
-        except Exception as e:
-            if self.debug and self.env._step_counter % 60 == 0:
-                print(f"[WARN] gripper contact error: {e}")
-            return False
-
-    def _check_jaw_contact(self) -> bool:
-        """Check if jaw (moving jaw) is in contact using contact sensor interface."""
-        sensor_path = getattr(self.env, "jaw_sensor_path", None)
-        if sensor_path is None or self._contact_reporter is None:
-            return False
-        try:
-            reading = self._contact_reporter.get_sensor_reading(sensor_path)
-            if self.debug and self.env._step_counter % 60 == 0:
-                print(f"[DEBUG] jaw reading: valid={reading.is_valid}, value={reading.value}")
-            return reading.is_valid and reading.value > 0.0
-        except Exception as e:
-            if self.debug and self.env._step_counter % 60 == 0:
-                print(f"[WARN] jaw contact error: {e}")
-            return False
-
-
-
+        
+        # History for "following" detection
+        self._history_len = 10
+        self._dist_history = deque(maxlen=self._history_len)
+        
+        # Frame counters for temporal filtering
+        self._following_frames = 0
+        self._not_following_frames = 0
 
     @property
     def is_grasping(self) -> bool:
@@ -189,9 +150,17 @@ class Gripper:
     def reset(self) -> None:
         self._is_grasped = False
         self._dist_history.clear()
-        self._condition_met_frames = 0
-        self._condition_failed_frames = 0
+        self._following_frames = 0
+        self._not_following_frames = 0
         self._last_state = {}
+
+    def _is_following(self) -> bool:
+        """Check if cube is 'following' the gripper (constant relative distance)."""
+        if len(self._dist_history) < self._history_len:
+            return False
+        dists = list(self._dist_history)
+        variation = max(dists) - min(dists)
+        return variation < self.FOLLOWING_THRESHOLD
 
     def update(
         self,
@@ -203,64 +172,68 @@ class Gripper:
         object_world_pos: Optional[np.ndarray] = None,
         arm_moving: bool = False,
     ) -> bool:
-        """Update grasp state based on physical contact detection and stability."""
-        self._ensure_contact_reporter()
+        """
+        Update grasp state using behavioral detection:
         
-        # 1. Check if both gripper and jaw are contacting using ContactSensor
-        gripper_contact = self._check_gripper_contact()
-        jaw_contact = self._check_jaw_contact()
-        contact_met = gripper_contact and jaw_contact
-
-
+        If not grasped:
+            if closed AND lifted AND following_for_N:
+                grasped = True
+        else (grasped):
+            if not following_for_M:
+                grasped = False (dropped or released)
+        """
+        # 1. Check if gripper is closed
+        closed = False
+        if gripper_value is not None:
+            closed = gripper_value < self.CLOSED_THRESHOLD
         
-        # 2. Check relative distance stability using a window
-        stability_met = False
-        if gripper_world_pos is not None and object_world_pos is not None:
-            curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
-            self._dist_history.append(curr_dist)
-            
-            if len(self._dist_history) == self._history_n:
-                # Relative distance is stable if max variation in window is small
-                dists = list(self._dist_history)
-                variation = max(dists) - min(dists)
-                stability_met = variation < self._stability_threshold
-        
-        # 3. Check if cube is off the ground
-        lift_met = False
+        # 2. Check if cube is lifted off the ground
+        lifted = False
         cube_z = 0.0
         if object_world_pos is not None:
             cube_z = float(object_world_pos[2])
-            lift_met = cube_z > self._lift_threshold
-            
-        # Store state for external access
-        self._last_state = {
-            "contact": contact_met,
-            "stability": stability_met,
-            "lift": lift_met,
-            "cube_z": cube_z,
-        }
-            
-        # Combine conditions
-        all_conditions_met = contact_met and stability_met and lift_met
+            lifted = cube_z > self.LIFT_THRESHOLD
         
-        # Update temporal window
+        # 3. Update distance history for following detection
+        following = False
+        if gripper_world_pos is not None and object_world_pos is not None:
+            curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
+            self._dist_history.append(curr_dist)
+            following = self._is_following()
+        
+        # Store state for external debugging
+        self._last_state = {
+            "closed": closed,
+            "lifted": lifted,
+            "following": following,
+            "cube_z": cube_z,
+            "following_frames": self._following_frames,
+            "not_following_frames": self._not_following_frames,
+        }
+        
+        # 4. Apply grasp detection logic
         if not self._is_grasped:
-            if all_conditions_met:
-                self._condition_met_frames += 1
-                if self._condition_met_frames >= 30: # Requirement: sustained for 30 frames
+            # To become grasped: need closed + lifted + following for N frames
+            if closed and lifted and following:
+                self._following_frames += 1
+                if self._following_frames >= self.FRAMES_TO_GRASP:
                     self._is_grasped = True
-                    self._condition_met_frames = 0
+                    self._following_frames = 0
+                    if self.debug:
+                        print(f"[GRASP] Detected grasp! closed={closed}, lifted={lifted}, cube_z={cube_z:.4f}")
             else:
-                self._condition_met_frames = 0
+                self._following_frames = 0
         else:
-            # If already grasped, check if any condition fails (allow some jitter)
-            if not (contact_met or stability_met): # Drop if we lose both contact and stability
-                self._condition_failed_frames += 1
-                if self._condition_failed_frames >= 30:
+            # To lose grasp: not following for M frames
+            if not following:
+                self._not_following_frames += 1
+                if self._not_following_frames >= self.FRAMES_TO_DROP:
                     self._is_grasped = False
-                    self._condition_failed_frames = 0
+                    self._not_following_frames = 0
+                    if self.debug:
+                        print(f"[GRASP] Detected drop! following={following}, cube_z={cube_z:.4f}")
             else:
-                self._condition_failed_frames = 0
+                self._not_following_frames = 0
         
         return self._is_grasped
 
