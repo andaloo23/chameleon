@@ -110,7 +110,7 @@ class Gripper:
     """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
 
     # Thresholds for grasp detection
-    CLOSE_COMMAND_THRESHOLD = 0.5  # If target_gripper < this, gripper is commanded to close
+    CLOSE_COMMAND_THRESHOLD = 0.1  # Target below this is considered a "close" command
     STALL_THRESHOLD = 0.001        # If gripper position changes less than this, it's stalled
     LIFT_THRESHOLD = 0.025         # Cube center Z above this = lifted (ground is ~0.02)
     FOLLOWING_THRESHOLD = 0.0005   # Max distance variation to be considered "following" (0.5mm)
@@ -139,6 +139,10 @@ class Gripper:
         # History for gripper stall detection
         self._gripper_value_history = deque(maxlen=self.STALL_FRAMES)
         
+        # Track previous target to detect ACTIVE close commands
+        self._prev_target_gripper: Optional[float] = None
+        self._closing_intent: bool = False  # True when user is actively closing
+        
         # Frame counters for temporal filtering
         self._following_frames = 0
         self._not_following_frames = 0
@@ -156,6 +160,8 @@ class Gripper:
         self._is_grasped = False
         self._dist_history.clear()
         self._gripper_value_history.clear()
+        self._prev_target_gripper = None
+        self._closing_intent = False
         self._following_frames = 0
         self._not_following_frames = 0
         self._last_state = {}
@@ -202,17 +208,27 @@ class Gripper:
             if not following_for_M:
                 grasped = False (dropped or released)
         """
-        # 1. Check if gripper is closed = commanded to close AND stalled
-        # Default is open. Closed only when close command issued AND gripper stops moving.
-        closing_commanded = False
-        stalled = False
+        # 1. Detect ACTIVE close/open intent based on target changes
+        # Closing intent is set when target decreases toward close position
+        # Opening intent clears closing_intent
         if target_gripper is not None:
-            closing_commanded = target_gripper < self.CLOSE_COMMAND_THRESHOLD
+            if self._prev_target_gripper is not None:
+                if target_gripper < self._prev_target_gripper:
+                    # Target is decreasing (moving toward close)
+                    self._closing_intent = True
+                elif target_gripper > self._prev_target_gripper:
+                    # Target is increasing (moving toward open)
+                    self._closing_intent = False
+            self._prev_target_gripper = target_gripper
+        
+        # 2. Check if gripper is stalled (position not changing)
+        stalled = False
         if gripper_value is not None:
             self._gripper_value_history.append(float(gripper_value))
             stalled = self._is_gripper_stalled()
         
-        closed = closing_commanded and stalled
+        # Closed = actively trying to close AND gripper has stalled
+        closed = self._closing_intent and stalled
         
         # 2. Check if cube is lifted off the ground
         lifted = False
@@ -231,7 +247,7 @@ class Gripper:
         # Store state for external debugging
         self._last_state = {
             "closed": closed,
-            "closing_commanded": closing_commanded,
+            "closing_intent": self._closing_intent,
             "stalled": stalled,
             "lifted": lifted,
             "following": following,
