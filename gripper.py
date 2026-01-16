@@ -264,8 +264,7 @@ class Gripper:
                 if self._following_frames >= self.FRAMES_TO_GRASP:
                     self._is_grasped = True
                     self._following_frames = 0
-                    if self.debug:
-                        print(f"[GRASP] Detected grasp! closed={closed}, lifted={lifted}, cube_z={cube_z:.4f}")
+                    print("grasp detected")
             else:
                 self._following_frames = 0
         else:
@@ -275,8 +274,7 @@ class Gripper:
                 if self._not_following_frames >= self.FRAMES_TO_DROP:
                     self._is_grasped = False
                     self._not_following_frames = 0
-                    if self.debug:
-                        print(f"[GRASP] Detected drop! following={following}, cube_z={cube_z:.4f}")
+                    print("drop detected")
             else:
                 self._not_following_frames = 0
         

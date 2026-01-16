@@ -445,18 +445,6 @@ class IsaacPickPlaceEnv:
                 arm_moving=arm_moving
             )
 
-        # Concise status line: G=grasp, C=closed, F=following, L=lifted
-        state = self.gripper_detector.last_state if self.gripper_detector else {}
-        c = state.get("closed", False)
-        f = state.get("following", False) 
-        l = state.get("lifted", False)
-        # Print every 30 frames on a new line for visibility
-        if self._step_counter % 30 == 0:
-            print(f"[GRASP] G:{int(is_grasped)} C:{int(c)} F:{int(f)} L:{int(l)} | z={state.get('cube_z', 0):.3f}")
-
-
-
-
 
         obs = self._get_observation()
         self.reward_engine.compute_reward_components()
