@@ -857,37 +857,55 @@ class IsaacPickPlaceEnv:
         try:
             import omni.kit.commands
             root = getattr(self.robot, "prim_path", "/World/so_arm100")
+            print(f"[DEBUG] Robot prim path: {root}")
+            
+            # Verify the gripper and jaw prims exist
+            stage = self.world.stage
+            gripper_prim = stage.GetPrimAtPath(f"{root}/gripper")
+            jaw_prim = stage.GetPrimAtPath(f"{root}/jaw")
+            print(f"[DEBUG] Gripper prim valid: {gripper_prim.IsValid()}")
+            print(f"[DEBUG] Jaw prim valid: {jaw_prim.IsValid()}")
             
             # Create sensor on gripper (fixed jaw)
+            # path is RELATIVE to parent, parent is the full path
             gripper_parent = f"{root}/gripper"
-            self.gripper_sensor_path = f"{gripper_parent}/contact_sensor"
             ok, _ = omni.kit.commands.execute(
                 "IsaacSensorCreateContactSensor",
-                path=self.gripper_sensor_path,
+                path="contact_sensor",  # Relative path
                 parent=gripper_parent,
                 min_threshold=0,
                 max_threshold=1e8,
                 sensor_period=-1,
             )
-            print(f"[INFO] Gripper contact sensor: {ok}, {self.gripper_sensor_path}")
+            self.gripper_sensor_path = f"{gripper_parent}/contact_sensor"
+            print(f"[INFO] Gripper contact sensor created: {ok}, path={self.gripper_sensor_path}")
             
             # Create sensor on jaw (moving jaw)
             jaw_parent = f"{root}/jaw"
-            self.jaw_sensor_path = f"{jaw_parent}/contact_sensor"
             ok, _ = omni.kit.commands.execute(
                 "IsaacSensorCreateContactSensor",
-                path=self.jaw_sensor_path,
+                path="contact_sensor",  # Relative path
                 parent=jaw_parent,
                 min_threshold=0,
                 max_threshold=1e8,
                 sensor_period=-1,
             )
-            print(f"[INFO] Jaw contact sensor: {ok}, {self.jaw_sensor_path}")
+            self.jaw_sensor_path = f"{jaw_parent}/contact_sensor"
+            print(f"[INFO] Jaw contact sensor created: {ok}, path={self.jaw_sensor_path}")
+            
+            # Verify sensors were created
+            gripper_sensor_prim = stage.GetPrimAtPath(self.gripper_sensor_path)
+            jaw_sensor_prim = stage.GetPrimAtPath(self.jaw_sensor_path)
+            print(f"[DEBUG] Gripper sensor prim valid: {gripper_sensor_prim.IsValid()}")
+            print(f"[DEBUG] Jaw sensor prim valid: {jaw_sensor_prim.IsValid()}")
             
         except Exception as e:
             print(f"[WARN] Could not create contact sensors: {e}")
+            import traceback
+            traceback.print_exc()
             self.gripper_sensor_path = None
             self.jaw_sensor_path = None
+
 
 
 
