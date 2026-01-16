@@ -156,26 +156,19 @@ class Gripper:
         self._not_following_frames = 0
         self._last_state = {}
 
-    def _is_following(self, gripper_moving: bool) -> bool:
+    def _is_following(self) -> bool:
         """
-        Check if cube is 'following' the gripper.
+        Check if cube is 'following' the gripper (constant relative distance).
         
-        Following is true ONLY when:
-        1. The gripper is actually moving (gripper position changing)
-        2. The relative distance between gripper and cube is constant
-        
-        This prevents false positives when both are stationary.
+        Following is true when the relative distance is stable.
+        Combined with 'lifted', this prevents false positives.
         """
         if len(self._dist_history) < self._history_len:
             return False
         
-        # Check distance stability
         dists = list(self._dist_history)
         dist_variation = max(dists) - min(dists)
-        distance_stable = dist_variation < self.FOLLOWING_THRESHOLD
-        
-        # Must be moving AND distance stable to be "following"
-        return gripper_moving and distance_stable
+        return dist_variation < self.FOLLOWING_THRESHOLD
 
     def update(
         self,
@@ -209,30 +202,18 @@ class Gripper:
             cube_z = float(object_world_pos[2])
             lifted = cube_z > self.LIFT_THRESHOLD
         
-        # 3. Track gripper position for movement detection
-        gripper_moving = False
-        if gripper_world_pos is not None:
-            self._gripper_pos_history.append(gripper_world_pos.copy())
-            if len(self._gripper_pos_history) >= 2:
-                # Gripper is "moving" if it moved more than 1mm over the history window
-                oldest = self._gripper_pos_history[0]
-                newest = self._gripper_pos_history[-1]
-                gripper_movement = float(np.linalg.norm(newest - oldest))
-                gripper_moving = gripper_movement > 0.001  # 1mm threshold
-        
-        # 4. Update distance history for following detection
+        # 3. Update distance history for following detection
         following = False
         if gripper_world_pos is not None and object_world_pos is not None:
             curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
             self._dist_history.append(curr_dist)
-            following = self._is_following(gripper_moving)
+            following = self._is_following()
         
         # Store state for external debugging
         self._last_state = {
             "closed": closed,
             "lifted": lifted,
             "following": following,
-            "gripper_moving": gripper_moving,
             "cube_z": cube_z,
             "following_frames": self._following_frames,
             "not_following_frames": self._not_following_frames,
