@@ -65,44 +65,6 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
 
 
 # -------------------------
-# Legacy Compatibility (Required by reward_engine.py)
-# -------------------------
-
-@dataclass
-class GraspState:
-    grasped: bool = False
-    confidence: float = 0.0
-    stable_frames: int = 0
-    was_closing: bool = False
-    position_stable: bool = False
-    position_blocked: bool = False
-    grasp_position: Optional[float] = None
-
-
-class GraspDetector:
-    """Minimal compatibility class for reward_engine.py."""
-    def __init__(self, **kwargs):
-        self._grasped = False
-        self._history = deque(maxlen=15)
-        self.min_stable_frames = kwargs.get("min_stable_frames", 5)
-
-    def reset(self):
-        self._grasped = False
-        self._history.clear()
-
-    def update(self, gripper_position, target_position=None):
-        self._history.append(gripper_position)
-        # Dummy update that always returns a state
-        return GraspState(grasped=self._grasped)
-
-    @property
-    def is_grasped(self): return self._grasped
-
-    @property
-    def grasp_position(self): return None
-
-
-# -------------------------
 # Behavioral Gripper
 # -------------------------
 
@@ -304,12 +266,12 @@ class Gripper:
             cube_inside_height = (cube_bottom_z >= cup_bottom_z - self.IN_CUP_HEIGHT_MARGIN and
                                   cube_bottom_z <= cup_top_z)
             in_cup = xy_in_cup and cube_inside_height
-            
-            # Debug output
-            if self.debug:
-                print(f"[CUP] xy_dist={cube_cup_xy_dist*100:.1f}cm eff_r={effective_radius*100:.1f}cm | "
-                      f"cube_z={cube_z*100:.1f}cm bottom_z={cube_bottom_z*100:.1f}cm cup_top={cup_top_z*100:.1f}cm | "
-                      f"D={int(droppable_range)} I={int(in_cup)}")
+        
+        # Event-based debug output: only print when state changes
+        if droppable_range and not self._is_droppable_range:
+            print("droppable detected")
+        if in_cup and not self._is_in_cup:
+            print("cube is in cup")
         
         self._is_droppable_range = droppable_range
         self._is_in_cup = in_cup
@@ -330,7 +292,7 @@ class Gripper:
             "cup_top_z": cup_top_z,
         }
         
-        # 4. Apply grasp detection logic
+        # 5. Apply grasp detection logic
         if not self._is_grasped:
             # To become grasped: need closed + lifted + following for N frames
             if closed and lifted and following:

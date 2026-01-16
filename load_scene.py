@@ -150,10 +150,6 @@ class IsaacPickPlaceEnv:
         )
         self._gripper_pose_fallback_warned = False
         self._prev_gripper_value = None
-        
-        # Contact sensor paths for gripper and jaw (will be set in _build_scene)
-        self.gripper_sensor_path = None
-        self.jaw_sensor_path = None
 
 
         if self.capture_images:
@@ -271,7 +267,6 @@ class IsaacPickPlaceEnv:
 
         self._apply_gripper_friction()
         self._configure_gripper_drive()
-        self._create_contact_sensors()  # Create contact sensors for gripper/jaw
         self.robot.configure_drives() # Set up PD controllers for arm
 
         
@@ -850,74 +845,8 @@ class IsaacPickPlaceEnv:
                 dr.CreateMaxForceAttr().Set(float(self._gripper_drive_max_force))
         except Exception: pass
     
-    def _create_contact_sensors(self):
-        """Create contact sensors on gripper and jaw links using kit commands."""
-        try:
-            import omni.kit.commands
-            root = getattr(self.robot, "prim_path", "/World/so_arm100")
-            print(f"[DEBUG] Robot prim path: {root}")
-            
-            # Verify the gripper and jaw prims exist
-            stage = self.world.stage
-            gripper_prim = stage.GetPrimAtPath(f"{root}/gripper")
-            jaw_prim = stage.GetPrimAtPath(f"{root}/jaw")
-            print(f"[DEBUG] Gripper prim valid: {gripper_prim.IsValid()}")
-            print(f"[DEBUG] Jaw prim valid: {jaw_prim.IsValid()}")
-            
-            # Create sensor on gripper (fixed jaw)
-            # path is RELATIVE to parent, parent is the full path
-            gripper_parent = f"{root}/gripper"
-            ok, _ = omni.kit.commands.execute(
-                "IsaacSensorCreateContactSensor",
-                path="contact_sensor",  # Relative path
-                parent=gripper_parent,
-                min_threshold=0,
-                max_threshold=1e8,
-                sensor_period=-1,
-            )
-            self.gripper_sensor_path = f"{gripper_parent}/contact_sensor"
-            print(f"[INFO] Gripper contact sensor created: {ok}, path={self.gripper_sensor_path}")
-            
-            # Create sensor on jaw (moving jaw)
-            jaw_parent = f"{root}/jaw"
-            ok, _ = omni.kit.commands.execute(
-                "IsaacSensorCreateContactSensor",
-                path="contact_sensor",  # Relative path
-                parent=jaw_parent,
-                min_threshold=0,
-                max_threshold=1e8,
-                sensor_period=-1,
-            )
-            self.jaw_sensor_path = f"{jaw_parent}/contact_sensor"
-            print(f"[INFO] Jaw contact sensor created: {ok}, path={self.jaw_sensor_path}")
-            
-            # Verify sensors were created
-            gripper_sensor_prim = stage.GetPrimAtPath(self.gripper_sensor_path)
-            jaw_sensor_prim = stage.GetPrimAtPath(self.jaw_sensor_path)
-            print(f"[DEBUG] Gripper sensor prim valid: {gripper_sensor_prim.IsValid()}")
-            print(f"[DEBUG] Jaw sensor prim valid: {jaw_sensor_prim.IsValid()}")
-            
-        except Exception as e:
-            print(f"[WARN] Could not create contact sensors: {e}")
-            import traceback
-            traceback.print_exc()
-            self.gripper_sensor_path = None
-            self.jaw_sensor_path = None
-
-
-
-
     def _apply_domain_randomization(self):
         if self.domain_randomizer: self.domain_randomizer.randomize()
-
-    def _get_recent_collisions(self):
-        try:
-            physics = self.world.get_physics_context()
-            report = getattr(physics, "get_contact_report", lambda: None)()
-            if not report: return []
-            entries = report.get("contacts", []) if isinstance(report, dict) else report
-            return [{"prim0": e.get("body0"), "prim1": e.get("body1")} for e in entries if isinstance(e, dict)]
-        except Exception: return []
 
     def _validate_state(self, _obs):
         issues = []
