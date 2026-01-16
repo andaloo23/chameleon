@@ -110,9 +110,9 @@ class Gripper:
     """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
 
     # Thresholds for grasp detection
-    CLOSED_THRESHOLD = 0.3      # Gripper position below this = closed (0=fully closed, 1=open)
+    CLOSED_THRESHOLD = 0.05     # Gripper position below this = closed (0=fully closed, ~1.5=open)
     LIFT_THRESHOLD = 0.025      # Cube center Z above this = lifted (ground is ~0.02)
-    FOLLOWING_THRESHOLD = 0.001 # Max distance variation to be considered "following" (1mm)
+    FOLLOWING_THRESHOLD = 0.0005 # Max distance variation to be considered "following" (0.5mm)
     
     # Frame counts for temporal filtering
     FRAMES_TO_GRASP = 15        # N: frames of following required to confirm grasp
@@ -133,6 +133,7 @@ class Gripper:
         # History for "following" detection
         self._history_len = 10
         self._dist_history = deque(maxlen=self._history_len)
+        self._gripper_pos_history = deque(maxlen=self._history_len)
         
         # Frame counters for temporal filtering
         self._following_frames = 0
@@ -150,17 +151,31 @@ class Gripper:
     def reset(self) -> None:
         self._is_grasped = False
         self._dist_history.clear()
+        self._gripper_pos_history.clear()
         self._following_frames = 0
         self._not_following_frames = 0
         self._last_state = {}
 
-    def _is_following(self) -> bool:
-        """Check if cube is 'following' the gripper (constant relative distance)."""
+    def _is_following(self, gripper_moving: bool) -> bool:
+        """
+        Check if cube is 'following' the gripper.
+        
+        Following is true ONLY when:
+        1. The gripper is actually moving (gripper position changing)
+        2. The relative distance between gripper and cube is constant
+        
+        This prevents false positives when both are stationary.
+        """
         if len(self._dist_history) < self._history_len:
             return False
+        
+        # Check distance stability
         dists = list(self._dist_history)
-        variation = max(dists) - min(dists)
-        return variation < self.FOLLOWING_THRESHOLD
+        dist_variation = max(dists) - min(dists)
+        distance_stable = dist_variation < self.FOLLOWING_THRESHOLD
+        
+        # Must be moving AND distance stable to be "following"
+        return gripper_moving and distance_stable
 
     def update(
         self,
@@ -194,18 +209,30 @@ class Gripper:
             cube_z = float(object_world_pos[2])
             lifted = cube_z > self.LIFT_THRESHOLD
         
-        # 3. Update distance history for following detection
+        # 3. Track gripper position for movement detection
+        gripper_moving = False
+        if gripper_world_pos is not None:
+            self._gripper_pos_history.append(gripper_world_pos.copy())
+            if len(self._gripper_pos_history) >= 2:
+                # Gripper is "moving" if it moved more than 1mm over the history window
+                oldest = self._gripper_pos_history[0]
+                newest = self._gripper_pos_history[-1]
+                gripper_movement = float(np.linalg.norm(newest - oldest))
+                gripper_moving = gripper_movement > 0.001  # 1mm threshold
+        
+        # 4. Update distance history for following detection
         following = False
         if gripper_world_pos is not None and object_world_pos is not None:
             curr_dist = float(np.linalg.norm(gripper_world_pos - object_world_pos))
             self._dist_history.append(curr_dist)
-            following = self._is_following()
+            following = self._is_following(gripper_moving)
         
         # Store state for external debugging
         self._last_state = {
             "closed": closed,
             "lifted": lifted,
             "following": following,
+            "gripper_moving": gripper_moving,
             "cube_z": cube_z,
             "following_frames": self._following_frames,
             "not_following_frames": self._not_following_frames,
