@@ -122,12 +122,12 @@ class Gripper:
     
     # Droppable range detection thresholds
     # Cube must be XY-aligned within the cup's inner radius and above the cup
-    DROPPABLE_XY_MARGIN = 0.8   # Fraction of inner radius - cube must be within this to be "droppable"
-    DROPPABLE_MIN_HEIGHT = 0.01 # Minimum height above cup top to be considered in droppable range
+    DROPPABLE_XY_MARGIN = 1.0   # Fraction of inner radius - cube center within this to be "droppable"
+    DROPPABLE_MIN_HEIGHT = 0.005 # Minimum height above cup top to be considered in droppable range (5mm)
     
     # In-cup detection thresholds  
-    IN_CUP_XY_MARGIN = 0.9      # Fraction of inner radius - cube must be within this to be "in cup"
-    IN_CUP_HEIGHT_MARGIN = 0.01 # Tolerance for cube bottom being slightly above cup bottom
+    IN_CUP_XY_MARGIN = 1.0      # Fraction of inner radius - cube center within this to be "in cup"
+    IN_CUP_HEIGHT_MARGIN = 0.02 # Tolerance for cube settling (2cm)
 
     def __init__(
         self,
@@ -289,20 +289,27 @@ class Gripper:
             cup_top_z = float(cup_pos[2]) + cup_height
             cup_bottom_z = float(cup_pos[2])
             
-            # Effective inner radius for cube (accounting for cube size)
-            effective_radius = cup_inner_radius - cube_half_size
+            # Use inner radius directly for XY checks (cube center must be within this)
+            effective_radius = cup_inner_radius
             
-            # Droppable range: cube XY within droppable margin AND cube bottom is above cup top
+            # Droppable range: cube center XY within inner radius AND cube bottom is above cup top
             cube_bottom_z = cube_z - cube_half_size
             xy_in_range = cube_cup_xy_dist <= effective_radius * self.DROPPABLE_XY_MARGIN
             above_cup = cube_bottom_z > cup_top_z + self.DROPPABLE_MIN_HEIGHT
             droppable_range = xy_in_range and above_cup
             
-            # In-cup detection: cube XY within cup AND cube bottom is inside cup (below top, above bottom)
+            # In-cup detection: cube center XY within cup AND cube bottom is inside cup (between bottom and top)
             xy_in_cup = cube_cup_xy_dist <= effective_radius * self.IN_CUP_XY_MARGIN
+            # Cube is "in cup" if its bottom is above cup bottom and below cup top
             cube_inside_height = (cube_bottom_z >= cup_bottom_z - self.IN_CUP_HEIGHT_MARGIN and
-                                  cube_bottom_z < cup_top_z)
+                                  cube_bottom_z <= cup_top_z)
             in_cup = xy_in_cup and cube_inside_height
+            
+            # Debug output
+            if self.debug:
+                print(f"[CUP] xy_dist={cube_cup_xy_dist*100:.1f}cm eff_r={effective_radius*100:.1f}cm | "
+                      f"cube_z={cube_z*100:.1f}cm bottom_z={cube_bottom_z*100:.1f}cm cup_top={cup_top_z*100:.1f}cm | "
+                      f"D={int(droppable_range)} I={int(in_cup)}")
         
         self._is_droppable_range = droppable_range
         self._is_in_cup = in_cup
