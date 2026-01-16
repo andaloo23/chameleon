@@ -864,7 +864,7 @@ class IsaacPickPlaceEnv:
                 name="gripper_contact_sensor",
                 min_threshold=0.0,
                 max_threshold=100000.0,
-                radius=0.03,  # 3cm contact radius
+                radius=0.005,  # 5mm contact radius - tight for precise detection
                 translation=np.array([0, -0.03, 0]),  # Position at fingertip
             )
             self.world.scene.add(self.gripper_contact_sensor)
@@ -876,7 +876,7 @@ class IsaacPickPlaceEnv:
                 name="jaw_contact_sensor",
                 min_threshold=0.0,
                 max_threshold=100000.0,
-                radius=0.03,  # 3cm contact radius
+                radius=0.005,  # 5mm contact radius - tight for precise detection
                 translation=np.array([0, -0.03, 0]),  # Position at fingertip
             )
             self.world.scene.add(self.jaw_contact_sensor)
@@ -890,6 +890,7 @@ class IsaacPickPlaceEnv:
             print(f"[WARN] Could not create contact sensors: {e}")
             self.gripper_contact_sensor = None
             self.jaw_contact_sensor = None
+
 
     def _apply_domain_randomization(self):
         if self.domain_randomizer: self.domain_randomizer.randomize()
