@@ -132,35 +132,49 @@ class Gripper:
         self._stability_threshold = 0.0005  # 0.5mm strict stability
 
     def _ensure_contact_reporter(self):
-        """Sync paths with environment."""
-        if hasattr(self.env, "_gripper_prim_path") and self.env._gripper_prim_path:
-            self._gripper_path = self.env._gripper_prim_path
-        if hasattr(self.env, "_jaw_prim_path") and self.env._jaw_prim_path:
-            self._jaw_path = self.env._jaw_prim_path
-        return True
+        """Initialize contact sensor interface."""
+        if self._contact_reporter is not None:
+            return True
+        try:
+            from omni.isaac.sensor import _sensor
+            self._contact_reporter = _sensor.acquire_contact_sensor_interface()
+            return True
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Could not acquire contact sensor interface: {e}")
+            return False
 
     def _check_gripper_contact(self) -> bool:
-        """Check if gripper (fixed jaw) is in contact using ContactSensor."""
-        sensor = getattr(self.env, "gripper_contact_sensor", None)
-        if sensor is None:
+        """Check if gripper (fixed jaw) is in contact using contact sensor interface."""
+        sensor_path = getattr(self.env, "gripper_sensor_path", None)
+        if sensor_path is None or self._contact_reporter is None:
             return False
         try:
-            reading = sensor.get_current_frame()
-            # is_valid indicates the sensor detected something
-            return reading.get("in_contact", False) or reading.get("value", 0.0) > 0.0
-        except Exception:
+            reading = self._contact_reporter.get_sensor_reading(sensor_path)
+            if self.debug and self.env._step_counter % 60 == 0:
+                print(f"[DEBUG] gripper reading: valid={reading.is_valid}, value={reading.value}")
+            return reading.is_valid and reading.value > 0.0
+        except Exception as e:
+            if self.debug and self.env._step_counter % 60 == 0:
+                print(f"[WARN] gripper contact error: {e}")
             return False
 
     def _check_jaw_contact(self) -> bool:
-        """Check if jaw (moving jaw) is in contact using ContactSensor."""
-        sensor = getattr(self.env, "jaw_contact_sensor", None)
-        if sensor is None:
+        """Check if jaw (moving jaw) is in contact using contact sensor interface."""
+        sensor_path = getattr(self.env, "jaw_sensor_path", None)
+        if sensor_path is None or self._contact_reporter is None:
             return False
         try:
-            reading = sensor.get_current_frame()
-            return reading.get("in_contact", False) or reading.get("value", 0.0) > 0.0
-        except Exception:
+            reading = self._contact_reporter.get_sensor_reading(sensor_path)
+            if self.debug and self.env._step_counter % 60 == 0:
+                print(f"[DEBUG] jaw reading: valid={reading.is_valid}, value={reading.value}")
+            return reading.is_valid and reading.value > 0.0
+        except Exception as e:
+            if self.debug and self.env._step_counter % 60 == 0:
+                print(f"[WARN] jaw contact error: {e}")
             return False
+
+
 
 
     @property

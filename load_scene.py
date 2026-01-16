@@ -151,9 +151,10 @@ class IsaacPickPlaceEnv:
         self._gripper_pose_fallback_warned = False
         self._prev_gripper_value = None
         
-        # Contact sensors for gripper and jaw (will be initialized in _build_scene)
-        self.gripper_contact_sensor = None
-        self.jaw_contact_sensor = None
+        # Contact sensor paths for gripper and jaw (will be set in _build_scene)
+        self.gripper_sensor_path = None
+        self.jaw_sensor_path = None
+
 
         if self.capture_images:
             self._reset_temp_dir()
@@ -852,44 +853,42 @@ class IsaacPickPlaceEnv:
         except Exception: pass
     
     def _create_contact_sensors(self):
-        """Create contact sensors on gripper and jaw links."""
+        """Create contact sensors on gripper and jaw links using kit commands."""
         try:
-            from omni.isaac.sensor import ContactSensor
+            import omni.kit.commands
             root = getattr(self.robot, "prim_path", "/World/so_arm100")
             
             # Create sensor on gripper (fixed jaw)
-            gripper_sensor_path = f"{root}/gripper/contact_sensor"
-            self.gripper_contact_sensor = ContactSensor(
-                prim_path=gripper_sensor_path,
-                name="gripper_contact_sensor",
-                min_threshold=0.0,
-                max_threshold=100000.0,
-                radius=0.005,  # 5mm contact radius - tight for precise detection
-                translation=np.array([0, -0.03, 0]),  # Position at fingertip
+            gripper_parent = f"{root}/gripper"
+            self.gripper_sensor_path = f"{gripper_parent}/contact_sensor"
+            ok, _ = omni.kit.commands.execute(
+                "IsaacSensorCreateContactSensor",
+                path=self.gripper_sensor_path,
+                parent=gripper_parent,
+                min_threshold=0,
+                max_threshold=1e8,
+                sensor_period=-1,
             )
-            self.world.scene.add(self.gripper_contact_sensor)
+            print(f"[INFO] Gripper contact sensor: {ok}, {self.gripper_sensor_path}")
             
             # Create sensor on jaw (moving jaw)
-            jaw_sensor_path = f"{root}/jaw/contact_sensor"
-            self.jaw_contact_sensor = ContactSensor(
-                prim_path=jaw_sensor_path,
-                name="jaw_contact_sensor",
-                min_threshold=0.0,
-                max_threshold=100000.0,
-                radius=0.005,  # 5mm contact radius - tight for precise detection
-                translation=np.array([0, -0.03, 0]),  # Position at fingertip
+            jaw_parent = f"{root}/jaw"
+            self.jaw_sensor_path = f"{jaw_parent}/contact_sensor"
+            ok, _ = omni.kit.commands.execute(
+                "IsaacSensorCreateContactSensor",
+                path=self.jaw_sensor_path,
+                parent=jaw_parent,
+                min_threshold=0,
+                max_threshold=1e8,
+                sensor_period=-1,
             )
-            self.world.scene.add(self.jaw_contact_sensor)
+            print(f"[INFO] Jaw contact sensor: {ok}, {self.jaw_sensor_path}")
             
-            # Initialize sensors
-            self.gripper_contact_sensor.initialize()
-            self.jaw_contact_sensor.initialize()
-            
-            print(f"[INFO] Contact sensors created: {gripper_sensor_path}, {jaw_sensor_path}")
         except Exception as e:
             print(f"[WARN] Could not create contact sensors: {e}")
-            self.gripper_contact_sensor = None
-            self.jaw_contact_sensor = None
+            self.gripper_sensor_path = None
+            self.jaw_sensor_path = None
+
 
 
     def _apply_domain_randomization(self):
