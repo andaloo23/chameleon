@@ -90,6 +90,9 @@ class Gripper:
     # In-cup detection thresholds  
     IN_CUP_XY_MARGIN = 1.0      # Fraction of inner radius - cube center within this to be "in cup"
     IN_CUP_HEIGHT_MARGIN = 0.02 # Tolerance for cube settling (2cm)
+    
+    # Cup collision detection thresholds
+    CUP_COLLISION_MARGIN = 0.015  # Distance threshold for cup collision (15mm)
 
     def __init__(
         self,
@@ -121,6 +124,7 @@ class Gripper:
         # Droppable range and in-cup detection state
         self._is_droppable_range: bool = False  # True if cube would land in cup if dropped
         self._is_in_cup: bool = False           # True if cube is inside the cup
+        self._is_cup_collision: bool = False    # True if gripper is colliding with cup
 
     @property
     def is_grasping(self) -> bool:
@@ -135,6 +139,11 @@ class Gripper:
     def is_in_cup(self) -> bool:
         """True if cube is currently inside the cup."""
         return self._is_in_cup
+    
+    @property
+    def is_cup_collision(self) -> bool:
+        """True if gripper is colliding with cup."""
+        return self._is_cup_collision
 
     @property
     def last_state(self) -> dict:
@@ -151,6 +160,7 @@ class Gripper:
         self._not_following_frames = 0
         self._is_droppable_range = False
         self._is_in_cup = False
+        self._is_cup_collision = False
         self._last_state = {}
 
     def _is_following(self) -> bool:
@@ -187,6 +197,7 @@ class Gripper:
         cup_pos: Optional[np.ndarray] = None,
         cup_height: float = 0.0,
         cup_inner_radius: float = 0.0,
+        cup_outer_radius: float = 0.0,
         cube_half_size: float = 0.0,
     ) -> bool:
         """
@@ -267,14 +278,53 @@ class Gripper:
                                   cube_bottom_z <= cup_top_z)
             in_cup = xy_in_cup and cube_inside_height
         
+        # 5. Cup collision detection: gripper or jaw collides with cup
+        cup_collision = False
+        if cup_pos is not None and cup_outer_radius > 0 and cup_height > 0:
+            cup_xy = cup_pos[:2]
+            cup_bottom_z = float(cup_pos[2])
+            cup_top_z = cup_bottom_z + cup_height
+            
+            # Check gripper collision
+            if gripper_world_pos is not None:
+                gripper_xy = gripper_world_pos[:2]
+                gripper_z = float(gripper_world_pos[2])
+                gripper_xy_dist = float(np.linalg.norm(gripper_xy - cup_xy))
+                
+                # Collision if: within outer radius + margin, at cup height level, and within wall zone
+                at_cup_height = cup_bottom_z <= gripper_z <= cup_top_z + self.CUP_COLLISION_MARGIN
+                near_wall = (cup_inner_radius - self.CUP_COLLISION_MARGIN <= gripper_xy_dist <= 
+                            cup_outer_radius + self.CUP_COLLISION_MARGIN)
+                inside_cup = gripper_xy_dist < cup_inner_radius and at_cup_height
+                
+                if at_cup_height and (near_wall or inside_cup):
+                    cup_collision = True
+            
+            # Check jaw collision
+            if jaw_world_pos is not None and not cup_collision:
+                jaw_xy = jaw_world_pos[:2]
+                jaw_z = float(jaw_world_pos[2])
+                jaw_xy_dist = float(np.linalg.norm(jaw_xy - cup_xy))
+                
+                at_cup_height = cup_bottom_z <= jaw_z <= cup_top_z + self.CUP_COLLISION_MARGIN
+                near_wall = (cup_inner_radius - self.CUP_COLLISION_MARGIN <= jaw_xy_dist <= 
+                            cup_outer_radius + self.CUP_COLLISION_MARGIN)
+                inside_cup = jaw_xy_dist < cup_inner_radius and at_cup_height
+                
+                if at_cup_height and (near_wall or inside_cup):
+                    cup_collision = True
+        
         # Event-based debug output: only print when state changes
         if droppable_range and not self._is_droppable_range:
             print("droppable detected")
         if in_cup and not self._is_in_cup:
             print("cube is in cup")
+        if cup_collision and not self._is_cup_collision:
+            print("cup collision detected")
         
         self._is_droppable_range = droppable_range
         self._is_in_cup = in_cup
+        self._is_cup_collision = cup_collision
         
         # Store state for external debugging
         self._last_state = {
@@ -288,6 +338,7 @@ class Gripper:
             "not_following_frames": self._not_following_frames,
             "droppable_range": droppable_range,
             "in_cup": in_cup,
+            "cup_collision": cup_collision,
             "cube_cup_xy_dist": cube_cup_xy_dist,
             "cup_top_z": cup_top_z,
         }

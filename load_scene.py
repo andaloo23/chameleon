@@ -445,6 +445,7 @@ class IsaacPickPlaceEnv:
                 cup_pos=cup_pos,
                 cup_height=self.cup_height,
                 cup_inner_radius=self.cup_inner_radius_top,
+                cup_outer_radius=self.cup_outer_radius_top,
                 cube_half_size=self.cube_scale[2] / 2.0,
             )
 

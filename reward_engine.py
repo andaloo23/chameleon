@@ -1,14 +1,27 @@
 import numpy as np
 
-REACH_DISTANCE_MAX = 1.0
-REACHING_WEIGHT = 1.0
+# Reward weights for 5-stage task
+# Stage 1: Approach cube (dense shaping)
+APPROACH_DISTANCE_MAX = 1.0   # Max distance for shaping
+APPROACH_WEIGHT = 1.0         # Reward weight for approaching cube
+
+# Stage 2: Grasp cube (one-time bonus)
 GRASP_BONUS = 2.0
-LIFT_BONUS = 2.5
-PLACEMENT_WEIGHT = 3.0
-PLACEMENT_BONUS = 1.5
+
+# Stage 3: Transport to cup (dense shaping) 
+TRANSPORT_DISTANCE_MAX = 0.5  # Max XY distance for shaping
+TRANSPORT_WEIGHT = 2.0        # Higher weight for transport (post-grasp)
+
+# Stage 4: Droppable range (one-time bonus)
+DROPPABLE_BONUS = 1.5
+
+# Stage 5: Success (one-time bonus)
 SUCCESS_BONUS = 10.0
-ACTION_COST_WEIGHT = 0.01
-DROP_PENALTY = -3.0
+
+# Penalties
+ACTION_COST_WEIGHT = 0.01     # Per-step action cost
+DROP_PENALTY = -3.0           # Dropping cube not in cup
+CUP_COLLISION_PENALTY = -0.5  # Per-step penalty for cup collision
 JOINT_LIMIT_PENALTY_WEIGHT = 1.0
 
 
@@ -39,10 +52,9 @@ class RewardEngine:
 
     def reset(self):
         self.stage_flags = {
-            "grasped": False,
-            "lifted": False,
-            "placed": False,
-            "success": False,
+            "grasped": False,           # Stage 2: one-time grasp bonus
+            "droppable_reached": False, # Stage 4: one-time droppable range bonus
+            "success": False,           # Stage 5: one-time success bonus
         }
         self.reward_components = {}
         self.drop_detected = False
@@ -67,74 +79,96 @@ class RewardEngine:
         self._update_task_state()
 
     def compute_reward_components(self):
+        """
+        Compute reward components for the 5-stage pick-and-place task:
+        
+        Stage 1: Approach cube - dense shaping reward for getting closer to cube
+        Stage 2: Grasp cube - one-time bonus when grasp detected
+        Stage 3: Transport to cup - dense shaping for decreasing XY distance to cup
+        Stage 4: Droppable range - one-time bonus when cube above cup
+        Stage 5: Success - one-time bonus for cube dropped in cup
+        
+        Penalties:
+        - Action cost: per-step cost based on joint velocities
+        - Drop penalty: one-time penalty for dropping cube not in cup
+        - Cup collision: per-step penalty for gripper hitting cup
+        - Joint limit penalty: per-step soft penalty for approaching joint limits
+        """
         state = self.task_state
         components = {}
-
+        
+        # Get state values
         gripper_cube_distance = state.get("gripper_cube_distance")
-        if gripper_cube_distance is not None:
-            reach_ratio = 1.0 - min(gripper_cube_distance, REACH_DISTANCE_MAX) / REACH_DISTANCE_MAX
-            reach_ratio = max(0.0, reach_ratio)
-            components["reaching"] = REACHING_WEIGHT * reach_ratio
-        else:
-            components["reaching"] = 0.0
-
-        cube_height = state.get("cube_height")
-        cube_cup_distance = state.get("cube_cup_distance")
         cube_cup_distance_xy = state.get("cube_cup_distance_xy")
+        cube_height = state.get("cube_height")
         joint_positions = state.get("joint_positions")
         joint_velocities = state.get("joint_velocities")
-        gripper_value = state.get("gripper_joint")
-# (Line removed)
-
-        # Grasp detection: use the environment's consolidated detector.
-        # This now includes contact, stability, and lift requirements.
-        grasp_detected = getattr(self.env.gripper_detector, "is_grasping", False)
         
+        # Get detector state
+        grasp_detected = getattr(self.env.gripper_detector, "is_grasping", False)
+        droppable_detected = getattr(self.env.gripper_detector, "is_droppable_range", False)
+        in_cup_detected = getattr(self.env.gripper_detector, "is_in_cup", False)
+        cup_collision = getattr(self.env.gripper_detector, "is_cup_collision", False)
+        
+        # ===== STAGE 1: Approach Cube =====
+        # Dense shaping: reward increases as gripper gets closer to cube
+        if gripper_cube_distance is not None:
+            approach_ratio = 1.0 - min(gripper_cube_distance, APPROACH_DISTANCE_MAX) / APPROACH_DISTANCE_MAX
+            approach_ratio = max(0.0, approach_ratio)
+            components["approach_shaping"] = APPROACH_WEIGHT * approach_ratio
+        else:
+            components["approach_shaping"] = 0.0
+        
+        # ===== STAGE 2: Grasp Cube =====
+        # One-time bonus when grasp is detected
         if not self.stage_flags.get("grasped") and grasp_detected:
             self.stage_flags["grasped"] = True
             components["grasp_bonus"] = GRASP_BONUS
-            # print(f"[GRASP] ✓ Grasp detected!")
         else:
             components["grasp_bonus"] = 0.0
-
-        if (self.stage_flags.get("grasped") and not self.stage_flags.get("lifted") and
-                cube_height is not None and cube_height >= self.env.cup_height + 0.02):
-            self.stage_flags["lifted"] = True
-            components["lift_bonus"] = LIFT_BONUS
+        
+        # ===== STAGE 3: Transport to Cup =====
+        # Dense shaping: reward increases as cube XY distance to cup decreases
+        # Only active after grasping (to avoid rewarding moving cube by pushing)
+        if self.stage_flags.get("grasped") and cube_cup_distance_xy is not None:
+            transport_ratio = 1.0 - min(cube_cup_distance_xy, TRANSPORT_DISTANCE_MAX) / TRANSPORT_DISTANCE_MAX
+            transport_ratio = max(0.0, transport_ratio)
+            components["transport_shaping"] = TRANSPORT_WEIGHT * transport_ratio
         else:
-            components["lift_bonus"] = 0.0
-
-        placement_progress = 0.0
-        if cube_cup_distance is not None:
-            placement_progress = 1.0 - min(cube_cup_distance, 0.5) / 0.5
-            placement_progress = np.clip(placement_progress, 0.0, 1.0)
-        components["placement_shaping"] = PLACEMENT_WEIGHT * placement_progress
-
-        if (self.stage_flags.get("lifted") and not self.stage_flags.get("placed") and
-                cube_cup_distance is not None and cube_cup_distance <= 0.05):
-            self.stage_flags["placed"] = True
-            components["placement_bonus"] = PLACEMENT_BONUS
+            components["transport_shaping"] = 0.0
+        
+        # ===== STAGE 4: Droppable Range =====
+        # One-time bonus when cube is positioned above cup (ready to drop)
+        if not self.stage_flags.get("droppable_reached") and droppable_detected:
+            self.stage_flags["droppable_reached"] = True
+            components["droppable_bonus"] = DROPPABLE_BONUS
         else:
-            components["placement_bonus"] = 0.0
-
-        gripper_joint = state.get("gripper_joint")
-        gripper_open = gripper_joint is not None and gripper_joint >= 0.02
-        inside_cup = (
-            cube_height is not None and cube_height <= self.env.cup_height and
-            cube_cup_distance_xy is not None and cube_cup_distance_xy <= self.env.cup_inner_radius_top * 0.6
-        )
-        if not self.stage_flags.get("success") and inside_cup and gripper_open:
+            components["droppable_bonus"] = 0.0
+        
+        # ===== STAGE 5: Success =====
+        # One-time bonus when cube is inside the cup
+        if not self.stage_flags.get("success") and in_cup_detected:
             self.stage_flags["success"] = True
             components["success_bonus"] = SUCCESS_BONUS
         else:
             components["success_bonus"] = 0.0
-
+        
+        # ===== PENALTIES =====
+        
+        # Action cost: penalize large joint velocities to encourage efficiency
         if joint_velocities is not None:
             action_cost = float(np.linalg.norm(joint_velocities))
             components["action_cost"] = -ACTION_COST_WEIGHT * action_cost
         else:
             components["action_cost"] = 0.0
-
+        
+        # Cup collision: per-step penalty for gripper touching cup
+        if cup_collision:
+            components["cup_collision_penalty"] = CUP_COLLISION_PENALTY
+        else:
+            components["cup_collision_penalty"] = 0.0
+        
+        # Joint limit penalty: soft penalty for approaching joint limits
         joint_penalty = 0.0
         if joint_positions is not None:
             for idx, name in enumerate(self.env.robot.joint_names):
@@ -150,23 +184,23 @@ class RewardEngine:
                     if proximity < margin:
                         joint_penalty += margin - proximity
         components["joint_limit_penalty"] = -JOINT_LIMIT_PENALTY_WEIGHT * joint_penalty
-
+        
+        # Drop penalty: one-time penalty for dropping cube not in cup
         drop_triggered = False
-        if self.stage_flags.get("lifted") and not self.stage_flags.get("success"):
-            close_to_gripper = (gripper_cube_distance is not None and
-                                gripper_cube_distance <= self.env.cube_scale[0] * 1.5)
+        if self.stage_flags.get("grasped") and not self.stage_flags.get("success"):
+            # Cube was grasped but is now on ground and not in cup
             low_height = cube_height is not None and cube_height <= self.env.cube_scale[2] * 0.75
-            # Use consolidated detector for drop detection
-            still_grasping = getattr(self.env.gripper_detector, "is_grasping", False)
-            if low_height and (not still_grasping or not close_to_gripper):
+            still_grasping = grasp_detected
+            not_in_cup = not in_cup_detected
+            if low_height and not still_grasping and not_in_cup:
                 drop_triggered = True
-
+        
         if drop_triggered and not self.drop_detected:
             components["drop_penalty"] = DROP_PENALTY
             self.drop_detected = True
         else:
             components["drop_penalty"] = 0.0
-
+        
         self.reward_components = components
         return components
 
