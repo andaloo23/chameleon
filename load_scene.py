@@ -438,11 +438,19 @@ class IsaacPickPlaceEnv:
 
         is_grasped = False
         if self.gripper_detector:
+            # Get cup position for droppable/in-cup detection
+            cup_xy = getattr(self, "_cup_xy", None)
+            cup_pos = np.array([cup_xy[0], cup_xy[1], 0.0], dtype=np.float32) if cup_xy is not None else None
+            
             is_grasped = self.gripper_detector.update(
                 gripper_value=agp, target_gripper=self._latest_target_gripper,
                 gripper_world_pos=gwp, jaw_world_pos=jwp,
                 object_world_pos=cp,
-                arm_moving=arm_moving
+                arm_moving=arm_moving,
+                cup_pos=cup_pos,
+                cup_height=self.cup_height,
+                cup_inner_radius=self.cup_inner_radius_top,
+                cube_half_size=self.cube_scale[2] / 2.0,
             )
 
 

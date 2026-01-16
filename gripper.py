@@ -119,6 +119,15 @@ class Gripper:
     FRAMES_TO_GRASP = 15        # N: frames of following required to confirm grasp
     FRAMES_TO_DROP = 30         # M: frames of not following required to confirm drop
     STALL_FRAMES = 5            # Frames of no movement to consider gripper stalled
+    
+    # Droppable range detection thresholds
+    # Cube must be XY-aligned within the cup's inner radius and above the cup
+    DROPPABLE_XY_MARGIN = 0.8   # Fraction of inner radius - cube must be within this to be "droppable"
+    DROPPABLE_MIN_HEIGHT = 0.01 # Minimum height above cup top to be considered in droppable range
+    
+    # In-cup detection thresholds  
+    IN_CUP_XY_MARGIN = 0.9      # Fraction of inner radius - cube must be within this to be "in cup"
+    IN_CUP_HEIGHT_MARGIN = 0.01 # Tolerance for cube bottom being slightly above cup bottom
 
     def __init__(
         self,
@@ -146,10 +155,24 @@ class Gripper:
         # Frame counters for temporal filtering
         self._following_frames = 0
         self._not_following_frames = 0
+        
+        # Droppable range and in-cup detection state
+        self._is_droppable_range: bool = False  # True if cube would land in cup if dropped
+        self._is_in_cup: bool = False           # True if cube is inside the cup
 
     @property
     def is_grasping(self) -> bool:
         return self._is_grasped
+    
+    @property
+    def is_droppable_range(self) -> bool:
+        """True if cube is above cup and would land inside if dropped."""
+        return self._is_droppable_range
+    
+    @property
+    def is_in_cup(self) -> bool:
+        """True if cube is currently inside the cup."""
+        return self._is_in_cup
 
     @property
     def last_state(self) -> dict:
@@ -164,6 +187,8 @@ class Gripper:
         self._closing_intent = False
         self._following_frames = 0
         self._not_following_frames = 0
+        self._is_droppable_range = False
+        self._is_in_cup = False
         self._last_state = {}
 
     def _is_following(self) -> bool:
@@ -197,6 +222,10 @@ class Gripper:
         jaw_world_pos: Optional[np.ndarray] = None,
         object_world_pos: Optional[np.ndarray] = None,
         arm_moving: bool = False,
+        cup_pos: Optional[np.ndarray] = None,
+        cup_height: float = 0.0,
+        cup_inner_radius: float = 0.0,
+        cube_half_size: float = 0.0,
     ) -> bool:
         """
         Update grasp state using behavioral detection:
@@ -244,6 +273,40 @@ class Gripper:
             self._dist_history.append(curr_dist)
             following = self._is_following()
         
+        # 4. Droppable range detection: cube is above cup and would land inside if dropped
+        droppable_range = False
+        in_cup = False
+        cube_cup_xy_dist = None
+        cup_top_z = 0.0
+        
+        if cup_pos is not None and object_world_pos is not None and cup_inner_radius > 0:
+            # Calculate XY distance from cube center to cup center
+            cube_xy = object_world_pos[:2]
+            cup_xy = cup_pos[:2]
+            cube_cup_xy_dist = float(np.linalg.norm(cube_xy - cup_xy))
+            
+            # Cup top Z position
+            cup_top_z = float(cup_pos[2]) + cup_height
+            cup_bottom_z = float(cup_pos[2])
+            
+            # Effective inner radius for cube (accounting for cube size)
+            effective_radius = cup_inner_radius - cube_half_size
+            
+            # Droppable range: cube XY within droppable margin AND cube bottom is above cup top
+            cube_bottom_z = cube_z - cube_half_size
+            xy_in_range = cube_cup_xy_dist <= effective_radius * self.DROPPABLE_XY_MARGIN
+            above_cup = cube_bottom_z > cup_top_z + self.DROPPABLE_MIN_HEIGHT
+            droppable_range = xy_in_range and above_cup
+            
+            # In-cup detection: cube XY within cup AND cube bottom is inside cup (below top, above bottom)
+            xy_in_cup = cube_cup_xy_dist <= effective_radius * self.IN_CUP_XY_MARGIN
+            cube_inside_height = (cube_bottom_z >= cup_bottom_z - self.IN_CUP_HEIGHT_MARGIN and
+                                  cube_bottom_z < cup_top_z)
+            in_cup = xy_in_cup and cube_inside_height
+        
+        self._is_droppable_range = droppable_range
+        self._is_in_cup = in_cup
+        
         # Store state for external debugging
         self._last_state = {
             "closed": closed,
@@ -254,6 +317,10 @@ class Gripper:
             "cube_z": cube_z,
             "following_frames": self._following_frames,
             "not_following_frames": self._not_following_frames,
+            "droppable_range": droppable_range,
+            "in_cup": in_cup,
+            "cube_cup_xy_dist": cube_cup_xy_dist,
+            "cup_top_z": cup_top_z,
         }
         
         # 4. Apply grasp detection logic
