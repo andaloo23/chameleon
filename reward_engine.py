@@ -52,9 +52,16 @@ class RewardEngine:
 
     def reset(self):
         self.stage_flags = {
+            # Original stage flags
             "grasped": False,           # Stage 2: one-time grasp bonus
             "droppable_reached": False, # Stage 4: one-time droppable range bonus
             "success": False,           # Stage 5: one-time success bonus
+            # New milestone flags for PPO tracking
+            "reached": False,           # Gripper within reach distance of cube
+            "controlled": False,        # Alias for grasped (grasp detected)
+            "lifted": False,            # Cube lifted above ground threshold
+            "above_cup": False,         # Cube positioned above cup XY
+            "released": False,          # Gripper opened after grasp
         }
         self.reward_components = {}
         self.drop_detected = False
@@ -62,6 +69,7 @@ class RewardEngine:
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
         self.latest_target_gripper = None
+        self._was_grasping = False  # Track grasp state for release detection
         # env.gripper_detector.reset() is called by the env itself
 
     def record_joint_state(self, joint_positions, joint_velocities, target_gripper=None):
@@ -200,6 +208,30 @@ class RewardEngine:
             self.drop_detected = True
         else:
             components["drop_penalty"] = 0.0
+        
+        # ===== UPDATE MILESTONE FLAGS =====
+        # These are one-way latching flags for PPO tracking
+        
+        # Reached: gripper within 5cm of cube
+        if gripper_cube_distance is not None and gripper_cube_distance < 0.05:
+            self.stage_flags["reached"] = True
+        
+        # Controlled: same as grasped (grasp detected)
+        if grasp_detected:
+            self.stage_flags["controlled"] = True
+        
+        # Lifted: cube above ground threshold (3cm)
+        if cube_height is not None and cube_height > 0.03:
+            self.stage_flags["lifted"] = True
+        
+        # Above cup: same as droppable range
+        if droppable_detected:
+            self.stage_flags["above_cup"] = True
+        
+        # Released: gripper opened after having grasped
+        if self._was_grasping and not grasp_detected:
+            self.stage_flags["released"] = True
+        self._was_grasping = grasp_detected
         
         self.reward_components = components
         return components

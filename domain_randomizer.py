@@ -113,8 +113,10 @@ class DomainRandomizer:
             pass
 
         try:
-            scale_noise = rng.uniform(0.95, 1.05, size=3)
-            self.env.cube.set_scale(self.env.cube_scale * scale_noise)
+            # Randomize cube size (0.8x to 1.2x for significant variation)
+            scale_factor = rng.uniform(0.8, 1.2)
+            scale_noise = np.array([scale_factor, scale_factor, scale_factor])
+            self.env.cube.set_local_scale(self.env.cube_scale * scale_noise)
         except Exception:
             pass
 
