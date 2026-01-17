@@ -1,20 +1,8 @@
-"""gripper.py
-
-Refined gripper logic for Isaac Sim. 
-This version implements a behavioral grasp detection system based on 
-bounding box overlap (contact detection).
-"""
-
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from collections import deque
 import numpy as np
-
-
-# -------------------------
-# Math Utilities (Required by load_scene.py)
-# -------------------------
 
 def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     """Convert quaternion [w, x, y, z] to 3x3 rotation matrix."""
@@ -31,7 +19,6 @@ def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
         ],
         dtype=np.float32,
     )
-
 
 def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
     """Convert 3x3 rotation matrix to quaternion [w, x, y, z]."""
@@ -62,11 +49,6 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
         y = (R[1, 2] + R[2, 1]) / s
         z = 0.25 * s
     return np.array([w, x, y, z], dtype=np.float32)
-
-
-# -------------------------
-# Behavioral Gripper
-# -------------------------
 
 class Gripper:
     """Gripper class with behavioral grasp detection based on gripper state and relative motion."""
@@ -366,4 +348,3 @@ class Gripper:
                 self._not_following_frames = 0
         
         return self._is_grasped
-

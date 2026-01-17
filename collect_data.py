@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to collect.")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode.")
     parser.add_argument("--max_steps", type=int, default=1500, help="Max steps per episode.")
-    )
+    
     args = parser.parse_args()
 
     print(f"[info] Starting data collection for {args.episodes} episodes...")

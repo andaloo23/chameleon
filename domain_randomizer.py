@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def _safe_quat_mul(q1, q2):
     x1, y1, z1, w1 = q1
     x2, y2, z2, w2 = q2
@@ -11,13 +10,11 @@ def _safe_quat_mul(q1, q2):
         w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
     ], dtype=np.float32)
 
-
 def _quat_normalize(quat):
     norm = np.linalg.norm(quat)
     if norm < 1e-6:
         return np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
     return quat / norm
-
 
 def _random_quaternion(rng, max_angle_rad):
     axis = rng.normal(size=3)
@@ -31,13 +28,11 @@ def _random_quaternion(rng, max_angle_rad):
     sin_half = np.sin(half)
     return np.array([axis[0] * sin_half, axis[1] * sin_half, axis[2] * sin_half, np.cos(half)], dtype=np.float32)
 
-
 class DomainRandomizer:
     def __init__(self, env):
         self.env = env
 
     def randomize(self):
-        # COMPLETELY DISABLED FOR DEBUGGING
         pass
         # self._randomize_lighting()
         # self._randomize_ground()
