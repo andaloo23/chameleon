@@ -1,7 +1,6 @@
 import imageio.v2 as imageio
 import numpy as np
 
-
 def write_png(path, rgba_uint8):
     if rgba_uint8 is None:
         return False
