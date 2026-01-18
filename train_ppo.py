@@ -228,14 +228,14 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         # Track per-step statistics from info
         task_state = info.get("task_state", {})
         gripper_cube_dist = task_state.get("gripper_cube_distance")
-        gripper_joint = task_state.get("gripper_joint")
+        gripper_width = task_state.get("gripper_width")  # Physical distance between jaws
         
         if gripper_cube_dist is not None:
             min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
             final_gripper_cube_dist = gripper_cube_dist
         
-        if gripper_joint is not None:
-            min_gripper_width = min(min_gripper_width, gripper_joint)
+        if gripper_width is not None:
+            min_gripper_width = min(min_gripper_width, gripper_width)
         
         buffer.add(obs, action, reward, value, done, log_prob)
         current_episode_reward += reward

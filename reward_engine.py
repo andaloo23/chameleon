@@ -347,6 +347,14 @@ class RewardEngine:
         state["gripper_joint"] = gripper_value
         state["target_gripper"] = self.latest_target_gripper
         
+        # Compute physical gripper width as distance between gripper and jaw links
+        gripper_link_pos = gripper_pos  # Already computed above
+        jaw_link_pos = getattr(env, "_last_jaw_pos", None)
+        if gripper_link_pos is not None and jaw_link_pos is not None:
+            state["gripper_width"] = float(np.linalg.norm(gripper_link_pos - jaw_link_pos))
+        else:
+            state["gripper_width"] = None
+        
         # Legacy threshold-based closure check (kept for backward compatibility)
         state["gripper_closed"] = gripper_value is not None and gripper_value <= 0.35
         
