@@ -88,11 +88,20 @@ def main():
     print("  Gripper:       Y / U")
     print("  Press ESC to Exit")
 
+    # Track if reached has been announced
+    reached_announced = False
+
     try:
         while input_state["is_running"]:
             # Step simulation with current targets
             # This maintains the robot's pose and updates physics/rendering
-            env.step(joint_positions, render=True)
+            obs, reward, done, info = env.step(joint_positions, render=True)
+            
+            # Check if reached milestone
+            stage_flags = info.get("stage_flags", {})
+            if stage_flags.get("reached") and not reached_announced:
+                print("\n*** CUBE REACHED! ***\n")
+                reached_announced = True
             
     except Exception as e:
         print(f"[ERROR] {e}")
