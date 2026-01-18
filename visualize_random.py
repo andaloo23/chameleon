@@ -56,19 +56,19 @@ def run_random_episode(max_steps: int = 300):
         # Track statistics
         task_state = info.get("task_state", {})
         gripper_cube_dist = task_state.get("gripper_cube_distance")
-        gripper_joint = task_state.get("gripper_joint")
+        gripper_width = task_state.get("gripper_width")  # Physical distance between jaws
         
         if gripper_cube_dist is not None:
             min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
-        if gripper_joint is not None:
-            min_gripper_width = min(min_gripper_width, gripper_joint)
+        if gripper_width is not None:
+            min_gripper_width = min(min_gripper_width, gripper_width)
         
         # Print every 30 steps
         if (step + 1) % 30 == 0:
             flags = info.get("milestone_flags", {})
             print(f"Step {step+1:3d} | "
                   f"Dist: {gripper_cube_dist:.3f}m | "
-                  f"Gripper: {gripper_joint:.3f} | "
+                  f"GripperWidth: {gripper_width:.4f if gripper_width else 'N/A'}m | "
                   f"Reward: {reward:.2f} | "
                   f"Reached: {flags.get('reached', False)}")
         

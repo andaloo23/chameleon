@@ -25,8 +25,8 @@ CUP_COLLISION_PENALTY = -0.5  # Per-step penalty for cup collision
 JOINT_LIMIT_PENALTY_WEIGHT = 1.0
 
 # Self-collision prevention
-SELF_COLLISION_THRESHOLD = 0.05  # 5cm - distance threshold for penalty
-SELF_COLLISION_PENALTY_WEIGHT = 2.0  # Weight for self-collision penalty
+SELF_COLLISION_THRESHOLD = 0.10  # 10cm - distance threshold for penalty
+SELF_COLLISION_PENALTY_WEIGHT = 5.0  # Weight for self-collision penalty (increased)
 
 
 class RewardEngine:
