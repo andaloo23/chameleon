@@ -66,9 +66,10 @@ def run_random_episode(max_steps: int = 300):
         # Print every 30 steps
         if (step + 1) % 30 == 0:
             flags = info.get("milestone_flags", {})
+            gw_str = f"{gripper_width:.4f}" if gripper_width is not None else "N/A"
             print(f"Step {step+1:3d} | "
                   f"Dist: {gripper_cube_dist:.3f}m | "
-                  f"GripperWidth: {gripper_width:.4f if gripper_width else 'N/A'}m | "
+                  f"GripperWidth: {gw_str}m | "
                   f"Reward: {reward:.2f} | "
                   f"Reached: {flags.get('reached', False)}")
         
