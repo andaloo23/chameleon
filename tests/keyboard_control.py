@@ -90,12 +90,22 @@ def main():
 
     # Track if reached has been announced
     reached_announced = False
+    frame_count = 0
 
     try:
         while input_state["is_running"]:
             # Step simulation with current targets
             # This maintains the robot's pose and updates physics/rendering
             obs, reward, done, info = env.step(joint_positions, render=True)
+            frame_count += 1
+            
+            # Get task state for debugging
+            task_state = info.get("task_state", {})
+            gripper_cube_dist = task_state.get("gripper_cube_distance")
+            
+            # Debug output every 60 frames (~1 second)
+            if frame_count % 60 == 0 and gripper_cube_dist is not None:
+                print(f"Gripper-Cube Distance: {gripper_cube_dist:.4f}m (reached threshold: 0.05m)")
             
             # Check if reached milestone
             stage_flags = info.get("stage_flags", {})
