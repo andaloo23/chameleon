@@ -17,7 +17,8 @@ def run_random_episode(max_steps: int = 200):
     print("=" * 60)
     
     # Create environment with rendering enabled (headless=False)
-    env = PPOEnv(headless=False, max_steps=max_steps, delta_scale=0.1)
+    # Use larger delta_scale (0.3) for visible motion with random actions
+    env = PPOEnv(headless=False, max_steps=max_steps, delta_scale=0.3)
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
     print("=" * 60)
