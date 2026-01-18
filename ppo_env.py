@@ -1,25 +1,38 @@
 """
-PPO-ready Gym environment wrapper for the pick-and-place task.
+PPO-ready environment wrapper for the pick-and-place task.
 
 Provides:
 - Flattened 21-dim observation vector
 - 6-dim delta joint action space
 - Milestone flags in info dict
+
+No external gym/gymnasium dependency required.
 """
 
 import numpy as np
-
-try:
-    import gymnasium as gym
-    from gymnasium import spaces
-except ImportError:
-    import gym
-    from gym import spaces
+from dataclasses import dataclass
+from typing import Tuple, Dict, Any, Optional
 
 from load_scene import IsaacPickPlaceEnv
 
 
-class PPOEnv(gym.Env):
+@dataclass
+class Box:
+    """Simple Box space mimicking gym.spaces.Box."""
+    low: float
+    high: float
+    shape: Tuple[int, ...]
+    dtype: np.dtype = np.float32
+    
+    def sample(self) -> np.ndarray:
+        """Sample random action from space."""
+        return np.random.uniform(self.low, self.high, size=self.shape).astype(self.dtype)
+    
+    def __repr__(self):
+        return f"Box({self.low}, {self.high}, {self.shape}, {self.dtype})"
+
+
+class PPOEnv:
     """
     Gym-compatible wrapper for IsaacPickPlaceEnv.
     
@@ -34,17 +47,13 @@ class PPOEnv(gym.Env):
         - Delta joint commands scaled by delta_scale
     """
     
-    metadata = {"render_modes": ["human", "rgb_array"]}
-    
     def __init__(
         self,
         headless: bool = True,
         max_steps: int = 500,
         delta_scale: float = 0.05,
-        random_seed: int = None,
+        random_seed: Optional[int] = None,
     ):
-        super().__init__()
-        
         self.headless = headless
         self.max_steps = max_steps
         self.delta_scale = delta_scale
@@ -58,7 +67,7 @@ class PPOEnv(gym.Env):
         
         # Observation space: 21-dim flattened vector
         # joint_pos(6) + joint_vel(6) + gripper_pos(3) + cube_pos(3) + cup_pos(3)
-        self.observation_space = spaces.Box(
+        self.observation_space = Box(
             low=-np.inf,
             high=np.inf,
             shape=(21,),
@@ -66,7 +75,7 @@ class PPOEnv(gym.Env):
         )
         
         # Action space: delta joint commands (6 joints)
-        self.action_space = spaces.Box(
+        self.action_space = Box(
             low=-1.0,
             high=1.0,
             shape=(6,),
@@ -84,13 +93,15 @@ class PPOEnv(gym.Env):
         """Flatten observation dict to 21-dim vector."""
         joint_pos = np.array(obs.get("joint_positions", np.zeros(6)), dtype=np.float32)
         joint_vel = np.array(obs.get("joint_velocities", np.zeros(6)), dtype=np.float32)
-        gripper_pos = np.array(obs.get("gripper_pos", np.zeros(3)), dtype=np.float32)
+        gripper_pos = obs.get("gripper_pos")
         cube_pos = np.array(obs.get("cube_pos", np.zeros(3)), dtype=np.float32)
         cup_pos = np.array(obs.get("cup_pos", np.zeros(3)), dtype=np.float32)
         
         # Handle None values
-        if gripper_pos is None or len(gripper_pos) == 0:
+        if gripper_pos is None:
             gripper_pos = np.zeros(3, dtype=np.float32)
+        else:
+            gripper_pos = np.array(gripper_pos, dtype=np.float32)
         
         return np.concatenate([
             joint_pos[:6],
@@ -122,7 +133,7 @@ class PPOEnv(gym.Env):
         }
         return flags
     
-    def reset(self, seed=None, options=None):
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation."""
         if seed is not None:
             np.random.seed(seed)
@@ -136,7 +147,7 @@ class PPOEnv(gym.Env):
         
         return obs, info
     
-    def step(self, action: np.ndarray):
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
         Execute delta action and return (obs, reward, terminated, truncated, info).
         
