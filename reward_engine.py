@@ -24,6 +24,10 @@ DROP_PENALTY = -3.0           # Dropping cube not in cup
 CUP_COLLISION_PENALTY = -0.5  # Per-step penalty for cup collision
 JOINT_LIMIT_PENALTY_WEIGHT = 1.0
 
+# Self-collision prevention
+SELF_COLLISION_THRESHOLD = 0.05  # 5cm - distance threshold for penalty
+SELF_COLLISION_PENALTY_WEIGHT = 2.0  # Weight for self-collision penalty
+
 
 class RewardEngine:
     def __init__(self, env):
@@ -209,6 +213,17 @@ class RewardEngine:
         else:
             components["drop_penalty"] = 0.0
         
+        # ===== SELF-COLLISION PENALTY =====
+        # Penalize gripper approaching base, shoulder, or upper_arm
+        # Quadratic penalty: if d < r: penalty = -k * (r - d)^2, else 0
+        self_collision_penalty = 0.0
+        for link_name in ["base", "shoulder", "upper_arm"]:
+            dist = state.get(f"gripper_{link_name}_distance")
+            if dist is not None and dist < SELF_COLLISION_THRESHOLD:
+                violation = SELF_COLLISION_THRESHOLD - dist
+                self_collision_penalty -= SELF_COLLISION_PENALTY_WEIGHT * (violation ** 2)
+        components["self_collision_penalty"] = self_collision_penalty
+        
         # ===== UPDATE MILESTONE FLAGS =====
         # These are one-way latching flags for PPO tracking
         
@@ -338,5 +353,29 @@ class RewardEngine:
         # Behavioral grasp detection state
         state["grasp_detected"] = getattr(self.env.gripper_detector, "is_grasping", False)
         state["grasp_position"] = None
+
+        # Self-collision: compute gripper distance to base, shoulder, and upper_arm
+        link_positions = {}
+        try:
+            if hasattr(env, "robot_articulation") and env.robot_articulation is not None:
+                link_poses = env._get_link_poses()
+                if link_poses and link_poses[0] is not None:
+                    positions, _ = link_poses
+                    # Link indices: base=0, shoulder=1, upper_arm=2
+                    if len(positions) > 0:
+                        link_positions["base"] = np.array(positions[0], dtype=np.float32)
+                    if len(positions) > 1:
+                        link_positions["shoulder"] = np.array(positions[1], dtype=np.float32)
+                    if len(positions) > 2:
+                        link_positions["upper_arm"] = np.array(positions[2], dtype=np.float32)
+        except Exception:
+            pass
+        
+        # Compute distances from gripper to each tracked link
+        for link_name, link_pos in link_positions.items():
+            if gripper_pos is not None and link_pos is not None:
+                state[f"gripper_{link_name}_distance"] = float(np.linalg.norm(gripper_pos - link_pos))
+            else:
+                state[f"gripper_{link_name}_distance"] = None
 
         self.task_state = state
