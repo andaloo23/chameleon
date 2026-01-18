@@ -227,8 +227,8 @@ class RewardEngine:
         # ===== UPDATE MILESTONE FLAGS =====
         # These are one-way latching flags for PPO tracking
         
-        # Reached: gripper within 5cm of cube
-        if gripper_cube_distance is not None and gripper_cube_distance < 0.05:
+        # Reached: gripper within 10cm of cube
+        if gripper_cube_distance is not None and gripper_cube_distance < 0.10:
             self.stage_flags["reached"] = True
         
         # Controlled: same as grasped (grasp detected)

@@ -105,7 +105,7 @@ def main():
             
             # Debug output every 60 frames (~1 second)
             if frame_count % 60 == 0 and gripper_cube_dist is not None:
-                print(f"Gripper-Cube Distance: {gripper_cube_dist:.4f}m (reached threshold: 0.05m)")
+                print(f"Gripper-Cube Distance: {gripper_cube_dist:.4f}m (reached threshold: 0.10m)")
             
             # Check if reached milestone
             stage_flags = info.get("stage_flags", {})
