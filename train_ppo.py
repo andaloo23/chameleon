@@ -202,6 +202,12 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     episode_flags = []
     current_episode_reward = 0.0
     
+    # Per-episode tracking
+    min_gripper_cube_dist = float("inf")
+    final_gripper_cube_dist = float("inf")
+    min_gripper_width = float("inf")
+    episode_count = 0
+    
     for _ in range(n_steps):
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
         
@@ -219,13 +225,38 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         next_obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         
+        # Track per-step statistics from info
+        task_state = info.get("task_state", {})
+        gripper_cube_dist = task_state.get("gripper_cube_distance")
+        gripper_joint = task_state.get("gripper_joint")
+        
+        if gripper_cube_dist is not None:
+            min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
+            final_gripper_cube_dist = gripper_cube_dist
+        
+        if gripper_joint is not None:
+            min_gripper_width = min(min_gripper_width, gripper_joint)
+        
         buffer.add(obs, action, reward, value, done, log_prob)
         current_episode_reward += reward
         
         if done:
+            episode_count += 1
             episode_rewards.append(current_episode_reward)
             episode_flags.append(info.get("milestone_flags", {}))
+            
+            # Print per-episode statistics
+            print(f"  [Episode {episode_count}] "
+                  f"MinDist: {min_gripper_cube_dist:.4f}m | "
+                  f"FinalDist: {final_gripper_cube_dist:.4f}m | "
+                  f"MinGripperWidth: {min_gripper_width:.4f} | "
+                  f"Reward: {current_episode_reward:.2f}")
+            
+            # Reset tracking for next episode
             current_episode_reward = 0.0
+            min_gripper_cube_dist = float("inf")
+            final_gripper_cube_dist = float("inf")
+            min_gripper_width = float("inf")
             obs, info = env.reset()
         else:
             obs = next_obs
