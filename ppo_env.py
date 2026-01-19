@@ -167,6 +167,13 @@ class PPOEnv:
             lower, upper = self._joint_limits[name]
             target_joints[i] = np.clip(target_joints[i], lower, upper)
         
+        # Force gripper open during approach stage (before grasp detected)
+        grasp_detected = getattr(self._env.gripper_detector, "is_grasping", False)
+        if not grasp_detected:
+            # Override gripper joint to fully open (upper limit)
+            gripper_upper = self._joint_limits["gripper"][1]
+            target_joints[5] = gripper_upper  # Joint index 5 is gripper
+        
         # Step underlying environment
         obs_dict, reward, done, info = self._env.step(target_joints, render=not self.headless)
         

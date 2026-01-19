@@ -135,6 +135,12 @@ class RewardEngine:
         else:
             components["approach_shaping"] = 0.0
         
+        # Stay-near reward: encourage staying close to cube before grasping
+        if gripper_cube_distance is not None and gripper_cube_distance < 0.14 and not grasp_detected:
+            components["stay_near_reward"] = 0.02  # Per-step bonus for being close
+        else:
+            components["stay_near_reward"] = 0.0
+        
         # ===== STAGE 2: Grasp Cube =====
         # One-time bonus when grasp is detected
         if not self.stage_flags.get("grasped") and grasp_detected:
@@ -217,8 +223,8 @@ class RewardEngine:
         # ===== UPDATE MILESTONE FLAGS =====
         # These are one-way latching flags for PPO tracking
         
-        # Reached: gripper within 15cm of cube
-        if gripper_cube_distance is not None and gripper_cube_distance < 0.15:
+        # Reached: gripper within 14cm of cube
+        if gripper_cube_distance is not None and gripper_cube_distance < 0.14:
             self.stage_flags["reached"] = True
         
         # Controlled: same as grasped (grasp detected)
