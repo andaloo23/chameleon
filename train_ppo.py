@@ -226,10 +226,12 @@ def ppo_update(
 
 
 def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048):
-    """Collect rollout data from environment. Returns (last_value, episode_rewards, episode_flags, mean_action_mag)."""
+    """Collect rollout data from environment. Returns (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists)."""
     obs, info = env.reset()
     episode_rewards = []
     episode_flags = []
+    episode_min_dists = []
+    episode_final_dists = []
     current_episode_reward = 0.0
     
     # Per-episode tracking
@@ -302,6 +304,8 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
             episode_count += 1
             episode_rewards.append(current_episode_reward)
             episode_flags.append(info.get("milestone_flags", {}))
+            episode_min_dists.append(min_gripper_cube_dist)
+            episode_final_dists.append(final_gripper_cube_dist)
             
             # Print per-episode statistics (one line)
             print(f"  [Ep {episode_count}] "
@@ -335,7 +339,7 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         last_value = last_value.item()
     
     mean_action_mag = np.mean(action_magnitudes) if action_magnitudes else 0.0
-    return last_value, episode_rewards, episode_flags, mean_action_mag
+    return last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists
 
 
 def train_ppo(
@@ -396,6 +400,8 @@ def train_ppo(
         "value_loss": [],
         "mean_action_mag": [],
         "avg_reward": [],
+        "min_dist": [],
+        "final_dist": [],
     }
     
     while total_episodes < num_episodes:
@@ -403,7 +409,7 @@ def train_ppo(
         buffer.clear()
         
         # Collect rollout
-        last_value, episode_rewards, episode_flags, mean_action_mag = collect_rollout(
+        last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists = collect_rollout(
             env, policy, buffer, n_steps=rollout_steps
         )
         
@@ -415,6 +421,8 @@ def train_ppo(
         all_flags.extend(episode_flags)
         total_episodes += len(episode_rewards)
         avg_reward = np.mean(all_rewards) if all_rewards else 0.0
+        avg_min_dist = np.mean(ep_min_dists) if ep_min_dists else 0.0
+        avg_final_dist = np.mean(ep_final_dists) if ep_final_dists else 0.0
         
         # Store metrics for plotting
         metrics_history["iteration"].append(iteration)
@@ -426,6 +434,8 @@ def train_ppo(
         metrics_history["value_loss"].append(metrics["value_loss"])
         metrics_history["mean_action_mag"].append(mean_action_mag)
         metrics_history["avg_reward"].append(avg_reward)
+        metrics_history["min_dist"].append(avg_min_dist)
+        metrics_history["final_dist"].append(avg_final_dist)
         
         # Log progress
         if iteration % log_interval == 0 or total_episodes >= num_episodes:
@@ -482,7 +492,7 @@ def plot_training_metrics(metrics: Dict):
         
         episodes = metrics["episode"]
         
-        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        fig, axes = plt.subplots(4, 2, figsize=(12, 13))
         fig.suptitle("PPO Training Metrics", fontsize=14)
         
         # Entropy
@@ -526,6 +536,20 @@ def plot_training_metrics(metrics: Dict):
         axes[2, 1].set_ylabel("Avg Reward")
         axes[2, 1].set_title("Average Episode Reward")
         axes[2, 1].grid(True, alpha=0.3)
+        
+        # Min Distance (gripper to cube)
+        axes[3, 0].plot(episodes, metrics["min_dist"], 'purple')
+        axes[3, 0].set_xlabel("Episode")
+        axes[3, 0].set_ylabel("Min Distance (m)")
+        axes[3, 0].set_title("Min Gripper-Cube Distance")
+        axes[3, 0].grid(True, alpha=0.3)
+        
+        # Final Distance (gripper to cube)
+        axes[3, 1].plot(episodes, metrics["final_dist"], 'brown')
+        axes[3, 1].set_xlabel("Episode")
+        axes[3, 1].set_ylabel("Final Distance (m)")
+        axes[3, 1].set_title("Final Gripper-Cube Distance")
+        axes[3, 1].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.savefig("ppo_training_metrics.png", dpi=150)
