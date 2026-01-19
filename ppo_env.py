@@ -124,7 +124,7 @@ class PPOEnv:
         cube_height = task_state.get("cube_height", 0.0)
         
         flags = {
-            "reached": gripper_cube_dist < 0.05 if gripper_cube_dist is not None else False,
+            "reached": gripper_cube_dist < 0.20 if gripper_cube_dist is not None else False,
             "controlled": bool(stage_flags.get("grasped", False)),
             "lifted": cube_height > 0.03 if cube_height is not None else False,
             "above_cup": bool(getattr(gripper_detector, "is_droppable_range", False) if gripper_detector else False),
