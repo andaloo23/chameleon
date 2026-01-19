@@ -123,12 +123,12 @@ class RewardEngine:
         cup_collision = getattr(self.env.gripper_detector, "is_cup_collision", False)
         
         # ===== STAGE 1: Approach Cube =====
-        # Delta-based shaping: reward moving closer, penalize moving away
+        # Delta-based shaping: reward only for moving closer (no penalty for moving away)
         if gripper_cube_distance is not None:
             if self._prev_gripper_cube_distance is not None:
-                # Reward = k * (d_prev - d_now) -> positive if getting closer
+                # Reward = k * max(0, d_prev - d_now) -> only reward getting closer
                 delta = self._prev_gripper_cube_distance - gripper_cube_distance
-                components["approach_shaping"] = APPROACH_DELTA_WEIGHT * delta
+                components["approach_shaping"] = APPROACH_DELTA_WEIGHT * max(0.0, delta)
             else:
                 components["approach_shaping"] = 0.0
             self._prev_gripper_cube_distance = gripper_cube_distance

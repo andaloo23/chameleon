@@ -237,6 +237,14 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     final_gripper_cube_dist = float("inf")
     min_gripper_width = float("inf")
     episode_count = 0
+    step_count = 0
+    first_episode_debug = True  # Output d_min_body for first episode only
+    
+    # Reward component sums per episode
+    sum_approach = 0.0
+    sum_action_cost = 0.0
+    sum_joint_limit = 0.0
+    sum_self_keepout = 0.0
     
     # Action magnitude tracking
     action_magnitudes = []
@@ -263,8 +271,25 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         
         # Track per-step statistics from info
         task_state = info.get("task_state", {})
+        reward_components = info.get("reward_components", {})
         gripper_cube_dist = task_state.get("gripper_cube_distance")
         gripper_width = task_state.get("gripper_width")  # Physical distance between jaws
+        
+        # Get minimum distance to body links (base, shoulder, upper_arm)
+        d_base = task_state.get("gripper_base_distance", float("inf"))
+        d_shoulder = task_state.get("gripper_shoulder_distance", float("inf"))
+        d_upper_arm = task_state.get("gripper_upper_arm_distance", float("inf"))
+        d_min_body = min(d_base, d_shoulder, d_upper_arm)
+        
+        # Debug: output d_min_body each step for 1st episode
+        if first_episode_debug:
+            print(f"    Step {step_count}: d_min_body={d_min_body:.4f}m")
+        
+        # Track reward component sums for this episode
+        sum_approach += reward_components.get("approach_shaping", 0.0)
+        sum_action_cost += reward_components.get("action_cost", 0.0)
+        sum_joint_limit += reward_components.get("joint_limit_penalty", 0.0)
+        sum_self_keepout += reward_components.get("self_collision_penalty", 0.0)
         
         if gripper_cube_dist is not None:
             min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
@@ -275,24 +300,37 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         
         buffer.add(obs, action, reward, value, done, log_prob)
         current_episode_reward += reward
+        step_count += 1
         
         if done:
             episode_count += 1
             episode_rewards.append(current_episode_reward)
             episode_flags.append(info.get("milestone_flags", {}))
             
-            # Print per-episode statistics
+            # Print per-episode statistics with reward breakdowns
             print(f"  [Episode {episode_count}] "
                   f"MinDist: {min_gripper_cube_dist:.4f}m | "
-                  f"FinalDist: {final_gripper_cube_dist:.4f}m | "
-                  f"MinGripperWidth: {min_gripper_width:.4f} | "
                   f"Reward: {current_episode_reward:.2f}")
+            print(f"    sum_approach={sum_approach:.2f} | "
+                  f"sum_action_cost={sum_action_cost:.3f} | "
+                  f"sum_joint_limit={sum_joint_limit:.3f} | "
+                  f"sum_self_keepout={sum_self_keepout:.3f}")
+            
+            # Stop debug output after first episode
+            if first_episode_debug:
+                first_episode_debug = False
+                print("  [First episode debug complete]")
             
             # Reset tracking for next episode
             current_episode_reward = 0.0
             min_gripper_cube_dist = float("inf")
             final_gripper_cube_dist = float("inf")
             min_gripper_width = float("inf")
+            sum_approach = 0.0
+            sum_action_cost = 0.0
+            sum_joint_limit = 0.0
+            sum_self_keepout = 0.0
+            step_count = 0
             obs, info = env.reset()
         else:
             obs = next_obs
