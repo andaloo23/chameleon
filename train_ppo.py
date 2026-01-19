@@ -349,6 +349,7 @@ def train_ppo(
     learning_rate: float = 3e-4,
     rollout_steps: int = 2048,
     log_interval: int = 10,
+    n_envs: int = 1,
 ):
     """
     Train PPO on the pick-and-place task.
@@ -360,15 +361,21 @@ def train_ppo(
         learning_rate: Learning rate for optimizer
         rollout_steps: Steps per rollout before update
         log_interval: Episodes between logging
+        n_envs: Number of parallel environments (1 = single env, >1 = VecEnv)
     """
-    from ppo_env import PPOEnv
-    
     print("=" * 60)
     print("PPO Training for Pick-and-Place Task")
     print("=" * 60)
     
-    # Create environment
-    env = PPOEnv(headless=headless, max_steps=max_steps)
+    # Create environment(s)
+    if n_envs > 1:
+        from vec_env import VecEnv
+        env = VecEnv(n_envs=n_envs, headless=headless, max_steps=max_steps)
+        print(f"Using {n_envs} parallel environments")
+    else:
+        from ppo_env import PPOEnv
+        env = PPOEnv(headless=headless, max_steps=max_steps)
+    
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
     
@@ -569,8 +576,18 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true", help="Run headless")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=2048, help="Steps per rollout")
+    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments (max ~8 for single GPU)")
     
     args = parser.parse_args()
+    
+    # Warn about GPU memory limits
+    if args.n_envs > 8:
+        print(f"[WARNING] {args.n_envs} parallel Isaac Sim instances may exceed GPU memory.")
+        print("[WARNING] Consider using 4-8 envs or refactoring to OmniIsaacGymEnvs for true vectorization.")
+    
+    if args.n_envs > 1:
+        print(f"[INFO] Parallel environments requested: {args.n_envs}")
+        print("[INFO] Note: Each env runs a separate Isaac Sim instance. GPU memory limited to ~4-8 envs.")
     
     train_ppo(
         num_episodes=args.episodes,
@@ -578,5 +595,5 @@ if __name__ == "__main__":
         headless=args.headless,
         learning_rate=args.lr,
         rollout_steps=args.rollout_steps,
+        n_envs=args.n_envs,
     )
-
