@@ -1,9 +1,8 @@
 import numpy as np
 
 # Reward weights for 5-stage task
-# Stage 1: Approach cube (dense shaping)
-APPROACH_DISTANCE_MAX = 1.0   # Max distance for shaping
-APPROACH_WEIGHT = 1.0         # Reward weight for approaching cube
+# Stage 1: Approach cube (delta-based shaping)
+APPROACH_DELTA_WEIGHT = 10.0  # Reward per meter closer to cube
 
 # Stage 2: Grasp cube (one-time bonus)
 GRASP_BONUS = 2.0
@@ -74,6 +73,7 @@ class RewardEngine:
         self.latest_joint_velocities = None
         self.latest_target_gripper = None
         self._was_grasping = False  # Track grasp state for release detection
+        self._prev_gripper_cube_distance = None  # For delta-based approach reward
         # env.gripper_detector.reset() is called by the env itself
 
     def record_joint_state(self, joint_positions, joint_velocities, target_gripper=None):
@@ -123,11 +123,15 @@ class RewardEngine:
         cup_collision = getattr(self.env.gripper_detector, "is_cup_collision", False)
         
         # ===== STAGE 1: Approach Cube =====
-        # Dense shaping: reward increases as gripper gets closer to cube
+        # Delta-based shaping: reward moving closer, penalize moving away
         if gripper_cube_distance is not None:
-            approach_ratio = 1.0 - min(gripper_cube_distance, APPROACH_DISTANCE_MAX) / APPROACH_DISTANCE_MAX
-            approach_ratio = max(0.0, approach_ratio)
-            components["approach_shaping"] = APPROACH_WEIGHT * approach_ratio
+            if self._prev_gripper_cube_distance is not None:
+                # Reward = k * (d_prev - d_now) -> positive if getting closer
+                delta = self._prev_gripper_cube_distance - gripper_cube_distance
+                components["approach_shaping"] = APPROACH_DELTA_WEIGHT * delta
+            else:
+                components["approach_shaping"] = 0.0
+            self._prev_gripper_cube_distance = gripper_cube_distance
         else:
             components["approach_shaping"] = 0.0
         

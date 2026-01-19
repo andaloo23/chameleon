@@ -139,18 +139,24 @@ def ppo_update(
     n_epochs: int = 4,
     batch_size: int = 64,
 ):
-    """Perform PPO update."""
+    """Perform PPO update. Returns dict of metrics."""
     returns, advantages = buffer.compute_returns_and_advantages(last_value)
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
     obs_tensor, actions_tensor, old_log_probs_tensor = buffer.get_tensors()
     returns_tensor = torch.tensor(returns, dtype=torch.float32)
     advantages_tensor = torch.tensor(advantages, dtype=torch.float32)
+    values_tensor = torch.tensor(np.array(buffer.values), dtype=torch.float32)
     
     n_samples = len(buffer.observations)
     indices = np.arange(n_samples)
     
     total_loss = 0.0
+    total_policy_loss = 0.0
+    total_value_loss = 0.0
+    total_entropy = 0.0
+    total_approx_kl = 0.0
+    total_clip_fraction = 0.0
     n_updates = 0
     
     for _ in range(n_epochs):
@@ -189,14 +195,38 @@ def ppo_update(
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
             optimizer.step()
             
+            # Compute metrics
+            with torch.no_grad():
+                approx_kl = ((ratio - 1) - torch.log(ratio)).mean().item()
+                clip_fraction = (torch.abs(ratio - 1.0) > clip_eps).float().mean().item()
+            
             total_loss += loss.item()
+            total_policy_loss += policy_loss.item()
+            total_value_loss += value_loss.item()
+            total_entropy += entropy.mean().item()
+            total_approx_kl += approx_kl
+            total_clip_fraction += clip_fraction
             n_updates += 1
     
-    return total_loss / max(n_updates, 1)
+    # Compute explained variance
+    with torch.no_grad():
+        explained_var = 1 - (returns_tensor - values_tensor).var() / (returns_tensor.var() + 1e-8)
+        explained_var = explained_var.item()
+    
+    metrics = {
+        "loss": total_loss / max(n_updates, 1),
+        "policy_loss": total_policy_loss / max(n_updates, 1),
+        "value_loss": total_value_loss / max(n_updates, 1),
+        "entropy": total_entropy / max(n_updates, 1),
+        "approx_kl": total_approx_kl / max(n_updates, 1),
+        "clip_fraction": total_clip_fraction / max(n_updates, 1),
+        "explained_variance": explained_var,
+    }
+    return metrics
 
 
 def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048):
-    """Collect rollout data from environment."""
+    """Collect rollout data from environment. Returns (last_value, episode_rewards, episode_flags, mean_action_mag)."""
     obs, info = env.reset()
     episode_rewards = []
     episode_flags = []
@@ -207,6 +237,9 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     final_gripper_cube_dist = float("inf")
     min_gripper_width = float("inf")
     episode_count = 0
+    
+    # Action magnitude tracking
+    action_magnitudes = []
     
     for _ in range(n_steps):
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
@@ -221,6 +254,9 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
             action_std = torch.exp(policy.policy_log_std)
             dist = Normal(action_mean, action_std)
             log_prob = dist.log_prob(torch.tensor(action)).sum().item()
+        
+        # Track action magnitude (after clipping in env.step)
+        action_magnitudes.append(np.abs(action).mean())
         
         next_obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
@@ -267,7 +303,8 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         _, last_value = policy.get_action(obs_tensor)
         last_value = last_value.item()
     
-    return last_value, episode_rewards, episode_flags
+    mean_action_mag = np.mean(action_magnitudes) if action_magnitudes else 0.0
+    return last_value, episode_rewards, episode_flags, mean_action_mag
 
 
 def train_ppo(
@@ -317,27 +354,50 @@ def train_ppo(
     total_episodes = 0
     iteration = 0
     
+    # Metrics tracking for plotting
+    metrics_history = {
+        "iteration": [],
+        "episode": [],
+        "entropy": [],
+        "approx_kl": [],
+        "clip_fraction": [],
+        "explained_variance": [],
+        "value_loss": [],
+        "mean_action_mag": [],
+        "avg_reward": [],
+    }
+    
     while total_episodes < num_episodes:
         iteration += 1
         buffer.clear()
         
         # Collect rollout
-        last_value, episode_rewards, episode_flags = collect_rollout(
+        last_value, episode_rewards, episode_flags, mean_action_mag = collect_rollout(
             env, policy, buffer, n_steps=rollout_steps
         )
         
         # Update policy
-        loss = ppo_update(policy, optimizer, buffer, last_value)
+        metrics = ppo_update(policy, optimizer, buffer, last_value)
         
         # Track statistics
         all_rewards.extend(episode_rewards)
         all_flags.extend(episode_flags)
         total_episodes += len(episode_rewards)
+        avg_reward = np.mean(all_rewards) if all_rewards else 0.0
+        
+        # Store metrics for plotting
+        metrics_history["iteration"].append(iteration)
+        metrics_history["episode"].append(total_episodes)
+        metrics_history["entropy"].append(metrics["entropy"])
+        metrics_history["approx_kl"].append(metrics["approx_kl"])
+        metrics_history["clip_fraction"].append(metrics["clip_fraction"])
+        metrics_history["explained_variance"].append(metrics["explained_variance"])
+        metrics_history["value_loss"].append(metrics["value_loss"])
+        metrics_history["mean_action_mag"].append(mean_action_mag)
+        metrics_history["avg_reward"].append(avg_reward)
         
         # Log progress
         if iteration % log_interval == 0 or total_episodes >= num_episodes:
-            avg_reward = np.mean(all_rewards) if all_rewards else 0.0
-            
             # Count milestone percentages
             n_episodes = len(all_flags)
             if n_episodes > 0:
@@ -348,8 +408,10 @@ def train_ppo(
             else:
                 pct_reached = pct_controlled = pct_lifted = pct_success = 0.0
             
-            print(f"[Iter {iteration:4d}] Episodes: {total_episodes:5d} | "
-                  f"Avg Reward: {avg_reward:7.2f} | Loss: {loss:.4f}")
+            print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} | "
+                  f"Reward: {avg_reward:7.2f} | "
+                  f"Entropy: {metrics['entropy']:.3f} | "
+                  f"KL: {metrics['approx_kl']:.4f}")
             print(f"           Reached: {pct_reached:5.1f}% | Controlled: {pct_controlled:5.1f}% | "
                   f"Lifted: {pct_lifted:5.1f}% | Success: {pct_success:5.1f}%")
     
@@ -372,9 +434,77 @@ def train_ppo(
         print(f"% Lifted:    {pct_lifted:.1f}%")
         print(f"% Success:   {pct_success:.1f}%")
     
+    # Plot metrics
+    plot_training_metrics(metrics_history)
+    
     env.close()
     
     return policy
+
+
+def plot_training_metrics(metrics: Dict):
+    """Plot training metrics vs episode number and save to file."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')  # Non-interactive backend for headless
+        import matplotlib.pyplot as plt
+        
+        episodes = metrics["episode"]
+        
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        fig.suptitle("PPO Training Metrics", fontsize=14)
+        
+        # Entropy
+        axes[0, 0].plot(episodes, metrics["entropy"], 'b-')
+        axes[0, 0].set_xlabel("Episode")
+        axes[0, 0].set_ylabel("Entropy")
+        axes[0, 0].set_title("Policy Entropy")
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # Approx KL
+        axes[0, 1].plot(episodes, metrics["approx_kl"], 'r-')
+        axes[0, 1].set_xlabel("Episode")
+        axes[0, 1].set_ylabel("Approx KL")
+        axes[0, 1].set_title("Approximate KL Divergence")
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # Clip Fraction
+        axes[1, 0].plot(episodes, metrics["clip_fraction"], 'g-')
+        axes[1, 0].set_xlabel("Episode")
+        axes[1, 0].set_ylabel("Clip Fraction")
+        axes[1, 0].set_title("Fraction of Clipped Updates")
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Explained Variance
+        axes[1, 1].plot(episodes, metrics["explained_variance"], 'm-')
+        axes[1, 1].set_xlabel("Episode")
+        axes[1, 1].set_ylabel("Explained Variance")
+        axes[1, 1].set_title("Value Function Explained Variance")
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        # Mean Action Magnitude
+        axes[2, 0].plot(episodes, metrics["mean_action_mag"], 'c-')
+        axes[2, 0].set_xlabel("Episode")
+        axes[2, 0].set_ylabel("Mean |Action|")
+        axes[2, 0].set_title("Mean Action Magnitude (after scaling)")
+        axes[2, 0].grid(True, alpha=0.3)
+        
+        # Average Reward
+        axes[2, 1].plot(episodes, metrics["avg_reward"], 'orange')
+        axes[2, 1].set_xlabel("Episode")
+        axes[2, 1].set_ylabel("Avg Reward")
+        axes[2, 1].set_title("Average Episode Reward")
+        axes[2, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig("ppo_training_metrics.png", dpi=150)
+        print(f"\n[INFO] Training metrics plot saved to: ppo_training_metrics.png")
+        plt.close()
+        
+    except ImportError:
+        print("[WARN] matplotlib not available, skipping plots")
+    except Exception as e:
+        print(f"[WARN] Failed to create plots: {e}")
 
 
 if __name__ == "__main__":
@@ -394,3 +524,4 @@ if __name__ == "__main__":
         learning_rate=args.lr,
         rollout_steps=args.rollout_steps,
     )
+
