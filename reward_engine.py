@@ -2,7 +2,7 @@ import numpy as np
 
 # Reward weights for 5-stage task
 # Stage 1: Approach cube (delta-based shaping)
-APPROACH_DELTA_WEIGHT = 10.0  # Reward per meter closer to cube
+APPROACH_DELTA_WEIGHT = 20.0  # Reward per meter closer to cube
 
 # Stage 2: Grasp cube (one-time bonus)
 GRASP_BONUS = 2.0
@@ -18,7 +18,7 @@ DROPPABLE_BONUS = 1.5
 SUCCESS_BONUS = 10.0
 
 # Penalties
-ACTION_COST_WEIGHT = 0.01     # Per-step action cost
+ACTION_COST_WEIGHT = 0.0002   # Per-step action cost (reduced)
 DROP_PENALTY = -3.0           # Dropping cube not in cup
 CUP_COLLISION_PENALTY = -0.5  # Per-step penalty for cup collision
 JOINT_LIMIT_PENALTY_WEIGHT = 1.0
