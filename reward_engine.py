@@ -337,11 +337,14 @@ class RewardEngine:
         state["gripper_joint"] = gripper_value
         state["target_gripper"] = self.latest_target_gripper
         
-        # Compute physical gripper width as distance between gripper and jaw links
-        gripper_link_pos = gripper_pos  # Already computed above
-        jaw_link_pos = getattr(env, "_last_jaw_pos", None)
-        if gripper_link_pos is not None and jaw_link_pos is not None:
-            state["gripper_width"] = float(np.linalg.norm(gripper_link_pos - jaw_link_pos))
+        # Compute physical gripper width from joint angle
+        # Jaw rotates around Z axis at offset (-0.0202, -0.0244) from gripper origin
+        # The effective opening is proportional to sin(joint_angle) * jaw_arm_length
+        JAW_ARM_LENGTH = 0.03  # Approximate distance from rotation axis to contact surface (30mm)
+        if gripper_value is not None:
+            # Joint range: -0.2 (closed) to 2.0 (wide open)
+            # Map to opening: closed = ~0mm, open = ~60mm
+            state["gripper_width"] = float(JAW_ARM_LENGTH * np.sin(max(0, gripper_value)))
         else:
             state["gripper_width"] = None
         
