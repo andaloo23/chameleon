@@ -307,14 +307,11 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
             episode_rewards.append(current_episode_reward)
             episode_flags.append(info.get("milestone_flags", {}))
             
-            # Print per-episode statistics with reward breakdowns
-            print(f"  [Episode {episode_count}] "
-                  f"MinDist: {min_gripper_cube_dist:.4f}m | "
+            # Print per-episode statistics (one line)
+            print(f"  [Ep {episode_count}] "
+                  f"MinDist: {min_gripper_cube_dist:.3f}m | "
+                  f"GripperWidth: {min_gripper_width:.4f}m | "
                   f"Reward: {current_episode_reward:.2f}")
-            print(f"    sum_approach={sum_approach:.2f} | "
-                  f"sum_action_cost={sum_action_cost:.3f} | "
-                  f"sum_joint_limit={sum_joint_limit:.3f} | "
-                  f"sum_self_keepout={sum_self_keepout:.3f}")
             
             # Stop debug output after first episode
             if first_episode_debug:

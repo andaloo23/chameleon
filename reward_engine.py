@@ -184,22 +184,8 @@ class RewardEngine:
         else:
             components["cup_collision_penalty"] = 0.0
         
-        # Joint limit penalty: soft penalty for approaching joint limits
-        joint_penalty = 0.0
-        if joint_positions is not None:
-            for idx, name in enumerate(self.env.robot.joint_names):
-                lower, upper = self.env.robot.joint_limits[name]
-                value = float(joint_positions[idx])
-                if value < lower:
-                    joint_penalty += lower - value
-                elif value > upper:
-                    joint_penalty += value - upper
-                else:
-                    margin = 0.02 if name != "gripper" else 0.002
-                    proximity = min(value - lower, upper - value)
-                    if proximity < margin:
-                        joint_penalty += margin - proximity
-        components["joint_limit_penalty"] = -JOINT_LIMIT_PENALTY_WEIGHT * joint_penalty
+        # Joint limit penalty: disabled
+        components["joint_limit_penalty"] = 0.0
         
         # Drop penalty: one-time penalty for dropping cube not in cup
         drop_triggered = False
@@ -239,8 +225,8 @@ class RewardEngine:
         if grasp_detected:
             self.stage_flags["controlled"] = True
         
-        # Lifted: cube above ground threshold (3cm)
-        if cube_height is not None and cube_height > 0.03:
+        # Lifted: cube above ground threshold (3cm) AND being grasped
+        if cube_height is not None and cube_height > 0.03 and grasp_detected:
             self.stage_flags["lifted"] = True
         
         # Above cup: same as droppable range
