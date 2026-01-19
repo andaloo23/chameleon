@@ -281,10 +281,6 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         d_upper_arm = task_state.get("gripper_upper_arm_distance", float("inf"))
         d_min_body = min(d_base, d_shoulder, d_upper_arm)
         
-        # Debug: output d_min_body each step for 1st episode
-        if first_episode_debug:
-            print(f"    Step {step_count}: d_min_body={d_min_body:.4f}m")
-        
         # Track reward component sums for this episode
         sum_approach += reward_components.get("approach_shaping", 0.0)
         sum_action_cost += reward_components.get("action_cost", 0.0)
