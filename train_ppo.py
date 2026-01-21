@@ -3,6 +3,10 @@ Minimal PPO training script for the pick-and-place task.
 
 Uses a tiny MLP policy and trains on the PPOEnv wrapper.
 Outputs statistics: avg reward, % reached, % controlled, % lifted.
+
+Supports two backends:
+- Isaac Sim (default): Uses ppo_env.py and vec_env.py
+- Isaac Lab (--isaac-lab): Uses lab/pick_place_env.py with GPU parallelization
 """
 
 import argparse
@@ -350,6 +354,7 @@ def train_ppo(
     rollout_steps: int = 2048,
     log_interval: int = 10,
     n_envs: int = 1,
+    isaac_lab: bool = False,
 ):
     """
     Train PPO on the pick-and-place task.
@@ -361,27 +366,52 @@ def train_ppo(
         learning_rate: Learning rate for optimizer
         rollout_steps: Steps per rollout before update
         log_interval: Episodes between logging
-        n_envs: Number of parallel environments (1 = single env, >1 = VecEnv)
+        n_envs: Number of parallel environments
+        isaac_lab: Use Isaac Lab backend (GPU-accelerated)
     """
     print("=" * 60)
     print("PPO Training for Pick-and-Place Task")
+    if isaac_lab:
+        print("Backend: Isaac Lab (GPU-accelerated)")
+    else:
+        print("Backend: Isaac Sim (legacy)")
     print("=" * 60)
     
     # Create environment(s)
-    if n_envs > 1:
+    if isaac_lab:
+        # Isaac Lab: GPU-accelerated parallel environments
+        from isaaclab.app import AppLauncher
+        app_launcher = AppLauncher(headless=headless)
+        simulation_app = app_launcher.app
+        
+        from lab.pick_place_env import PickPlaceEnv
+        from lab.pick_place_env_cfg import PickPlaceEnvCfg
+        
+        cfg = PickPlaceEnvCfg()
+        cfg.scene.num_envs = n_envs
+        cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
+        env = PickPlaceEnv(cfg)
+        print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
+        
+        # Isaac Lab uses gymnasium-style API with dict observations
+        obs_dim = cfg.observation_space
+        act_dim = cfg.action_space
+    elif n_envs > 1:
         from vec_env import VecEnv
         env = VecEnv(n_envs=n_envs, headless=headless, max_steps=max_steps)
-        print(f"Using {n_envs} parallel environments")
+        print(f"Using {n_envs} parallel environments (legacy VecEnv)")
+        obs_dim = env.observation_space.shape[0]
+        act_dim = env.action_space.shape[0]
     else:
         from ppo_env import PPOEnv
         env = PPOEnv(headless=headless, max_steps=max_steps)
+        obs_dim = env.observation_space.shape[0]
+        act_dim = env.action_space.shape[0]
     
-    print(f"Observation space: {env.observation_space}")
-    print(f"Action space: {env.action_space}")
+    print(f"Observation space: {obs_dim}")
+    print(f"Action space: {act_dim}")
     
     # Create policy and optimizer
-    obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
     policy = TinyMLP(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=64)
     optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
     
@@ -576,18 +606,26 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true", help="Run headless")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=2048, help="Steps per rollout")
-    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments (max ~8 for single GPU)")
+    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments")
+    parser.add_argument("--isaac-lab", action="store_true", 
+                        help="Use Isaac Lab backend (GPU-accelerated, supports 1000+ parallel envs)")
     
     args = parser.parse_args()
     
-    # Warn about GPU memory limits
-    if args.n_envs > 8:
-        print(f"[WARNING] {args.n_envs} parallel Isaac Sim instances may exceed GPU memory.")
-        print("[WARNING] Consider using 4-8 envs or refactoring to OmniIsaacGymEnvs for true vectorization.")
-    
-    if args.n_envs > 1:
-        print(f"[INFO] Parallel environments requested: {args.n_envs}")
-        print("[INFO] Note: Each env runs a separate Isaac Sim instance. GPU memory limited to ~4-8 envs.")
+    if args.isaac_lab:
+        print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
+        print(f"[INFO] Parallel environments: {args.n_envs} (can scale to 1000+)")
+        print("[INFO] Note: Requires Isaac Lab installation. See implementation_plan.md for setup.")
+    else:
+        # Legacy Isaac Sim mode warnings
+        if args.n_envs > 8:
+            print(f"[WARNING] {args.n_envs} parallel Isaac Sim instances may exceed GPU memory.")
+            print("[WARNING] Consider using --isaac-lab for true GPU parallelization.")
+        
+        if args.n_envs > 1:
+            print(f"[INFO] Parallel environments requested: {args.n_envs}")
+            print("[INFO] Note: Each env runs a separate Isaac Sim instance. GPU memory limited to ~4-8 envs.")
+            print("[INFO] Use --isaac-lab for native GPU parallelization (1000+ envs).")
     
     train_ppo(
         num_episodes=args.episodes,
@@ -596,4 +634,6 @@ if __name__ == "__main__":
         learning_rate=args.lr,
         rollout_steps=args.rollout_steps,
         n_envs=args.n_envs,
+        isaac_lab=args.isaac_lab,
     )
+
