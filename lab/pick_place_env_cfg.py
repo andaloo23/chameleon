@@ -67,6 +67,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             asset_path=_URDF_PATH,
             fix_base=True,
             self_collision=False,
+            joint_drive=UrdfFileCfg.JointDriveCfg(
+                gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
+                    stiffness=None,  # Will use actuator config
+                    damping=None,
+                ),
+            ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),

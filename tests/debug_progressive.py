@@ -70,6 +70,12 @@ class RobotOnlyEnvCfg(DirectRLEnvCfg):
             asset_path=URDF_PATH,
             fix_base=True,
             self_collision=False,
+            joint_drive=UrdfFileCfg.JointDriveCfg(
+                gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
+                    stiffness=None,
+                    damping=None,
+                ),
+            ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),
@@ -159,6 +165,12 @@ class RobotCubeEnvCfg(DirectRLEnvCfg):
         spawn=UrdfFileCfg(
             asset_path=URDF_PATH,
             fix_base=True,
+            joint_drive=UrdfFileCfg.JointDriveCfg(
+                gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
+                    stiffness=None,
+                    damping=None,
+                ),
+            ),
         ),
         actuators={
             "all_joints": ImplicitActuatorCfg(
