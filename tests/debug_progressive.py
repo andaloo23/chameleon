@@ -198,19 +198,34 @@ class RobotCubeEnv(DirectRLEnv):
     cfg: RobotCubeEnvCfg
     
     def _setup_scene(self):
-        print("  Adding robot...")
+        import time
+        t0 = time.time()
+        print(f"  [{time.time()-t0:.2f}s] _setup_scene starting...")
+        
+        print(f"  [{time.time()-t0:.2f}s] Creating Articulation...")
         self.robot = Articulation(self.cfg.robot_cfg)
-        print("  Adding cube...")
+        print(f"  [{time.time()-t0:.2f}s] Articulation created!")
+        
+        print(f"  [{time.time()-t0:.2f}s] Creating RigidObject (cube)...")
         self.cube = RigidObject(self.cfg.cube_cfg)
-        print("  Adding ground...")
+        print(f"  [{time.time()-t0:.2f}s] RigidObject created!")
+        
+        print(f"  [{time.time()-t0:.2f}s] Adding ground...")
         spawn_ground_plane("/World/ground", GroundPlaneCfg())
-        print("  Cloning...")
+        print(f"  [{time.time()-t0:.2f}s] Ground added!")
+        
+        print(f"  [{time.time()-t0:.2f}s] Cloning environments...")
         self.scene.clone_environments(copy_from_source=False)
+        print(f"  [{time.time()-t0:.2f}s] Cloning done!")
+        
+        print(f"  [{time.time()-t0:.2f}s] Registering with scene...")
         self.scene.articulations["robot"] = self.robot
         self.scene.rigid_objects["cube"] = self.cube
-        print("  Adding light...")
+        print(f"  [{time.time()-t0:.2f}s] Registration done!")
+        
+        print(f"  [{time.time()-t0:.2f}s] Adding light...")
         sim_utils.DomeLightCfg(intensity=2000.0).func("/World/Light", sim_utils.DomeLightCfg(intensity=2000.0))
-        print("  Done!")
+        print(f"  [{time.time()-t0:.2f}s] _setup_scene COMPLETE!")
     
     def _pre_physics_step(self, actions):
         pass
