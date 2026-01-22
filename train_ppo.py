@@ -169,6 +169,9 @@ def ppo_update(
     batch_size: int = 64,
 ):
     """Perform PPO update. Returns dict of metrics."""
+    # Get device from policy
+    device = next(policy.parameters()).device
+    
     returns, advantages = buffer.compute_returns_and_advantages(last_value)
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
@@ -176,6 +179,14 @@ def ppo_update(
     returns_tensor = torch.tensor(returns, dtype=torch.float32)
     advantages_tensor = torch.tensor(advantages, dtype=torch.float32)
     values_tensor = torch.tensor(np.array(buffer.values), dtype=torch.float32)
+    
+    # Move all tensors to policy device
+    obs_tensor = obs_tensor.to(device)
+    actions_tensor = actions_tensor.to(device)
+    old_log_probs_tensor = old_log_probs_tensor.to(device)
+    returns_tensor = returns_tensor.to(device)
+    advantages_tensor = advantages_tensor.to(device)
+    values_tensor = values_tensor.to(device)
     
     n_samples = len(buffer.observations)
     indices = np.arange(n_samples)
