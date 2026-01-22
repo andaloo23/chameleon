@@ -101,6 +101,8 @@ def main():
                 idx, direction = mapping[event.input]
                 step = GRIPPER_STEP if idx == 5 else STEP_SIZE
                 joint_targets[idx] += direction * step
+                if idx == 5:  # Gripper
+                    print(f"[GRIPPER] target={joint_targets[5].item():.3f}")
         return True
     
     # Register keyboard listener
