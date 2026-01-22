@@ -254,8 +254,128 @@ def ppo_update(
     return metrics
 
 
-def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048):
-    """Collect rollout data from environment. Returns (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists)."""
+def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048, 
+                    is_isaac_lab: bool = False, num_envs: int = 1):
+    """Collect rollout data from environment(s).
+    
+    When is_isaac_lab=True, uses batched processing for all num_envs environments.
+    Otherwise, uses single-env processing for legacy compatibility.
+    
+    Returns (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists).
+    """
+    if is_isaac_lab and num_envs > 1:
+        return _collect_rollout_batched(env, policy, buffer, n_steps, num_envs)
+    else:
+        return _collect_rollout_single(env, policy, buffer, n_steps)
+
+
+def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int, num_envs: int):
+    """Batched rollout collection for Isaac Lab with multiple parallel environments."""
+    obs_dict, info = env.reset()
+    
+    # Get device from policy
+    device = next(policy.parameters()).device
+    
+    # Track per-env episode stats
+    current_episode_rewards = torch.zeros(num_envs, device=device)
+    min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
+    final_gripper_cube_dists = torch.zeros(num_envs, device=device)
+    
+    # Completed episodes across all envs
+    all_episode_rewards = []
+    all_episode_min_dists = []
+    all_episode_final_dists = []
+    all_episode_flags = []
+    action_magnitudes = []
+    
+    steps_collected = 0
+    
+    while steps_collected < n_steps:
+        # Extract observations - shape: [num_envs, obs_dim]
+        obs_tensor = obs_dict["policy"]
+        if not obs_tensor.is_cuda and device.type == "cuda":
+            obs_tensor = obs_tensor.to(device)
+        
+        with torch.no_grad():
+            # Batched policy forward pass
+            action_mean, values = policy.forward(obs_tensor)
+            action_std = torch.exp(policy.policy_log_std)
+            dist = Normal(action_mean, action_std)
+            actions = dist.sample()
+            log_probs = dist.log_prob(actions).sum(dim=-1)
+            values = values.squeeze(-1)
+        
+        # Track action magnitudes
+        action_magnitudes.append(actions.abs().mean().item())
+        
+        # Step environment with batched actions
+        next_obs_dict, rewards, terminated, truncated, info = env.step(actions)
+        
+        # Combine done flags
+        dones = terminated | truncated
+        
+        # Update per-env tracking
+        current_episode_rewards += rewards
+        
+        # Track gripper-cube distance from info
+        task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
+        if "gripper_cube_distance" in task_state:
+            dist_val = task_state["gripper_cube_distance"]
+            # This is scalar from first env in current implementation
+            min_gripper_cube_dists[0] = min(min_gripper_cube_dists[0].item(), dist_val)
+            final_gripper_cube_dists[0] = dist_val
+        
+        # Add to buffer - need to add each env's experience
+        for env_idx in range(num_envs):
+            buffer.add(
+                obs_tensor[env_idx].cpu().numpy(),
+                actions[env_idx].cpu().numpy(),
+                rewards[env_idx].item(),
+                values[env_idx].item(),
+                dones[env_idx].item(),
+                log_probs[env_idx].item()
+            )
+            steps_collected += 1
+            
+            if steps_collected >= n_steps:
+                break
+        
+        # Handle episode completions
+        done_envs = dones.nonzero(as_tuple=False).squeeze(-1)
+        for env_idx in done_envs.tolist():
+            if isinstance(env_idx, int):
+                all_episode_rewards.append(current_episode_rewards[env_idx].item())
+                all_episode_min_dists.append(min_gripper_cube_dists[env_idx].item())
+                all_episode_final_dists.append(final_gripper_cube_dists[env_idx].item())
+                all_episode_flags.append({})
+                
+                # Print episode summary
+                ep_num = len(all_episode_rewards)
+                print(f"  [Ep {ep_num}] "
+                      f"MinDist: {min_gripper_cube_dists[env_idx]:.3f}m | "
+                      f"Reward: {current_episode_rewards[env_idx]:.2f}")
+                
+                # Reset this env's tracking
+                current_episode_rewards[env_idx] = 0.0
+                min_gripper_cube_dists[env_idx] = float("inf")
+                final_gripper_cube_dists[env_idx] = 0.0
+        
+        obs_dict = next_obs_dict
+    
+    # Get last value for GAE
+    with torch.no_grad():
+        obs_tensor = obs_dict["policy"]
+        if not obs_tensor.is_cuda and device.type == "cuda":
+            obs_tensor = obs_tensor.to(device)
+        _, last_values = policy.forward(obs_tensor)
+        last_value = last_values[0].item()  # Use first env's value
+    
+    mean_action_mag = np.mean(action_magnitudes) if action_magnitudes else 0.0
+    return last_value, all_episode_rewards, all_episode_flags, mean_action_mag, all_episode_min_dists, all_episode_final_dists
+
+
+def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int):
+    """Single-env rollout collection for legacy compatibility."""
     obs, info = env.reset()
     episode_rewards = []
     episode_flags = []
@@ -269,7 +389,7 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     min_gripper_width = float("inf")
     episode_count = 0
     step_count = 0
-    first_episode_debug = True  # Output d_min_body for first episode only
+    first_episode_debug = True
     
     # Reward component sums per episode
     sum_approach = 0.0
@@ -295,21 +415,20 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
             dist = Normal(action_mean, action_std)
             log_prob = dist.log_prob(torch.tensor(action)).sum().item()
         
-        # Track action magnitude (after clipping in env.step)
+        # Track action magnitude
         action_magnitudes.append(np.abs(action).mean())
         
         # Handle action format: Isaac Lab expects batched tensor, legacy expects numpy
         if isinstance(obs, dict):
-            # Isaac Lab - convert action to batched tensor
             action_input = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
-            if hasattr(action_input, "cuda"):
+            if torch.cuda.is_available():
                 action_input = action_input.cuda()
         else:
             action_input = action
         
         next_obs, reward, terminated, truncated, info = env.step(action_input)
         
-        # Extract scalars from potential tensors (Isaac Lab returns tensors)
+        # Extract scalars from potential tensors
         if hasattr(reward, "item"):
             reward = reward[0].item() if reward.dim() > 0 else reward.item()
         if hasattr(terminated, "item"):
@@ -319,19 +438,19 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         
         done = terminated or truncated
         
-        # Track per-step statistics from info (may be empty for Isaac Lab)
+        # Track per-step statistics from info
         task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
         reward_components = info.get("reward_components", {}) if isinstance(info, dict) else {}
         gripper_cube_dist = task_state.get("gripper_cube_distance")
-        gripper_width = task_state.get("gripper_width")  # Physical distance between jaws
+        gripper_width = task_state.get("gripper_width")
         
-        # Get minimum distance to body links (base, shoulder, upper_arm)
+        # Get minimum distance to body links
         d_base = task_state.get("gripper_base_distance", float("inf"))
         d_shoulder = task_state.get("gripper_shoulder_distance", float("inf"))
         d_upper_arm = task_state.get("gripper_upper_arm_distance", float("inf"))
         d_min_body = min(d_base, d_shoulder, d_upper_arm)
         
-        # Track reward component sums for this episode
+        # Track reward component sums
         sum_approach += reward_components.get("approach_shaping", 0.0)
         sum_action_cost += reward_components.get("action_cost", 0.0)
         sum_joint_limit += reward_components.get("joint_limit_penalty", 0.0)
@@ -355,18 +474,16 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
             episode_min_dists.append(min_gripper_cube_dist)
             episode_final_dists.append(final_gripper_cube_dist)
             
-            # Print per-episode statistics (one line)
             print(f"  [Ep {episode_count}] "
                   f"MinDist: {min_gripper_cube_dist:.3f}m | "
                   f"GripperWidth: {min_gripper_width:.4f}m | "
                   f"Reward: {current_episode_reward:.2f}")
             
-            # Stop debug output after first episode
             if first_episode_debug:
                 first_episode_debug = False
                 print("  [First episode debug complete]")
             
-            # Reset tracking for next episode
+            # Reset tracking
             current_episode_reward = 0.0
             min_gripper_cube_dist = float("inf")
             final_gripper_cube_dist = float("inf")
@@ -458,6 +575,12 @@ def train_ppo(
     
     # Create policy and optimizer
     policy = TinyMLP(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=64)
+    
+    # Move policy to GPU for Isaac Lab (batched GPU inference)
+    if isaac_lab and torch.cuda.is_available():
+        policy = policy.cuda()
+        print("Policy moved to GPU for Isaac Lab")
+    
     optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
     
     print(f"Policy: TinyMLP({obs_dim} -> 64 -> 64 -> {act_dim})")
@@ -492,7 +615,7 @@ def train_ppo(
         
         # Collect rollout
         last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists = collect_rollout(
-            env, policy, buffer, n_steps=rollout_steps
+            env, policy, buffer, n_steps=rollout_steps, is_isaac_lab=isaac_lab, num_envs=n_envs
         )
         
         # Update policy
