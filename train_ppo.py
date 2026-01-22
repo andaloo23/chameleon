@@ -787,7 +787,7 @@ def train_ppo(
     return policy
 
 
-def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
+def plot_training_metrics(metrics: Dict, smoothing_window: int = 50):
     """Plot training metrics vs episode number with moving average smoothing."""
     try:
         import matplotlib
