@@ -339,6 +339,11 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         # Combine done flags
         dones = terminated | truncated
         
+        # DEBUG: Print done status periodically
+        if steps_collected % 1000 == 0:
+            print(f"  [DEBUG] steps={steps_collected}, dones={dones.sum().item()}/{num_envs}, "
+                  f"terminated={terminated.sum().item()}, truncated={truncated.sum().item()}")
+        
         # Update per-env tracking
         current_episode_rewards += rewards
         
