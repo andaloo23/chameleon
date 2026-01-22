@@ -127,17 +127,6 @@ class PickPlaceEnv(DirectRLEnv):
         # Spawn at template path - will be cloned with other env assets
         cup_cfg.func("/World/envs/env_0/Cup", cup_cfg, translation=(0.0, -0.2, self.cfg.cup_height / 2))
         
-        # Create cup RigidObject wrapper to enable position control
-        from isaaclab.assets import RigidObjectCfg
-        cup_obj_cfg = RigidObjectCfg(
-            prim_path="/World/envs/env_.*/Cup",
-            spawn=None,  # Already spawned above
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(0.0, -0.2, self.cfg.cup_height / 2),
-            ),
-        )
-        self.cup = RigidObject(cup_obj_cfg)
-        
         # Clone environments AFTER all assets are added to env_0
         self.scene.clone_environments(copy_from_source=False)
         
@@ -148,7 +137,13 @@ class PickPlaceEnv(DirectRLEnv):
         # Add assets to scene
         self.scene.articulations["robot"] = self.robot
         self.scene.rigid_objects["cube"] = self.cube
-        self.scene.rigid_objects["cup"] = self.cup
+        
+        # Create XformPrimView for cup to enable position control of kinematic prims
+        from omni.isaac.core.prims import XformPrimView
+        self._cup_view = XformPrimView(
+            prim_paths_expr="/World/envs/env_.*/Cup",
+            name="cup_view",
+        )
         
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -329,9 +324,9 @@ class PickPlaceEnv(DirectRLEnv):
         # Update internal cup position tracking
         self._cup_pos[env_ids] = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
         
-        # Actually move the cup prim
-        cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
-        self.cup.write_root_pose_to_sim(torch.cat([cup_pos_world, cup_quat], dim=1), env_ids)
+        # Move cup prims using XformPrimView (for kinematic objects)
+        cup_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).expand(num_reset, 4)
+        self._cup_view.set_world_poses(cup_pos_world, cup_quat, indices=env_ids)
         
         # DEBUG: Print positions
         if num_reset <= 4:  # Only print for small resets
