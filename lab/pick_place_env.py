@@ -308,6 +308,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Move cup using RigidObject API
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
         self.cup.write_root_pose_to_sim(torch.cat([cup_pos_world, cup_quat], dim=1), env_ids)
+        self.cup.write_root_velocity_to_sim(torch.zeros(num_reset, 6, device=self.device), env_ids)
         
         # DEBUG: Print positions
         if num_reset <= 4:  # Only print for small resets

@@ -146,15 +146,16 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cup_mass = 0.20  # 200g
     cup_color = (0.8, 0.3, 0.2)
     
-    # Cup RigidObject config - kinematic (static) object
+    # Cup RigidObject config - heavy dynamic object (acts static but can be repositioned)
     cup_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Cup",
         spawn=sim_utils.CylinderCfg(
             radius=0.057,  # cup_outer_radius_top
             height=0.075,  # cup_height
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                kinematic_enabled=True,  # Cup doesn't move from physics
+                max_depenetration_velocity=1.0,
             ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=10.0),  # Heavy so it doesn't move from cube
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(
                 diffuse_color=(0.8, 0.3, 0.2),
