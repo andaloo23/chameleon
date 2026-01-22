@@ -20,6 +20,31 @@ import torch.optim as optim
 from torch.distributions import Normal
 
 
+def _extract_obs(obs):
+    """Extract observation tensor from either dict (Isaac Lab) or array (legacy) format.
+    
+    Isaac Lab returns: {"policy": tensor} where tensor is [batch, obs_dim] on GPU
+    Legacy returns: numpy array of shape [obs_dim]
+    
+    Returns: 1D numpy array suitable for training
+    """
+    if isinstance(obs, dict):
+        # Isaac Lab format - extract policy tensor
+        policy_obs = obs.get("policy", obs.get("obs", None))
+        if policy_obs is None:
+            raise ValueError(f"Unknown observation dict keys: {obs.keys()}")
+        # Handle batched tensor (take first env for single-env training)
+        if hasattr(policy_obs, "cpu"):
+            # It's a tensor - move to CPU and convert
+            if policy_obs.dim() > 1:
+                policy_obs = policy_obs[0]  # Take first environment
+            return policy_obs.cpu().numpy()
+        return np.array(policy_obs)
+    else:
+        # Legacy numpy array format
+        return np.asarray(obs)
+
+
 class TinyMLP(nn.Module):
     """
     Tiny MLP policy for PPO.
@@ -256,7 +281,8 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     action_magnitudes = []
     
     for _ in range(n_steps):
-        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+        obs_array = _extract_obs(obs)
+        obs_tensor = torch.tensor(obs_array, dtype=torch.float32).unsqueeze(0)
         
         with torch.no_grad():
             action, value = policy.get_action(obs_tensor)
@@ -272,12 +298,30 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         # Track action magnitude (after clipping in env.step)
         action_magnitudes.append(np.abs(action).mean())
         
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        # Handle action format: Isaac Lab expects batched tensor, legacy expects numpy
+        if isinstance(obs, dict):
+            # Isaac Lab - convert action to batched tensor
+            action_input = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
+            if hasattr(action_input, "cuda"):
+                action_input = action_input.cuda()
+        else:
+            action_input = action
+        
+        next_obs, reward, terminated, truncated, info = env.step(action_input)
+        
+        # Extract scalars from potential tensors (Isaac Lab returns tensors)
+        if hasattr(reward, "item"):
+            reward = reward[0].item() if reward.dim() > 0 else reward.item()
+        if hasattr(terminated, "item"):
+            terminated = terminated[0].item() if terminated.dim() > 0 else terminated.item()
+        if hasattr(truncated, "item"):
+            truncated = truncated[0].item() if truncated.dim() > 0 else truncated.item()
+        
         done = terminated or truncated
         
-        # Track per-step statistics from info
-        task_state = info.get("task_state", {})
-        reward_components = info.get("reward_components", {})
+        # Track per-step statistics from info (may be empty for Isaac Lab)
+        task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
+        reward_components = info.get("reward_components", {}) if isinstance(info, dict) else {}
         gripper_cube_dist = task_state.get("gripper_cube_distance")
         gripper_width = task_state.get("gripper_width")  # Physical distance between jaws
         
@@ -300,7 +344,7 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
         if gripper_width is not None:
             min_gripper_width = min(min_gripper_width, gripper_width)
         
-        buffer.add(obs, action, reward, value, done, log_prob)
+        buffer.add(obs_array, action, reward, value, done, log_prob)
         current_episode_reward += reward
         step_count += 1
         
@@ -338,7 +382,8 @@ def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 
     
     # Get last value for GAE computation
     with torch.no_grad():
-        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+        obs_array = _extract_obs(obs)
+        obs_tensor = torch.tensor(obs_array, dtype=torch.float32).unsqueeze(0)
         _, last_value = policy.get_action(obs_tensor)
         last_value = last_value.item()
     
