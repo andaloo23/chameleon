@@ -371,8 +371,8 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
             # Update min distances per env
             min_gripper_cube_dists = torch.minimum(min_gripper_cube_dists, dist_tensor)
             final_gripper_cube_dists = dist_tensor.clone()
-            # Consider "reached" if distance < 0.05m for each env
-            ever_reached = ever_reached | (dist_tensor < 0.05)
+            # Consider "reached" if distance < 0.10m for each env (gripper center to cube center)
+            ever_reached = ever_reached | (dist_tensor < 0.10)
         
         # Check grasp/droppable/in_cup per env (tensors)
         if "is_grasped" in task_state:
