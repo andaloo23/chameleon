@@ -362,27 +362,25 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         # Update per-env tracking
         current_episode_rewards += rewards
         
-        # Get task_state from info (has per-step milestone info)
+        # Get task_state from info (has per-step milestone info as per-env tensors)
         task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
         
-        # Update milestone tracking
-        # "reached" = gripper got close to cube (distance < threshold)
+        # Update per-env milestone tracking using tensor operations
         if "gripper_cube_distance" in task_state:
-            dist_val = task_state["gripper_cube_distance"]
-            # Update min distance for env 0 (scalar in current implementation)
-            min_gripper_cube_dists[0] = min(min_gripper_cube_dists[0].item(), dist_val)
-            final_gripper_cube_dists[0] = dist_val
-            # Consider "reached" if distance < 0.05m
-            if dist_val < 0.05:
-                ever_reached[0] = True
+            dist_tensor = task_state["gripper_cube_distance"]  # [num_envs] tensor
+            # Update min distances per env
+            min_gripper_cube_dists = torch.minimum(min_gripper_cube_dists, dist_tensor)
+            final_gripper_cube_dists = dist_tensor.clone()
+            # Consider "reached" if distance < 0.05m for each env
+            ever_reached = ever_reached | (dist_tensor < 0.05)
         
-        # Check grasp/droppable/in_cup from task_state
-        if task_state.get("is_grasped", False):
-            ever_grasped[0] = True
-        if task_state.get("is_droppable", False):
-            ever_droppable[0] = True
-        if task_state.get("is_in_cup", False):
-            ever_in_cup[0] = True
+        # Check grasp/droppable/in_cup per env (tensors)
+        if "is_grasped" in task_state:
+            ever_grasped = ever_grasped | task_state["is_grasped"]
+        if "is_droppable" in task_state:
+            ever_droppable = ever_droppable | task_state["is_droppable"]
+        if "is_in_cup" in task_state:
+            ever_in_cup = ever_in_cup | task_state["is_in_cup"]
         
         # Store in batch (vectorized)
         batch_obs.append(obs_tensor.cpu().numpy())
