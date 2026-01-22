@@ -685,19 +685,22 @@ def train_ppo(
     total_episodes = 0
     iteration = 0
     
-    # Metrics tracking for plotting
+    # Metrics tracking for plotting - now per-episode for smoother curves
     metrics_history = {
-        "iteration": [],
-        "episode": [],
+        # Per-episode data (logged for each episode)
+        "episode_num": [],      # Episode index
+        "reward": [],           # Episode reward
+        "min_dist": [],         # Min gripper-cube distance
+        "reached": [],          # Boolean: did gripper reach cube
+        "grasped": [],          # Boolean: did gripper grasp cube  
+        "lifted": [],           # Boolean: was cube lifted (droppable)
+        "success": [],          # Boolean: was cube placed in cup
+        
+        # Per-iteration PPO metrics (for training diagnostics)
+        "iter_episode": [],     # Episode count at iteration
         "entropy": [],
         "approx_kl": [],
-        "clip_fraction": [],
-        "explained_variance": [],
         "value_loss": [],
-        "mean_action_mag": [],
-        "avg_reward": [],
-        "min_dist": [],
-        "final_dist": [],
     }
     
     # State for batched rollout persistence (Isaac Lab only)
@@ -720,21 +723,23 @@ def train_ppo(
         all_flags.extend(episode_flags)
         total_episodes += len(episode_rewards)
         avg_reward = np.mean(all_rewards) if all_rewards else 0.0
-        avg_min_dist = np.mean(ep_min_dists) if ep_min_dists else 0.0
-        avg_final_dist = np.mean(ep_final_dists) if ep_final_dists else 0.0
         
-        # Store metrics for plotting
-        metrics_history["iteration"].append(iteration)
-        metrics_history["episode"].append(total_episodes)
+        # Store per-episode metrics for plotting
+        for i, (reward, min_d, flags) in enumerate(zip(episode_rewards, ep_min_dists, episode_flags)):
+            ep_idx = total_episodes - len(episode_rewards) + i + 1
+            metrics_history["episode_num"].append(ep_idx)
+            metrics_history["reward"].append(reward)
+            metrics_history["min_dist"].append(min_d if min_d != float("inf") else 0.0)
+            metrics_history["reached"].append(flags.get("reached", False))
+            metrics_history["grasped"].append(flags.get("controlled", False))
+            metrics_history["lifted"].append(flags.get("lifted", False))
+            metrics_history["success"].append(flags.get("success", False))
+        
+        # Store per-iteration PPO metrics
+        metrics_history["iter_episode"].append(total_episodes)
         metrics_history["entropy"].append(metrics["entropy"])
         metrics_history["approx_kl"].append(metrics["approx_kl"])
-        metrics_history["clip_fraction"].append(metrics["clip_fraction"])
-        metrics_history["explained_variance"].append(metrics["explained_variance"])
         metrics_history["value_loss"].append(metrics["value_loss"])
-        metrics_history["mean_action_mag"].append(mean_action_mag)
-        metrics_history["avg_reward"].append(avg_reward)
-        metrics_history["min_dist"].append(avg_min_dist)
-        metrics_history["final_dist"].append(avg_final_dist)
         
         # Log progress
         if iteration % log_interval == 0 or total_episodes >= num_episodes:
@@ -782,73 +787,87 @@ def train_ppo(
     return policy
 
 
-def plot_training_metrics(metrics: Dict):
-    """Plot training metrics vs episode number and save to file."""
+def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
+    """Plot training metrics vs episode number with moving average smoothing."""
     try:
         import matplotlib
         matplotlib.use('Agg')  # Non-interactive backend for headless
         import matplotlib.pyplot as plt
         
-        episodes = metrics["episode"]
+        def moving_avg(data, window):
+            """Compute moving average with given window size."""
+            if len(data) < window:
+                window = max(1, len(data))
+            cumsum = np.cumsum(np.insert(data, 0, 0))
+            return (cumsum[window:] - cumsum[:-window]) / window
         
-        fig, axes = plt.subplots(4, 2, figsize=(12, 13))
-        fig.suptitle("PPO Training Metrics", fontsize=14)
+        def moving_avg_bool(data, window):
+            """Compute moving average of boolean array (gives percentage)."""
+            return moving_avg(np.array(data, dtype=float) * 100, window)
         
-        # Entropy
-        axes[0, 0].plot(episodes, metrics["entropy"], 'b-')
+        episodes = np.array(metrics["episode_num"])
+        if len(episodes) < 2:
+            print("[WARN] Not enough episodes for plotting")
+            return
+        
+        w = min(smoothing_window, len(episodes) // 2)  # Adaptive window
+        ep_smoothed = episodes[w-1:]  # Align with smoothed data
+        
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        fig.suptitle(f"PPO Training Metrics (smoothing window={w})", fontsize=14)
+        
+        # Plot 1: Episode Reward (smoothed)
+        reward_smoothed = moving_avg(np.array(metrics["reward"]), w)
+        axes[0, 0].plot(ep_smoothed, reward_smoothed, 'b-', linewidth=2)
+        axes[0, 0].fill_between(ep_smoothed, reward_smoothed * 0.9, reward_smoothed * 1.1, alpha=0.2)
         axes[0, 0].set_xlabel("Episode")
-        axes[0, 0].set_ylabel("Entropy")
-        axes[0, 0].set_title("Policy Entropy")
+        axes[0, 0].set_ylabel("Reward")
+        axes[0, 0].set_title("Episode Reward (Smoothed)")
         axes[0, 0].grid(True, alpha=0.3)
         
-        # Approx KL
-        axes[0, 1].plot(episodes, metrics["approx_kl"], 'r-')
+        # Plot 2: Min Distance (smoothed)
+        min_dist_smoothed = moving_avg(np.array(metrics["min_dist"]), w)
+        axes[0, 1].plot(ep_smoothed, min_dist_smoothed, 'purple', linewidth=2)
         axes[0, 1].set_xlabel("Episode")
-        axes[0, 1].set_ylabel("Approx KL")
-        axes[0, 1].set_title("Approximate KL Divergence")
+        axes[0, 1].set_ylabel("Min Distance (m)")
+        axes[0, 1].set_title("Min Gripper-Cube Distance (Smoothed)")
         axes[0, 1].grid(True, alpha=0.3)
         
-        # Clip Fraction
-        axes[1, 0].plot(episodes, metrics["clip_fraction"], 'g-')
+        # Plot 3: % Reached (smoothed success rate)
+        reached_smoothed = moving_avg_bool(metrics["reached"], w)
+        axes[1, 0].plot(ep_smoothed, reached_smoothed, 'g-', linewidth=2)
         axes[1, 0].set_xlabel("Episode")
-        axes[1, 0].set_ylabel("Clip Fraction")
-        axes[1, 0].set_title("Fraction of Clipped Updates")
+        axes[1, 0].set_ylabel("% Reached")
+        axes[1, 0].set_title("Success Rate: Reached Cube")
+        axes[1, 0].set_ylim(0, 105)
         axes[1, 0].grid(True, alpha=0.3)
         
-        # Explained Variance
-        axes[1, 1].plot(episodes, metrics["explained_variance"], 'm-')
+        # Plot 4: % Grasped (smoothed success rate)
+        grasped_smoothed = moving_avg_bool(metrics["grasped"], w)
+        axes[1, 1].plot(ep_smoothed, grasped_smoothed, 'orange', linewidth=2)
         axes[1, 1].set_xlabel("Episode")
-        axes[1, 1].set_ylabel("Explained Variance")
-        axes[1, 1].set_title("Value Function Explained Variance")
+        axes[1, 1].set_ylabel("% Grasped")
+        axes[1, 1].set_title("Success Rate: Grasped Cube")
+        axes[1, 1].set_ylim(0, 105)
         axes[1, 1].grid(True, alpha=0.3)
         
-        # Mean Action Magnitude
-        axes[2, 0].plot(episodes, metrics["mean_action_mag"], 'c-')
+        # Plot 5: % Lifted (smoothed success rate)
+        lifted_smoothed = moving_avg_bool(metrics["lifted"], w)
+        axes[2, 0].plot(ep_smoothed, lifted_smoothed, 'c-', linewidth=2)
         axes[2, 0].set_xlabel("Episode")
-        axes[2, 0].set_ylabel("Mean |Action|")
-        axes[2, 0].set_title("Mean Action Magnitude (after scaling)")
+        axes[2, 0].set_ylabel("% Lifted")
+        axes[2, 0].set_title("Success Rate: Lifted Cube")
+        axes[2, 0].set_ylim(0, 105)
         axes[2, 0].grid(True, alpha=0.3)
         
-        # Average Reward
-        axes[2, 1].plot(episodes, metrics["avg_reward"], 'orange')
+        # Plot 6: % Success (smoothed success rate)
+        success_smoothed = moving_avg_bool(metrics["success"], w)
+        axes[2, 1].plot(ep_smoothed, success_smoothed, 'r-', linewidth=2)
         axes[2, 1].set_xlabel("Episode")
-        axes[2, 1].set_ylabel("Avg Reward")
-        axes[2, 1].set_title("Average Episode Reward")
+        axes[2, 1].set_ylabel("% Success")
+        axes[2, 1].set_title("Success Rate: Placed in Cup")
+        axes[2, 1].set_ylim(0, 105)
         axes[2, 1].grid(True, alpha=0.3)
-        
-        # Min Distance (gripper to cube)
-        axes[3, 0].plot(episodes, metrics["min_dist"], 'purple')
-        axes[3, 0].set_xlabel("Episode")
-        axes[3, 0].set_ylabel("Min Distance (m)")
-        axes[3, 0].set_title("Min Gripper-Cube Distance")
-        axes[3, 0].grid(True, alpha=0.3)
-        
-        # Final Distance (gripper to cube)
-        axes[3, 1].plot(episodes, metrics["final_dist"], 'brown')
-        axes[3, 1].set_xlabel("Episode")
-        axes[3, 1].set_ylabel("Final Distance (m)")
-        axes[3, 1].set_title("Final Gripper-Cube Distance")
-        axes[3, 1].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.savefig("ppo_training_metrics.png", dpi=150)
