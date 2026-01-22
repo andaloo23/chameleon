@@ -88,21 +88,29 @@ def main():
         carb.input.KeyboardInput.V: (3, -1),
         carb.input.KeyboardInput.T: (4, 1),   # wrist_roll
         carb.input.KeyboardInput.G: (4, -1),
-        carb.input.KeyboardInput.Y: (5, 1),   # gripper open
-        carb.input.KeyboardInput.U: (5, -1),  # gripper close
     }
+    
+    # Gripper limits
+    GRIPPER_OPEN = 1.5
+    GRIPPER_CLOSE = -0.5
     
     def on_keyboard_event(event):
         nonlocal joint_targets
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if event.input == carb.input.KeyboardInput.ESCAPE:
                 input_state["is_running"] = False
+            elif event.input == carb.input.KeyboardInput.Y:
+                # Gripper fully open
+                joint_targets[5] = GRIPPER_OPEN
+                print(f"[GRIPPER] Opening -> target={GRIPPER_OPEN}")
+            elif event.input == carb.input.KeyboardInput.U:
+                # Gripper fully close
+                joint_targets[5] = GRIPPER_CLOSE
+                print(f"[GRIPPER] Closing -> target={GRIPPER_CLOSE}")
             elif event.input in mapping:
                 idx, direction = mapping[event.input]
-                step = GRIPPER_STEP if idx == 5 else STEP_SIZE
+                step = STEP_SIZE
                 joint_targets[idx] += direction * step
-                if idx == 5:  # Gripper
-                    print(f"[GRIPPER] target={joint_targets[5].item():.3f}")
         return True
     
     # Register keyboard listener

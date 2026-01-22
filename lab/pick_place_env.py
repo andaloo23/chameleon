@@ -270,14 +270,8 @@ class PickPlaceEnv(DirectRLEnv):
             lower, upper = self.cfg.joint_limits[name]
             self._joint_targets[:, i] = torch.clamp(self._joint_targets[:, i], lower, upper)
         
-        # Force gripper open before grasp is detected (matching original behavior)
-        grasp_detected = self.grasp_detector.is_grasped
-        gripper_upper = self.cfg.joint_limits["gripper"][1]
-        self._joint_targets[:, 5] = torch.where(
-            grasp_detected,
-            self._joint_targets[:, 5],
-            torch.full_like(self._joint_targets[:, 5], gripper_upper)
-        )
+        # Note: Removed gripper override logic that forced gripper open before grasp.
+        # This allows direct gripper control for testing and training.
 
     def _apply_action(self) -> None:
         """Apply joint position targets to robot."""
