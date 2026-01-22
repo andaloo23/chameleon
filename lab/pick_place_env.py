@@ -249,6 +249,19 @@ class PickPlaceEnv(DirectRLEnv):
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
         self._stage_grasped = new_stage_grasped
         
+        # Add debug metrics to extras (for training script monitoring)
+        # Note: Using mean across envs for single scalar display
+        gripper_cube_dist = torch.norm(gripper_pos - cube_pos, dim=-1)
+        gripper_value = self.joint_pos[:, self._gripper_joint_idx]
+        
+        self.extras["task_state"] = {
+            "gripper_cube_distance": gripper_cube_dist[0].item(),  # First env for display
+            "gripper_width": gripper_value[0].item(),  # Gripper joint value
+            "is_grasped": self.grasp_detector.is_grasped[0].item(),
+            "is_droppable": self.grasp_detector.is_droppable[0].item(),
+            "is_in_cup": self.grasp_detector.is_in_cup[0].item(),
+        }
+        
         return total_reward
 
     def _get_dones(self) -> tuple[Tensor, Tensor]:
