@@ -266,37 +266,52 @@ def ppo_update(
 
 
 def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048, 
-                    is_isaac_lab: bool = False, num_envs: int = 1):
+                    is_isaac_lab: bool = False, num_envs: int = 1, state: dict = None):
     """Collect rollout data from environment(s).
     
     When is_isaac_lab=True, uses batched processing for all num_envs environments.
     Otherwise, uses single-env processing for legacy compatibility.
     
-    Returns (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists).
+    Args:
+        state: Optional state dict with 'obs_dict' and tracking tensors. If None, will reset env.
+    
+    Returns: 
+        (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists, next_state)
     """
     if is_isaac_lab and num_envs > 1:
-        return _collect_rollout_batched(env, policy, buffer, n_steps, num_envs)
+        return _collect_rollout_batched(env, policy, buffer, n_steps, num_envs, state)
     else:
-        return _collect_rollout_single(env, policy, buffer, n_steps)
+        result = _collect_rollout_single(env, policy, buffer, n_steps)
+        return result + (None,)  # Add None for state return
 
 
-def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int, num_envs: int):
+def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int, num_envs: int, state: dict = None):
     """Batched rollout collection for Isaac Lab with multiple parallel environments."""
-    obs_dict, info = env.reset()
     
     # Get device from policy
     device = next(policy.parameters()).device
     
-    # Track per-env episode stats
-    current_episode_rewards = torch.zeros(num_envs, device=device)
-    min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
-    final_gripper_cube_dists = torch.zeros(num_envs, device=device)
-    
-    # Per-env milestone tracking (did this env ever reach these milestones in current episode)
-    ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    ever_in_cup = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    # Initialize or restore state
+    if state is None:
+        # First call - reset environment
+        obs_dict, info = env.reset()
+        current_episode_rewards = torch.zeros(num_envs, device=device)
+        min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
+        final_gripper_cube_dists = torch.zeros(num_envs, device=device)
+        ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        ever_in_cup = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    else:
+        # Restore from previous rollout
+        obs_dict = state['obs_dict']
+        current_episode_rewards = state['current_episode_rewards']
+        min_gripper_cube_dists = state['min_gripper_cube_dists']
+        final_gripper_cube_dists = state['final_gripper_cube_dists']
+        ever_reached = state['ever_reached']
+        ever_grasped = state['ever_grasped']
+        ever_droppable = state['ever_droppable']
+        ever_in_cup = state['ever_in_cup']
     
     # Completed episodes across all envs
     all_episode_rewards = []
@@ -436,8 +451,20 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         _, last_values = policy.forward(obs_tensor)
         last_value = last_values[0].item()  # Use first env's value
     
+    # Build state dict for next rollout
+    next_state = {
+        'obs_dict': obs_dict,
+        'current_episode_rewards': current_episode_rewards,
+        'min_gripper_cube_dists': min_gripper_cube_dists,
+        'final_gripper_cube_dists': final_gripper_cube_dists,
+        'ever_reached': ever_reached,
+        'ever_grasped': ever_grasped,
+        'ever_droppable': ever_droppable,
+        'ever_in_cup': ever_in_cup,
+    }
+    
     mean_action_mag = np.mean(action_magnitudes) if action_magnitudes else 0.0
-    return last_value, all_episode_rewards, all_episode_flags, mean_action_mag, all_episode_min_dists, all_episode_final_dists
+    return last_value, all_episode_rewards, all_episode_flags, mean_action_mag, all_episode_min_dists, all_episode_final_dists, next_state
 
 
 def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int):
@@ -675,13 +702,16 @@ def train_ppo(
         "final_dist": [],
     }
     
+    # State for batched rollout persistence (Isaac Lab only)
+    rollout_state = None
+    
     while total_episodes < num_episodes:
         iteration += 1
         buffer.clear()
         
-        # Collect rollout
-        last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists = collect_rollout(
-            env, policy, buffer, n_steps=rollout_steps, is_isaac_lab=isaac_lab, num_envs=n_envs
+        # Collect rollout (pass state to persist observation across rollouts)
+        last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists, rollout_state = collect_rollout(
+            env, policy, buffer, n_steps=rollout_steps, is_isaac_lab=isaac_lab, num_envs=n_envs, state=rollout_state
         )
         
         # Update policy
