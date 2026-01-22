@@ -292,12 +292,26 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
     min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
     final_gripper_cube_dists = torch.zeros(num_envs, device=device)
     
+    # Per-env milestone tracking (did this env ever reach these milestones in current episode)
+    ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    ever_in_cup = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    
     # Completed episodes across all envs
     all_episode_rewards = []
     all_episode_min_dists = []
     all_episode_final_dists = []
     all_episode_flags = []
     action_magnitudes = []
+    
+    # Batch storage for buffer (collect all experiences, add at end)
+    batch_obs = []
+    batch_actions = []
+    batch_rewards = []
+    batch_values = []
+    batch_dones = []
+    batch_log_probs = []
     
     steps_collected = 0
     
@@ -328,50 +342,86 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         # Update per-env tracking
         current_episode_rewards += rewards
         
-        # Track gripper-cube distance from info
+        # Get task_state from info (has per-step milestone info)
         task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
+        
+        # Update milestone tracking
+        # "reached" = gripper got close to cube (distance < threshold)
         if "gripper_cube_distance" in task_state:
             dist_val = task_state["gripper_cube_distance"]
-            # This is scalar from first env in current implementation
+            # Update min distance for env 0 (scalar in current implementation)
             min_gripper_cube_dists[0] = min(min_gripper_cube_dists[0].item(), dist_val)
             final_gripper_cube_dists[0] = dist_val
+            # Consider "reached" if distance < 0.05m
+            if dist_val < 0.05:
+                ever_reached[0] = True
         
-        # Add to buffer - need to add each env's experience
-        for env_idx in range(num_envs):
-            buffer.add(
-                obs_tensor[env_idx].cpu().numpy(),
-                actions[env_idx].cpu().numpy(),
-                rewards[env_idx].item(),
-                values[env_idx].item(),
-                dones[env_idx].item(),
-                log_probs[env_idx].item()
-            )
-            steps_collected += 1
-            
-            if steps_collected >= n_steps:
-                break
+        # Check grasp/droppable/in_cup from task_state
+        if task_state.get("is_grasped", False):
+            ever_grasped[0] = True
+        if task_state.get("is_droppable", False):
+            ever_droppable[0] = True
+        if task_state.get("is_in_cup", False):
+            ever_in_cup[0] = True
+        
+        # Store in batch (vectorized)
+        batch_obs.append(obs_tensor.cpu().numpy())
+        batch_actions.append(actions.cpu().numpy())
+        batch_rewards.append(rewards.cpu().numpy())
+        batch_values.append(values.cpu().numpy())
+        batch_dones.append(dones.cpu().numpy())
+        batch_log_probs.append(log_probs.cpu().numpy())
+        
+        steps_collected += num_envs
         
         # Handle episode completions
         done_envs = dones.nonzero(as_tuple=False).squeeze(-1)
-        for env_idx in done_envs.tolist():
-            if isinstance(env_idx, int):
-                all_episode_rewards.append(current_episode_rewards[env_idx].item())
-                all_episode_min_dists.append(min_gripper_cube_dists[env_idx].item())
-                all_episode_final_dists.append(final_gripper_cube_dists[env_idx].item())
-                all_episode_flags.append({})
-                
-                # Print episode summary
-                ep_num = len(all_episode_rewards)
-                print(f"  [Ep {ep_num}] "
-                      f"MinDist: {min_gripper_cube_dists[env_idx]:.3f}m | "
-                      f"Reward: {current_episode_rewards[env_idx]:.2f}")
-                
-                # Reset this env's tracking
-                current_episode_rewards[env_idx] = 0.0
-                min_gripper_cube_dists[env_idx] = float("inf")
-                final_gripper_cube_dists[env_idx] = 0.0
+        if done_envs.numel() > 0:
+            for env_idx in done_envs.tolist():
+                if isinstance(env_idx, int):
+                    # Record episode stats
+                    all_episode_rewards.append(current_episode_rewards[env_idx].item())
+                    all_episode_min_dists.append(min_gripper_cube_dists[env_idx].item())
+                    all_episode_final_dists.append(final_gripper_cube_dists[env_idx].item())
+                    
+                    # Record milestone flags for this episode
+                    flags = {
+                        "reached": ever_reached[env_idx].item(),
+                        "controlled": ever_grasped[env_idx].item(),
+                        "lifted": ever_droppable[env_idx].item(),
+                        "success": ever_in_cup[env_idx].item(),
+                    }
+                    all_episode_flags.append(flags)
+                    
+                    # Print episode summary
+                    ep_num = len(all_episode_rewards)
+                    print(f"  [Ep {ep_num}] "
+                          f"MinDist: {min_gripper_cube_dists[env_idx]:.3f}m | "
+                          f"Reward: {current_episode_rewards[env_idx]:.2f} | "
+                          f"R:{int(flags['reached'])} G:{int(flags['controlled'])} L:{int(flags['lifted'])} S:{int(flags['success'])}")
+                    
+                    # Reset this env's tracking
+                    current_episode_rewards[env_idx] = 0.0
+                    min_gripper_cube_dists[env_idx] = float("inf")
+                    final_gripper_cube_dists[env_idx] = 0.0
+                    ever_reached[env_idx] = False
+                    ever_grasped[env_idx] = False
+                    ever_droppable[env_idx] = False
+                    ever_in_cup[env_idx] = False
         
         obs_dict = next_obs_dict
+    
+    # Add all experiences to buffer at once
+    for step_idx in range(len(batch_obs)):
+        for env_idx in range(num_envs):
+            buffer.add(
+                batch_obs[step_idx][env_idx],
+                batch_actions[step_idx][env_idx],
+                batch_rewards[step_idx][env_idx],
+                batch_values[step_idx][env_idx],
+                batch_dones[step_idx][env_idx],
+                batch_log_probs[step_idx][env_idx]
+            )
     
     # Get last value for GAE
     with torch.no_grad():
