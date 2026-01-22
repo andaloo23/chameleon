@@ -130,6 +130,9 @@ def main():
             # Step environment
             obs_dict, reward, terminated, truncated, info = env.step(delta_action)
             
+            # Update simulation app to process events and render
+            simulation_app.update()
+            
             # Get detector states from task_state
             task_state = info.get("task_state", {})
             
