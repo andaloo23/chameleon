@@ -143,7 +143,7 @@ class PickPlaceEnv(DirectRLEnv):
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
-        import omni.isaac.lab.sim as sim_utils_internal
+        import isaaclab.sim as sim_utils_internal
         from pxr import Gf, UsdGeom, UsdPhysics, Usd
         
         stage = sim_utils_internal.stage_utils.get_current_stage()
