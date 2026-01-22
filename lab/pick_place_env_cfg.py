@@ -148,11 +148,11 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cup_color = (0.8, 0.3, 0.2)
 
     # ===== Workspace Bounds =====
-    # Sampling range for cube and cup positions
-    workspace_radius_range = (0.12, 0.22)  # 120mm to 220mm from robot base
-    workspace_angle_range = (-80.0, 80.0)  # ±80° from -Y axis
+    # Sampling range for cube and cup positions (matches workspace.py)
+    workspace_radius_range = (0.20, 0.45)  # 200mm to 450mm from robot base
+    workspace_angle_range = (-80.0, 80.0)  # ±80° from -Y axis (cube)
     workspace_angle_range_cup = (-65.0, 65.0)  # ±65° for cup (more reachable)
-    cup_cube_min_distance = 0.08  # Minimum separation between cube and cup
+    cup_cube_min_distance = 0.10  # Minimum separation between cube and cup
 
     # ===== Action Scaling =====
     action_scale = 0.05  # Delta joint position scale (radians)
