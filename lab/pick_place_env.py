@@ -108,11 +108,11 @@ class PickPlaceEnv(DirectRLEnv):
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
         
-        # Create cup rigid object (kinematic - will be positioned during reset)
-        self.cup = RigidObject(self.cfg.cup_cfg)
-        
         # Add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
+        
+        # Create hollow cup at env_0 (will be cloned)
+        self._create_cup_prim("/World/envs/env_0/Cup", (0.0, -0.3, 0.0))
         
         # Clone environments AFTER all assets are added to env_0
         self.scene.clone_environments(copy_from_source=False)
@@ -120,6 +120,17 @@ class PickPlaceEnv(DirectRLEnv):
         # Filter collisions for CPU simulation
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
+        
+        # Create RigidObject wrapper for cup after cloning
+        from isaaclab.assets import RigidObjectCfg
+        cup_wrapper_cfg = RigidObjectCfg(
+            prim_path="/World/envs/env_.*/Cup",
+            spawn=None,  # Already spawned
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=(0.0, -0.3, 0.0),
+            ),
+        )
+        self.cup = RigidObject(cup_wrapper_cfg)
         
         # Add assets to scene
         self.scene.articulations["robot"] = self.robot
@@ -129,6 +140,120 @@ class PickPlaceEnv(DirectRLEnv):
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+    
+    def _create_cup_prim(self, prim_path: str, position: tuple):
+        """Create a hollow cup mesh at the given prim path."""
+        import omni.isaac.lab.sim as sim_utils_internal
+        from pxr import Gf, UsdGeom, UsdPhysics, Usd
+        
+        stage = sim_utils_internal.stage_utils.get_current_stage()
+        
+        # Cup dimensions from config
+        outer_r_top = self.cfg.cup_outer_radius_top
+        outer_r_bot = self.cfg.cup_outer_radius_bottom
+        inner_r_top = self.cfg.cup_inner_radius_top
+        inner_r_bot = self.cfg.cup_inner_radius_bottom
+        height = self.cfg.cup_height
+        bottom_thick = self.cfg.cup_bottom_thickness
+        color = self.cfg.cup_color
+        
+        # Build cup mesh
+        points, face_counts, face_indices = self._build_cup_mesh(
+            outer_r_top, outer_r_bot, height, inner_r_top, inner_r_bot, bottom_thick
+        )
+        
+        # Create xform for cup
+        xform = UsdGeom.Xform.Define(stage, prim_path)
+        UsdGeom.XformCommonAPI(xform).SetTranslate(
+            Gf.Vec3d(float(position[0]), float(position[1]), float(position[2]))
+        )
+        
+        # Create mesh
+        mesh_path = f"{prim_path}/CupMesh"
+        mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+        mesh.CreatePointsAttr(points)
+        mesh.CreateFaceVertexCountsAttr(face_counts)
+        mesh.CreateFaceVertexIndicesAttr(face_indices)
+        mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(*color)])
+        
+        # Apply physics
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
+        
+        xform_prim = xform.GetPrim()
+        rigid_api = UsdPhysics.RigidBodyAPI.Apply(xform_prim)
+        rigid_api.CreateRigidBodyEnabledAttr(True)
+        
+        mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
+        mass_api.CreateMassAttr().Set(10.0)  # Heavy so it doesn't move
+    
+    def _build_cup_mesh(self, outer_r_top, outer_r_bot, height, inner_r_top, inner_r_bot, bottom_thick, segments=32):
+        """Build hollow cup mesh geometry."""
+        from pxr import Gf
+        import numpy as np
+        
+        bottom_thick = min(bottom_thick, height * 0.4)
+        points = []
+        face_counts = []
+        face_indices = []
+        
+        def angle(i):
+            return (2.0 * np.pi * i) / segments
+        
+        # Outer bottom ring
+        for i in range(segments):
+            ang = angle(i)
+            points.append(Gf.Vec3f(outer_r_bot * np.cos(ang), outer_r_bot * np.sin(ang), 0.0))
+        
+        # Outer top ring
+        outer_top_offset = len(points)
+        for i in range(segments):
+            ang = angle(i)
+            points.append(Gf.Vec3f(outer_r_top * np.cos(ang), outer_r_top * np.sin(ang), height))
+        
+        # Inner top ring
+        inner_top_offset = len(points)
+        for i in range(segments):
+            ang = angle(i)
+            points.append(Gf.Vec3f(inner_r_top * np.cos(ang), inner_r_top * np.sin(ang), height))
+        
+        # Inner bottom ring (at bottom_thick height)
+        inner_bottom_offset = len(points)
+        for i in range(segments):
+            ang = angle(i)
+            points.append(Gf.Vec3f(inner_r_bot * np.cos(ang), inner_r_bot * np.sin(ang), bottom_thick))
+        
+        # Center points for bottom
+        bottom_center_top_idx = len(points)
+        points.append(Gf.Vec3f(0.0, 0.0, bottom_thick))
+        bottom_center_bottom_idx = len(points)
+        points.append(Gf.Vec3f(0.0, 0.0, 0.0))
+        
+        def add_tri(a, b, c):
+            face_counts.append(3)
+            face_indices.extend([a, b, c])
+        
+        # Build faces
+        for i in range(segments):
+            next_i = (i + 1) % segments
+            # Outer wall
+            add_tri(i, next_i, outer_top_offset + i)
+            add_tri(outer_top_offset + i, next_i, outer_top_offset + next_i)
+            # Inner wall
+            add_tri(inner_bottom_offset + i, inner_top_offset + i, inner_bottom_offset + next_i)
+            add_tri(inner_top_offset + i, inner_top_offset + next_i, inner_bottom_offset + next_i)
+            # Bottom outer to inner
+            add_tri(i, inner_bottom_offset + i, next_i)
+            add_tri(next_i, inner_bottom_offset + i, inner_bottom_offset + next_i)
+            # Inner bottom fan
+            add_tri(inner_bottom_offset + i, inner_bottom_offset + next_i, bottom_center_top_idx)
+            # Outer bottom fan
+            add_tri(i, bottom_center_bottom_idx, next_i)
+            # Top rim
+            add_tri(outer_top_offset + i, inner_top_offset + i, outer_top_offset + next_i)
+            add_tri(inner_top_offset + i, inner_top_offset + next_i, outer_top_offset + next_i)
+        
+        return points, face_counts, face_indices
 
     def _pre_physics_step(self, actions: Tensor) -> None:
         """Process actions before physics step."""
