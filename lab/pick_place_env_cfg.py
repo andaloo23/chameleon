@@ -67,13 +67,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             asset_path=_URDF_PATH,
             fix_base=True,
             self_collision=False,
-            urdf_converter_cfg=sim_utils.UrdfConverterCfg(
-                link_density=500.0,
-                fix_base=True,
-                self_collision=False,
-                convex_decompose_mesh=True,
-                make_instanceable=False,
-            ),
             joint_drive=UrdfFileCfg.JointDriveCfg(
                 gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
                     stiffness=None,  # Will use actuator config
