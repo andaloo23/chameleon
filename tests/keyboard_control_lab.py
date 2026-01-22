@@ -121,6 +121,8 @@ def main():
     print("-" * 40)
     
     REACH_THRESHOLD = 0.10  # meters
+    warmup_frames = 60  # Skip detector checks during scene stabilization
+    frame_count = 0
     
     try:
         while input_state["is_running"] and simulation_app.is_running():
@@ -133,6 +135,10 @@ def main():
             
             # Update simulation app to process events and render
             simulation_app.update()
+            
+            frame_count += 1
+            if frame_count < warmup_frames:
+                continue  # Skip detector checks during warmup
             
             # Get detector states from task_state
             task_state = info.get("task_state", {})
