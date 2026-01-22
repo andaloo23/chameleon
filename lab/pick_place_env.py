@@ -333,6 +333,10 @@ class PickPlaceEnv(DirectRLEnv):
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
         self.cup.write_root_pose_to_sim(torch.cat([cup_pos_world, cup_quat], dim=1), env_ids)
         
+        # DEBUG: Print positions
+        if num_reset <= 4:  # Only print for small resets
+            print(f"[DEBUG RESET] cube_xy={cube_xy[0].cpu().numpy()}, cup_xy={cup_xy[0].cpu().numpy()}")
+        
         # Reset grasp detector state
         self.grasp_detector.reset(env_ids)
         
