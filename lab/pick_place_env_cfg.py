@@ -136,7 +136,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cube_mass = 0.05
 
     # ===== Cup (Target Container) =====
-    # Cup will be created programmatically in _setup_scene due to complex geometry
     cup_height = 0.075  # 7.5cm
     cup_outer_radius_top = 0.057  # 5.7cm
     cup_outer_radius_bottom = 0.045  # 4.5cm
@@ -146,6 +145,25 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cup_bottom_thickness = 0.008  # 8mm
     cup_mass = 0.20  # 200g
     cup_color = (0.8, 0.3, 0.2)
+    
+    # Cup RigidObject config - kinematic (static) object
+    cup_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/Cup",
+        spawn=sim_utils.CylinderCfg(
+            radius=0.057,  # cup_outer_radius_top
+            height=0.075,  # cup_height
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,  # Cup doesn't move from physics
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.8, 0.3, 0.2),
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.0, -0.3, 0.075 / 2),  # Default position (will be randomized)
+        ),
+    )
 
     # ===== Workspace Bounds =====
     # Sampling range for cube and cup positions (matches workspace.py)
