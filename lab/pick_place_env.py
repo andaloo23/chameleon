@@ -272,11 +272,6 @@ class PickPlaceEnv(DirectRLEnv):
         # Timeout
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         
-        # DEBUG: Print episode length state periodically
-        if self.episode_length_buf[0].item() % 100 == 0:
-            print(f"    [ENV DEBUG] ep_len_buf[0]={self.episode_length_buf[0].item()}, "
-                  f"max_ep_len={self.max_episode_length}, timeout={time_out.any().item()}")
-        
         return terminated, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):

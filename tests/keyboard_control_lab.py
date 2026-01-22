@@ -51,6 +51,7 @@ def main():
     # Create environment with 1 env for testing
     cfg = PickPlaceEnvCfg()
     cfg.scene.num_envs = 1
+    cfg.episode_length_s = 3600.0  # 1 hour - effectively no timeout for keyboard control
     env = PickPlaceEnv(cfg)
     
     # Reset environment
