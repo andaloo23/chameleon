@@ -89,8 +89,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         actuators={
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
-                stiffness=1e6,
-                damping=1e4,
+                stiffness=1e5,
+                damping=3000.0,
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
@@ -132,7 +132,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
                 contact_offset=0.002,
-                rest_offset=0.0,
+                rest_offset=0.0005,
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(

@@ -116,7 +116,7 @@ class PickPlaceEnv(DirectRLEnv):
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
                     collision_api.CreateContactOffsetAttr().Set(0.002)
-                    collision_api.CreateRestOffsetAttr().Set(0.0)
+                    collision_api.CreateRestOffsetAttr().Set(0.0005)
                     
                     # Ensure mesh approximation is good for gripper
                     if prim.IsA(UsdGeom.Mesh):
