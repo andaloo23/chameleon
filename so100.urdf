@@ -172,14 +172,14 @@
     </visual>
     <!-- Box collision for reliable contact (instead of complex mesh) -->
     <collision>
-      <origin xyz="0.015 -0.04 0" rpy="0 0 0"/>
+      <origin xyz="0.015 -0.05 0" rpy="0 0 0"/>
       <geometry>
         <box size="0.015 0.10 0.025"/>
       </geometry>
     </collision>
     <!-- DEBUG: Visual representation of collision box (green) -->
     <visual>
-      <origin xyz="0.015 -0.04 0" rpy="0 0 0"/>
+      <origin xyz="0.015 -0.05 0" rpy="0 0 0"/>
       <geometry>
         <box size="0.015 0.10 0.025"/>
       </geometry>
