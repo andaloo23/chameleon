@@ -154,9 +154,9 @@
   <!-- Link gripper (fixed jaw) -->
   <link name="gripper">
     <inertial>
-      <mass value="0.0929859"/>
+      <mass value="0.2"/>
       <origin xyz="0.00552 -0.028 0.00048" rpy="0 0 0"/>
-      <inertia ixx="5.03136e-05" ixy="0" ixz="0" iyy="4.64098e-05" iyz="0" izz="2.72961e-05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
     </inertial>
     <visual>
       <geometry>
@@ -170,18 +170,18 @@
       </geometry>
       <material name="sts3215"/>
     </visual>
-    <!-- Box collision for reliable contact (instead of complex mesh) -->
+    <!-- Thicker box collision (4cm) prevents tunneling through objects -->
     <collision>
-      <origin xyz="0.015 -0.055 0" rpy="0 0 0"/>
+      <origin xyz="0.03 -0.055 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.015 0.10 0.025"/>
+        <box size="0.04 0.10 0.025"/>
       </geometry>
     </collision>
     <!-- DEBUG: Visual representation of collision box (green) -->
     <visual>
-      <origin xyz="0.015 -0.055 0" rpy="0 0 0"/>
+      <origin xyz="0.03 -0.055 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.015 0.10 0.025"/>
+        <box size="0.04 0.10 0.025"/>
       </geometry>
       <material name="collision_debug"/>
     </visual>
@@ -190,9 +190,9 @@
   <!-- Link jaw (moving jaw) -->
   <link name="jaw">
     <inertial>
-      <mass value="0.0202444"/>
+      <mass value="0.2"/>
       <origin xyz="-0.0016 -0.03032 0.00044" rpy="0 0 0"/>
-      <inertia ixx="1.11265e-06" ixy="0" ixz="0" iyy="8.99651e-07" iyz="0" izz="2.99548e-07"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
     </inertial>
     <visual>
       <geometry>
@@ -200,18 +200,18 @@
       </geometry>
       <material name="3d_printed"/>
     </visual>
-    <!-- Box collision for reliable contact (instead of complex mesh) -->
+    <!-- Thicker box collision (4cm) prevents tunneling through objects -->
     <collision>
-      <origin xyz="-0.003 -0.0425 0" rpy="0 0 0"/>
+      <origin xyz="-0.015 -0.0425 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.015 0.075 0.025"/>
+        <box size="0.04 0.075 0.025"/>
       </geometry>
     </collision>
     <!-- DEBUG: Visual representation of collision box (green) -->
     <visual>
-      <origin xyz="-0.003 -0.0425 0" rpy="0 0 0"/>
+      <origin xyz="-0.015 -0.0425 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.015 0.075 0.025"/>
+        <box size="0.04 0.075 0.025"/>
       </geometry>
       <material name="collision_debug"/>
     </visual>

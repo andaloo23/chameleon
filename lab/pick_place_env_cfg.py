@@ -47,9 +47,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=16,  # Render every 16 physics steps (~60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=True,  # Continuous collision detection
-            min_position_iteration_count=32, # Max stability for grasping
-            min_velocity_iteration_count=8,  # Better momentum handling
+            enable_ccd=False, # Sometimes CCD causes snapping/clipping with thin rotators
+            min_position_iteration_count=64, # High count for hard rigid contact
+            min_velocity_iteration_count=16, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.2,
@@ -96,8 +96,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=50000.0,  # Very high stiffness to prevent phasing
-                damping=2000.0,     # High damping to reduce oscillation
+                stiffness=20000.0, # Slightly lower stiffness is often more stable
+                damping=2000.0,
             ),
         },
     )
@@ -133,8 +133,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.005,
-                rest_offset=0.002,  # Small physical gap helps resolve hard collisions
+                contact_offset=0.01,  # 10mm buffer zone
+                rest_offset=0.0,
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
