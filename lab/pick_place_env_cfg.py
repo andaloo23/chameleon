@@ -128,13 +128,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=10.0, # Increased to push gripper out faster
+                max_depenetration_velocity=100.0, # Very high to force objects apart immediately
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.005,  # 5mm buffer to catch collisions early
-                rest_offset=0.0,
+                contact_offset=0.005,
+                rest_offset=0.002,  # Small physical gap helps resolve hard collisions
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(

@@ -115,7 +115,7 @@ class PickPlaceEnv(DirectRLEnv):
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
                     collision_api.CreateContactOffsetAttr().Set(0.005)
-                    collision_api.CreateRestOffsetAttr().Set(0.0)
+                    collision_api.CreateRestOffsetAttr().Set(0.002)
                     # Apply high friction material
                     sim_utils_internal.apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
         
