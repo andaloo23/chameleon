@@ -43,8 +43,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 120.0,  # 120Hz physics
-        render_interval=2,  # Render every 2 physics steps (60Hz)
+        dt=1.0 / 240.0,  # 240Hz physics (4 substeps)
+        render_interval=4,  # Render every 4 physics steps (60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=266.67,
-                damping=80.0,
+                stiffness=300.0,
+                damping=150.0,
             ),
         },
     )
