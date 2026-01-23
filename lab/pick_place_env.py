@@ -118,10 +118,10 @@ class PickPlaceEnv(DirectRLEnv):
                     collision_api.CreateContactOffsetAttr().Set(0.001)  # Minimal offset to prevent ghost contact
                     collision_api.CreateRestOffsetAttr().Set(0.0)
                     
-                    # Ensure mesh approximation is good for gripper
+                    # Use 'none' for accurate triangle mesh collision (no convex inflation)
                     if prim.IsA(UsdGeom.Mesh):
                         mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
-                        mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
+                        mesh_collision.CreateApproximationAttr().Set("none")
                     
                     # Apply higher friction material to robot links (especially gripper jaws)
                     sim_utils_internal.apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
@@ -129,13 +129,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
         
-        # Ensure cube also uses convex decomposition for its box shape (more accurate than simple box in some cases)
-        cube_prim = stage.GetPrimAtPath("/World/envs/env_0/Cube")
-        if cube_prim:
-            for prim in Usd.PrimRange(cube_prim):
-                if prim.IsA(UsdGeom.Mesh):
-                    mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
-                    mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
+        # Don't apply convexDecomposition to cube - let it use default collision
         
         # Add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
