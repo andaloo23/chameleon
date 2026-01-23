@@ -131,8 +131,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002,  # Small offset - high stiffness prevents phasing
-                rest_offset=0.0005,    # Minimal rest gap for accurate contact
+                contact_offset=0.0,  # Zero offset - no ghost contact
+                rest_offset=0.0,     # Zero rest gap
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
