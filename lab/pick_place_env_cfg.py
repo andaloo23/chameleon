@@ -48,8 +48,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
-            min_position_iteration=8,
-            min_velocity_iteration=1,
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.2,
@@ -96,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=6000.0,
-                damping=400.0,
+                stiffness=10000.0,
+                damping=500.0,
             ),
         },
     )
@@ -128,7 +126,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=1.0,
+                max_depenetration_velocity=10.0,
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05),

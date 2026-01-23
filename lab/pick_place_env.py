@@ -117,6 +117,12 @@ class PickPlaceEnv(DirectRLEnv):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
                     collision_api.CreateContactOffsetAttr().Set(0.002)
                     collision_api.CreateRestOffsetAttr().Set(0.001)
+                    
+                    # Fix clipping: higher depenetration velocity
+                    if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                        rb_api = UsdPhysics.RigidBodyAPI.Get(stage, prim.GetPath())
+                        rb_api.CreateMaxDepenetrationVelocityAttr().Set(10.0)
+                    
                     # Also ensure mesh approximation is good
                     if prim.IsA(UsdGeom.Mesh):
                         mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
