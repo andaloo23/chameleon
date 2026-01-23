@@ -48,8 +48,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
-            min_position_iteration_count=8,  # More solver iterations prevent phasing
-            min_velocity_iteration_count=1,
+            min_position_iteration_count=16, # Significant increase to prevent phasing
+            min_velocity_iteration_count=4,
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.2,
@@ -128,13 +128,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=2.0,
+                max_depenetration_velocity=10.0, # Increased to push gripper out faster
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.0,  # Zero offset - no ghost contact
-                rest_offset=0.0,     # Zero rest gap
+                contact_offset=0.002,  # Small buffer to help solver see collision early
+                rest_offset=0.0,
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
