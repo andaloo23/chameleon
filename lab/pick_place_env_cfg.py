@@ -33,7 +33,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     """Configuration for the SO-100 pick-and-place environment."""
 
     # ===== Environment Settings =====
-    decimation = 4  # Number of physics steps per RL step (increased from 2)
+    decimation = 8  # Number of physics steps per RL step (8 substeps)
     episode_length_s = 8.0
     
     # Action and observation space dimensions
@@ -43,8 +43,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 240.0,  # 240Hz physics (4 substeps)
-        render_interval=4,  # Render every 4 physics steps (60Hz)
+        dt=1.0 / 480.0,  # 480Hz physics (8 substeps)
+        render_interval=8,  # Render every 8 physics steps (60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=300.0,
-                damping=150.0,
+                stiffness=150.0,
+                damping=100.0,
             ),
         },
     )
@@ -131,7 +131,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002,
+                contact_offset=0.004,
                 rest_offset=0.0005,
             ),
             physics_material=high_friction_material,
