@@ -138,7 +138,12 @@ def main():
         while input_state["is_running"] and simulation_app.is_running():
             # Create action tensor (delta from current to target)
             current_pos = env.robot.data.joint_pos[0]
-            delta_action = (joint_targets - current_pos).unsqueeze(0)
+            
+            # Correct action scaling: env.step(action) does current_pos + action * action_scale
+            # So action = (target_pos - current_pos) / action_scale
+            # We also clamp to [-1, 1] to stay within standard action bounds
+            delta_action = (joint_targets - current_pos) / env.cfg.action_scale
+            delta_action = torch.clamp(delta_action, -1.0, 1.0).unsqueeze(0)
             
             # Step environment
             obs_dict, reward, terminated, truncated, info = env.step(delta_action)

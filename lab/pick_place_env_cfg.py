@@ -43,8 +43,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 240.0,  # 240Hz physics (increased from 120Hz)
-        render_interval=4,  # Render every 4 physics steps (60Hz)
+        dt=1.0 / 120.0,  # 120Hz physics
+        render_interval=2,  # Render every 2 physics steps (60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
@@ -56,8 +56,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Scene Configuration =====
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=4096,
-        env_spacing=1.5,
+        num_envs=4096,  # Default parallel environments
+        env_spacing=1.5,  # Space between environment clones
         replicate_physics=True,
     )
 
@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=500.0,
-                damping=50.0,
+                stiffness=6000.0,
+                damping=400.0,
             ),
         },
     )
@@ -126,13 +126,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=5.0,
+                max_depenetration_velocity=10.0,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),  # Slightly heavier for stability
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.005,
-                rest_offset=0.002,
+                contact_offset=0.001,
+                rest_offset=0.0,
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(

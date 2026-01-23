@@ -115,15 +115,10 @@ class PickPlaceEnv(DirectRLEnv):
             for prim in Usd.PrimRange(robot_prim):
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
-                    collision_api.CreateContactOffsetAttr().Set(0.005)
-                    collision_api.CreateRestOffsetAttr().Set(0.002)
+                    collision_api.CreateContactOffsetAttr().Set(0.001)
+                    collision_api.CreateRestOffsetAttr().Set(0.0)
                     
-                    # Fix clipping: higher depenetration velocity
-                    if prim.HasAPI(UsdPhysics.RigidBodyAPI):
-                        rb_api = UsdPhysics.RigidBodyAPI.Get(stage, prim.GetPath())
-                        rb_api.CreateMaxDepenetrationVelocityAttr().Set(5.0)
-                    
-                    # Also ensure mesh approximation is good
+                    # Ensure mesh approximation is good for gripper
                     if prim.IsA(UsdGeom.Mesh):
                         mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
                         mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
