@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=6000.0,
-                damping=400.0,
+                stiffness=800.0,
+                damping=40.0,
             ),
         },
     )
@@ -126,12 +126,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=10.0,
+                max_depenetration_velocity=2.0,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.001,
+                contact_offset=0.002,
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,

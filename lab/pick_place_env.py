@@ -115,7 +115,7 @@ class PickPlaceEnv(DirectRLEnv):
             for prim in Usd.PrimRange(robot_prim):
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
-                    collision_api.CreateContactOffsetAttr().Set(0.001)
+                    collision_api.CreateContactOffsetAttr().Set(0.002)
                     collision_api.CreateRestOffsetAttr().Set(0.0)
                     
                     # Ensure mesh approximation is good for gripper
@@ -128,6 +128,14 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
+        
+        # Ensure cube also uses convex decomposition for its box shape (more accurate than simple box in some cases)
+        cube_prim = stage.GetPrimAtPath("/World/envs/env_0/Cube")
+        if cube_prim:
+            for prim in Usd.PrimRange(cube_prim):
+                if prim.IsA(UsdGeom.Mesh):
+                    mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
+                    mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
         
         # Add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
