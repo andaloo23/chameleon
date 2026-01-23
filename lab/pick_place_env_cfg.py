@@ -33,7 +33,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     """Configuration for the SO-100 pick-and-place environment."""
 
     # ===== Environment Settings =====
-    decimation = 8  # Number of physics steps per RL step (8 substeps)
+    decimation = 16  # Matches 1000Hz / 16 = 62.5Hz RL step
     episode_length_s = 8.0
     
     # Action and observation space dimensions
@@ -43,13 +43,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 480.0,  # 480Hz physics
-        render_interval=8,  # Render every 8 physics steps (60Hz)
+        dt=1.0 / 1000.0,  # ~1000Hz physics for high-speed collision stability
+        render_interval=16,  # Render every 16 physics steps (~60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
-            min_position_iteration_count=16, # Significant increase to prevent phasing
-            min_velocity_iteration_count=4,
+            min_position_iteration_count=32, # Max stability for grasping
+            min_velocity_iteration_count=8,  # Better momentum handling
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.2,
@@ -133,7 +133,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002,  # Small buffer to help solver see collision early
+                contact_offset=0.005,  # 5mm buffer to catch collisions early
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,
