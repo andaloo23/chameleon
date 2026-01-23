@@ -48,8 +48,11 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
+            max_position_iteration=8,
+            max_velocity_iteration=1,
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
+            bounce_threshold_velocity=0.2,
         ),
     )
 
@@ -112,6 +115,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         "gripper": (-0.5, 1.5),
     }
 
+    # Physics material for higher friction
+    high_friction_material = sim_utils.RigidBodyMaterialCfg(
+        static_friction=2.0,
+        dynamic_friction=2.0,
+        restitution=0.0,
+    )
+
     # ===== Cube (Object to Pick) =====
     cube_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Cube",
@@ -119,9 +129,14 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 max_depenetration_velocity=1.0,
+                disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                contact_offset=0.002,
+                rest_offset=0.001,
+            ),
+            physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
                 diffuse_color=(1.0, 0.0, 0.0),  # Red
             ),

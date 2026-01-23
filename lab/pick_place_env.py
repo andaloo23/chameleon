@@ -105,6 +105,26 @@ class PickPlaceEnv(DirectRLEnv):
         # Create robot articulation
         self.robot = Articulation(self.cfg.robot_cfg)
         
+        # Set precise collision offsets for robot in env_0 before cloning
+        # This fixes 'ghost pushing' where robot touches cube too early
+        from pxr import Usd, UsdPhysics, UsdGeom
+        import isaaclab.sim as sim_utils_internal
+        stage = sim_utils_internal.stage_utils.get_current_stage()
+        robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
+        if robot_prim:
+            for prim in Usd.PrimRange(robot_prim):
+                if prim.HasAPI(UsdPhysics.CollisionAPI):
+                    collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
+                    collision_api.CreateContactOffsetAttr().Set(0.002)
+                    collision_api.CreateRestOffsetAttr().Set(0.001)
+                    # Also ensure mesh approximation is good
+                    if prim.IsA(UsdGeom.Mesh):
+                        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
+                        mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
+                    
+                    # Apply higher friction material to robot links (especially gripper jaws)
+                    sim_utils_internal.apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
+        
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
         
