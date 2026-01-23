@@ -48,8 +48,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
-            max_position_iteration=8,
-            max_velocity_iteration=1,
+            min_position_iteration=8,
+            min_velocity_iteration=1,
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.2,
