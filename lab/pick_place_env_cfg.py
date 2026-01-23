@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=150.0,
-                damping=100.0,
+                stiffness=5000.0,  # High stiffness for rigid behavior (prevents phasing)
+                damping=500.0,     # Higher damping to reduce oscillation
             ),
         },
     )
@@ -131,8 +131,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.004,
-                rest_offset=0.0005,
+                contact_offset=0.008,  # Larger buffer for earlier collision detection
+                rest_offset=0.002,     # Larger rest gap to prevent phasing
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
