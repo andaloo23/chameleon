@@ -33,18 +33,18 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     """Configuration for the SO-100 pick-and-place environment."""
 
     # ===== Environment Settings =====
-    decimation = 2  # Number of physics steps per RL step
-    episode_length_s = 8.0  # ~500 steps at 60Hz RL rate
+    decimation = 4  # Number of physics steps per RL step (increased from 2)
+    episode_length_s = 8.0
     
     # Action and observation space dimensions
-    action_space = 6  # Delta joint positions for 6 joints
-    observation_space = 21  # joint_pos(6) + joint_vel(6) + gripper_pos(3) + cube_pos(3) + cup_pos(3)
-    state_space = 0  # No asymmetric critic
+    action_space = 6
+    observation_space = 21
+    state_space = 0
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 120.0,  # 120Hz physics
-        render_interval=2,  # Render every 2 physics steps (60Hz)
+        dt=1.0 / 240.0,  # 240Hz physics (increased from 120Hz)
+        render_interval=4,  # Render every 4 physics steps (60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=True,  # Continuous collision detection
@@ -56,8 +56,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Scene Configuration =====
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=4096,  # Default parallel environments
-        env_spacing=1.5,  # Space between environment clones
+        num_envs=4096,
+        env_spacing=1.5,
         replicate_physics=True,
     )
 
@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=10000.0,
-                damping=500.0,
+                stiffness=500.0,
+                damping=50.0,
             ),
         },
     )
@@ -126,13 +126,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=10.0,
+                max_depenetration_velocity=5.0,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),  # Slightly heavier for stability
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002,
-                rest_offset=0.001,
+                contact_offset=0.005,
+                rest_offset=0.002,
             ),
             physics_material=high_friction_material,
             visual_material=sim_utils.PreviewSurfaceCfg(
