@@ -94,8 +94,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=800.0,
-                damping=40.0,
+                stiffness=266.67,
+                damping=80.0,
             ),
         },
     )
