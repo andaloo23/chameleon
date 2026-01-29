@@ -209,7 +209,9 @@ class PickPlaceEnv(DirectRLEnv):
         mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(*color)])
         
         # Apply physics
-        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        collision_api = UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        collision_api.CreateContactOffsetAttr().Set(0.002)
+        collision_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         xform_prim = xform.GetPrim()

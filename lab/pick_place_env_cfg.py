@@ -53,8 +53,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
             bounce_threshold_velocity=0.5, # Slightly higher to prevent jitter
-            contact_offset=0.002, # Global default contact offset
-            rest_offset=0.0,
         ),
     )
 
