@@ -180,10 +180,10 @@ class PickPlaceEnv(DirectRLEnv):
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
-        import isaaclab.sim as sim_utils_internal
-        from pxr import Gf, UsdGeom, UsdPhysics, Usd
+        import isaaclab.sim as sim_utils
+        from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
         
-        stage = sim_utils_internal.stage_utils.get_current_stage()
+        stage = sim_utils.stage_utils.get_current_stage()
         
         # Cup dimensions from config
         outer_r_top = self.cfg.cup_outer_radius_top
