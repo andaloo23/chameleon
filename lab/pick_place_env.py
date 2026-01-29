@@ -105,18 +105,22 @@ class PickPlaceEnv(DirectRLEnv):
         # Create robot articulation
         self.robot = Articulation(self.cfg.robot_cfg)
         
-        # Set precise collision offsets for robot collision shapes
         from pxr import Usd, UsdPhysics, UsdGeom
         import isaaclab.sim as sim_utils_internal
-        from isaaclab.sim.utils import apply_physics_material
         stage = sim_utils_internal.stage_utils.get_current_stage()
+        
+        # Spawn the high friction material once globally
+        material_path = "/World/Materials/HighFrictionMaterial"
+        if not stage.GetPrimAtPath(material_path):
+            self.cfg.high_friction_material.func(material_path, self.cfg.high_friction_material)
+        
         robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
         if robot_prim:
             for prim in Usd.PrimRange(robot_prim):
                 prim_path = prim.GetPath().pathString
                 
                 # Apply high friction material to all robot links
-                apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
+                sim_utils.bind_physics_material(prim.GetPath(), material_path)
                 
                 # Special handling for gripper and jaw (use mesh collision with convex decomposition)
                 if any(name in prim_path for name in ["/gripper", "/jaw"]):
@@ -216,8 +220,9 @@ class PickPlaceEnv(DirectRLEnv):
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
-        from isaaclab.sim.utils import apply_physics_material
-        apply_physics_material(mesh_path, self.cfg.high_friction_material)
+        import isaaclab.sim as sim_utils
+        material_path = "/World/Materials/HighFrictionMaterial"
+        sim_utils.bind_physics_material(mesh_path, material_path)
         
         xform_prim = xform.GetPrim()
         rigid_api = UsdPhysics.RigidBodyAPI.Apply(xform_prim)
