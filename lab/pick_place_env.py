@@ -214,9 +214,11 @@ class PickPlaceEnv(DirectRLEnv):
         mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(*color)])
         
         # Apply physics
-        collision_api = UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-        collision_api.CreateContactOffsetAttr().Set(0.002)
-        collision_api.CreateRestOffsetAttr().Set(0.0)
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        collision_api = UsdPhysics.CollisionAPI.Get(stage, mesh_path)
+        if collision_api:
+            collision_api.CreateContactOffsetAttr().Set(0.002)
+            collision_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
