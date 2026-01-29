@@ -137,7 +137,7 @@ class PickPlaceEnv(DirectRLEnv):
                 # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     physx_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-                    physx_api.CreateContactOffsetAttr().Set(0.002) # matched to cfg
+                    physx_api.CreateContactOffsetAttr().Set(0.001) # 1mm for precision
                     physx_api.CreateRestOffsetAttr().Set(0.0)
         
         # Create cube rigid object
@@ -145,8 +145,18 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Don't apply convexDecomposition to cube - let it use default collision
         
-        # Add ground plane
+        # Add ground plane and ensure it has a small contact offset
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
+        ground_prim = stage.GetPrimAtPath("/World/ground/Plane") # Typical path for PlaneCfg
+        if not ground_prim: # Fallback search
+            for prim in stage.TraverseAll():
+                if "ground" in prim.GetPath().pathString and prim.IsA(UsdGeom.Mesh):
+                    ground_prim = prim
+                    break
+        if ground_prim:
+            ground_physx = PhysxSchema.PhysxCollisionAPI.Apply(ground_prim)
+            ground_physx.CreateContactOffsetAttr().Set(0.001)
+            ground_physx.CreateRestOffsetAttr().Set(0.0)
         
         # Create hollow cup at env_0 (will be cloned)
         self._create_cup_prim("/World/envs/env_0/Cup", (0.0, -0.3, 0.0))
@@ -216,7 +226,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
         physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
-        physx_api.CreateContactOffsetAttr().Set(0.002)
+        physx_api.CreateContactOffsetAttr().Set(0.001)
         physx_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
