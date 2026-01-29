@@ -112,12 +112,28 @@ class PickPlaceEnv(DirectRLEnv):
         robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
         if robot_prim:
             for prim in Usd.PrimRange(robot_prim):
+                prim_path = prim.GetPath().pathString
+                
+                # Apply high friction material to all robot links
+                sim_utils_internal.apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
+                
+                # Special handling for gripper and jaw (use mesh collision with convex decomposition)
+                if any(name in prim_path for name in ["/gripper", "/jaw"]):
+                    # If it's a visual mesh, we might want to use it for collision
+                    if prim.IsA(UsdGeom.Mesh):
+                        # Ensure it has collision API
+                        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+                            UsdPhysics.CollisionAPI.Apply(prim)
+                        
+                        # Apply mesh collision with convex decomposition
+                        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
+                        mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
+                
+                # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
-                    collision_api.CreateContactOffsetAttr().Set(0.01)
+                    collision_api.CreateContactOffsetAttr().Set(0.002) # matched to cfg
                     collision_api.CreateRestOffsetAttr().Set(0.0)
-                    # Apply high friction material
-                    sim_utils_internal.apply_physics_material(prim.GetPath(), self.cfg.high_friction_material)
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)

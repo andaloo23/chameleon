@@ -52,7 +52,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             min_velocity_iteration_count=16, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
-            bounce_threshold_velocity=0.2,
+            bounce_threshold_velocity=0.5, # Slightly higher to prevent jitter
+            contact_offset=0.002, # Global default contact offset
+            rest_offset=0.0,
         ),
     )
 
@@ -133,7 +135,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.01,  # 10mm buffer zone
+                contact_offset=0.002,  # 2mm buffer zone
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,
@@ -199,9 +201,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_stall_threshold = 0.001
     grasp_lift_threshold = 0.025
     grasp_following_threshold = 0.0005
-    grasp_frames_to_grasp = 15
-    grasp_frames_to_drop = 30
-    grasp_history_len = 10
+    grasp_frames_to_grasp = 5
+    grasp_frames_to_drop = 15
+    grasp_history_len = 5
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
