@@ -105,8 +105,9 @@ class PickPlaceEnv(DirectRLEnv):
         # Create robot articulation
         self.robot = Articulation(self.cfg.robot_cfg)
         
-        from pxr import Usd, UsdPhysics, UsdGeom
+        from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
         import isaaclab.sim as sim_utils_internal
+        from isaaclab.sim.utils import apply_physics_material
         stage = sim_utils_internal.stage_utils.get_current_stage()
         
         # Spawn the high friction material once globally
@@ -136,9 +137,9 @@ class PickPlaceEnv(DirectRLEnv):
                 
                 # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
-                    collision_api = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
-                    collision_api.CreateContactOffsetAttr().Set(0.002) # matched to cfg
-                    collision_api.CreateRestOffsetAttr().Set(0.0)
+                    physx_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
+                    physx_api.CreateContactOffsetAttr().Set(0.002) # matched to cfg
+                    physx_api.CreateRestOffsetAttr().Set(0.0)
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
@@ -215,10 +216,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-        collision_api = UsdPhysics.CollisionAPI.Get(stage, mesh_path)
-        if collision_api:
-            collision_api.CreateContactOffsetAttr().Set(0.002)
-            collision_api.CreateRestOffsetAttr().Set(0.0)
+        physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
+        physx_api.CreateContactOffsetAttr().Set(0.002)
+        physx_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
