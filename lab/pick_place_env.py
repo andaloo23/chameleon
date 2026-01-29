@@ -106,9 +106,8 @@ class PickPlaceEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         
         from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
-        import isaaclab.sim as sim_utils_internal
-        from isaaclab.sim.utils import apply_physics_material
-        stage = sim_utils_internal.stage_utils.get_current_stage()
+        import isaaclab.sim as sim_utils
+        stage = sim_utils.stage_utils.get_current_stage()
         
         # Spawn the high friction material once globally
         material_path = "/World/Materials/HighFrictionMaterial"
