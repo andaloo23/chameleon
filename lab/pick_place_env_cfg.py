@@ -97,8 +97,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=1000.0,
-                damping=50.0,
+                stiffness=5000.0,
+                damping=100.0,
             ),
         },
     )
@@ -118,8 +118,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Physics material for higher friction
     high_friction_material = sim_utils.RigidBodyMaterialCfg(
-        static_friction=1.0,
-        dynamic_friction=1.0,
+        static_friction=2.0,
+        dynamic_friction=2.0,
         restitution=0.0,
     )
 

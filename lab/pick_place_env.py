@@ -126,7 +126,10 @@ class PickPlaceEnv(DirectRLEnv):
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     physx_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
                     physx_api.CreateContactOffsetAttr().Set(0.002) # 2mm for stability
-                    physx_api.CreateRestOffsetAttr().Set(0.0)
+                    
+                    # Apply a negative rest offset to fingers for a tighter "squeeze" grip
+                    rest_offset = -0.005 if any(name in prim_path for name in ["/gripper", "/jaw"]) else 0.0
+                    physx_api.CreateRestOffsetAttr().Set(rest_offset)
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
