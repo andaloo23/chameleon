@@ -92,13 +92,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         actuators={
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
-                stiffness=1e5,
-                damping=3000.0,
+                stiffness=1500.0,
+                damping=100.0,
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=20000.0, # Slightly lower stiffness is often more stable
-                damping=2000.0,
+                stiffness=1000.0,
+                damping=50.0,
             ),
         },
     )
@@ -129,7 +129,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=10.0, # Better balance between stability and push-out
+                max_depenetration_velocity=1.0, # Low velocity prevents explosions
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for stability

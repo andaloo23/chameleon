@@ -92,7 +92,7 @@ def main():
     
     # Gripper limits
     GRIPPER_OPEN = 1.5
-    GRIPPER_CLOSE = -0.5
+    GRIPPER_CLOSE = -0.2
     
     def on_keyboard_event(event):
         nonlocal joint_targets
