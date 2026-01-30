@@ -70,7 +70,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             asset_path=_URDF_PATH,
             fix_base=True,
             self_collision=False,
-            collision_approximation="convexHull",
+            collider_type="convexHull",
             joint_drive=UrdfFileCfg.JointDriveCfg(
                 gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
                     stiffness=None,  # Will use actuator config
