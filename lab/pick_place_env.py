@@ -216,7 +216,7 @@ class PickPlaceEnv(DirectRLEnv):
         physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
         physx_api.CreateContactOffsetAttr().Set(0.002)
         physx_api.CreateRestOffsetAttr().Set(0.0)
-        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexHull")
+        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
         import isaaclab.sim as sim_utils

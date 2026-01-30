@@ -70,7 +70,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             asset_path=_URDF_PATH,
             fix_base=True,
             self_collision=False,
-            collider_type="convexHull",
+            collider_type="convexDecomposition",
             joint_drive=UrdfFileCfg.JointDriveCfg(
                 gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
                     stiffness=None,  # Will use actuator config
@@ -118,8 +118,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Physics material for higher friction
     high_friction_material = sim_utils.RigidBodyMaterialCfg(
-        static_friction=2.0,
-        dynamic_friction=2.0,
+        static_friction=1.0,
+        dynamic_friction=1.0,
         restitution=0.0,
     )
 
@@ -129,7 +129,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=5.0, # Lower to prevent explosive behavior
+                max_depenetration_velocity=10.0, # Better balance between stability and push-out
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for stability
@@ -175,7 +175,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
-    rew_approach_delta_weight = 20.0  # Reward per meter closer to cube
+    rew_approach_delta_weight = 10.0  # Reduced to prevent aggressive collision behavior
     
     # Stage 2: Grasp cube (one-time bonus)
     rew_grasp_bonus = 2.0
