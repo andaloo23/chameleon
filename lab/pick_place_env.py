@@ -125,10 +125,13 @@ class PickPlaceEnv(DirectRLEnv):
                 # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     physx_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-                    physx_api.CreateContactOffsetAttr().Set(0.002) # 2mm for stability
+                    physx_api.CreateContactOffsetAttr().Set(0.005) # Larger buffer
+                    
+                    # Limit depenetration velocity on all robot links to prevent explosions
+                    physx_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
                     
                     # Apply a negative rest offset to fingers for a tighter "squeeze" grip
-                    rest_offset = -0.005 if any(name in prim_path for name in ["/gripper", "/jaw"]) else 0.0
+                    rest_offset = -0.002 if any(name in prim_path for name in ["/gripper", "/jaw"]) else 0.0
                     physx_api.CreateRestOffsetAttr().Set(rest_offset)
         
         # Create cube rigid object
@@ -146,8 +149,9 @@ class PickPlaceEnv(DirectRLEnv):
                     break
         if ground_prim:
             ground_physx = PhysxSchema.PhysxCollisionAPI.Apply(ground_prim)
-            ground_physx.CreateContactOffsetAttr().Set(0.002)
+            ground_physx.CreateContactOffsetAttr().Set(0.005)
             ground_physx.CreateRestOffsetAttr().Set(0.0)
+            ground_physx.CreateMaxDepenetrationVelocityAttr().Set(1.0)
         
         # Create hollow cup at env_0 (will be cloned)
         self._create_cup_prim("/World/envs/env_0/Cup", (0.0, -0.3, 0.0))
@@ -217,8 +221,9 @@ class PickPlaceEnv(DirectRLEnv):
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
         physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
-        physx_api.CreateContactOffsetAttr().Set(0.002)
+        physx_api.CreateContactOffsetAttr().Set(0.005)
         physx_api.CreateRestOffsetAttr().Set(0.0)
+        physx_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
