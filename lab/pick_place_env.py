@@ -222,10 +222,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-        physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
-        physx_api.CreateContactOffsetAttr().Set(0.005)
-        physx_api.CreateRestOffsetAttr().Set(0.0)
-        physx_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
+        physx_col_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
+        physx_col_api.CreateContactOffsetAttr().Set(0.005)
+        physx_col_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
         # Apply high friction material
@@ -234,8 +233,9 @@ class PickPlaceEnv(DirectRLEnv):
         sim_utils.bind_physics_material(mesh_path, material_path)
         
         xform_prim = xform.GetPrim()
-        rigid_api = UsdPhysics.RigidBodyAPI.Apply(xform_prim)
-        rigid_api.CreateRigidBodyEnabledAttr(True)
+        UsdPhysics.RigidBodyAPI.Apply(xform_prim)
+        physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(xform_prim)
+        physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
         
         mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
         mass_api.CreateMassAttr().Set(10.0)  # Heavy so it doesn't move
