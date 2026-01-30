@@ -70,6 +70,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             asset_path=_URDF_PATH,
             fix_base=True,
             self_collision=False,
+            collision_approximation="convexHull",
             joint_drive=UrdfFileCfg.JointDriveCfg(
                 gains=UrdfFileCfg.JointDriveCfg.PDGainsCfg(
                     stiffness=None,  # Will use actuator config
@@ -133,7 +134,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for stability
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.001,  # 1mm buffer zone
+                contact_offset=0.002,  # 2mm buffer zone for stability
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,

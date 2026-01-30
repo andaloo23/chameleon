@@ -122,22 +122,10 @@ class PickPlaceEnv(DirectRLEnv):
                 # Apply high friction material to all robot links
                 sim_utils.bind_physics_material(prim.GetPath(), material_path)
                 
-                # Special handling for gripper and jaw (use mesh collision with convex decomposition)
-                if any(name in prim_path for name in ["/gripper", "/jaw"]):
-                    # If it's a visual mesh, we might want to use it for collision
-                    if prim.IsA(UsdGeom.Mesh):
-                        # Ensure it has collision API
-                        if not prim.HasAPI(UsdPhysics.CollisionAPI):
-                            UsdPhysics.CollisionAPI.Apply(prim)
-                        
-                        # Apply mesh collision with convex hull (more stable for simple shapes)
-                        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
-                        mesh_collision.CreateApproximationAttr().Set("convexHull")
-                
                 # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     physx_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-                    physx_api.CreateContactOffsetAttr().Set(0.001) # 1mm for precision
+                    physx_api.CreateContactOffsetAttr().Set(0.002) # 2mm for stability
                     physx_api.CreateRestOffsetAttr().Set(0.0)
         
         # Create cube rigid object
@@ -155,7 +143,7 @@ class PickPlaceEnv(DirectRLEnv):
                     break
         if ground_prim:
             ground_physx = PhysxSchema.PhysxCollisionAPI.Apply(ground_prim)
-            ground_physx.CreateContactOffsetAttr().Set(0.001)
+            ground_physx.CreateContactOffsetAttr().Set(0.002)
             ground_physx.CreateRestOffsetAttr().Set(0.0)
         
         # Create hollow cup at env_0 (will be cloned)
@@ -226,7 +214,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
         physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
-        physx_api.CreateContactOffsetAttr().Set(0.001)
+        physx_api.CreateContactOffsetAttr().Set(0.002)
         physx_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexHull")
         
