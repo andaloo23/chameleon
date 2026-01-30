@@ -130,9 +130,9 @@ class PickPlaceEnv(DirectRLEnv):
                         if not prim.HasAPI(UsdPhysics.CollisionAPI):
                             UsdPhysics.CollisionAPI.Apply(prim)
                         
-                        # Apply mesh collision with convex decomposition
+                        # Apply mesh collision with convex hull (more stable for simple shapes)
                         mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
-                        mesh_collision.CreateApproximationAttr().Set("convexDecomposition")
+                        mesh_collision.CreateApproximationAttr().Set("convexHull")
                 
                 # Set contact offsets for all collision prims
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
@@ -228,7 +228,7 @@ class PickPlaceEnv(DirectRLEnv):
         physx_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
         physx_api.CreateContactOffsetAttr().Set(0.001)
         physx_api.CreateRestOffsetAttr().Set(0.0)
-        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
+        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexHull")
         
         # Apply high friction material
         import isaaclab.sim as sim_utils

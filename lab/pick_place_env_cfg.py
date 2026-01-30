@@ -131,7 +131,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
                 max_depenetration_velocity=5.0, # Lower to prevent explosive behavior
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.2), # Heavier cube resists clipping
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for stability
             collision_props=sim_utils.CollisionPropertiesCfg(
                 contact_offset=0.001,  # 1mm buffer zone
                 rest_offset=0.0,
@@ -198,7 +198,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_close_command_threshold = 0.1
     grasp_stall_threshold = 0.001
     grasp_lift_threshold = 0.025
-    grasp_following_threshold = 0.0005
+    grasp_following_threshold = 0.002
     grasp_frames_to_grasp = 5
     grasp_frames_to_drop = 15
     grasp_history_len = 5

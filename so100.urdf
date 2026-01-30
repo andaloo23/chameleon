@@ -170,21 +170,6 @@
       </geometry>
       <material name="sts3215"/>
     </visual>
-    <!-- Thicker box collision (4cm) prevents tunneling through objects -->
-    <collision>
-      <origin xyz="0.03 -0.055 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.04 0.10 0.025"/>
-      </geometry>
-    </collision>
-    <!-- DEBUG: Visual representation of collision box (green) -->
-    <visual>
-      <origin xyz="0.03 -0.055 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.04 0.10 0.025"/>
-      </geometry>
-      <material name="collision_debug"/>
-    </visual>
   </link>
 
   <!-- Link jaw (moving jaw) -->
@@ -199,21 +184,6 @@
         <mesh filename="assets/Moving_Jaw.stl" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="3d_printed"/>
-    </visual>
-    <!-- Thicker box collision (4cm) prevents tunneling through objects -->
-    <collision>
-      <origin xyz="-0.015 -0.0425 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.04 0.075 0.025"/>
-      </geometry>
-    </collision>
-    <!-- DEBUG: Visual representation of collision box (green) -->
-    <visual>
-      <origin xyz="-0.015 -0.0425 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.04 0.075 0.025"/>
-      </geometry>
-      <material name="collision_debug"/>
     </visual>
   </link>
 
