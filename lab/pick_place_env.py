@@ -77,6 +77,7 @@ class PickPlaceEnv(DirectRLEnv):
             num_envs=self.num_envs,
             device=self.device,
             history_len=self.cfg.grasp_history_len,
+            stall_frames=self.cfg.grasp_stall_frames,
             frames_to_grasp=self.cfg.grasp_frames_to_grasp,
             frames_to_drop=self.cfg.grasp_frames_to_drop,
             stall_threshold=self.cfg.grasp_stall_threshold,
