@@ -373,8 +373,8 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
             # Update min distances per env
             min_gripper_cube_dists = torch.minimum(min_gripper_cube_dists, dist_tensor)
             final_gripper_cube_dists = dist_tensor.clone()
-            # Consider "reached" if distance < 0.10m for each env (gripper center to cube center)
-            ever_reached = ever_reached | (dist_tensor < 0.10)
+            # Consider "reached" if distance < 0.15m for each env (gripper center to cube center)
+            ever_reached = ever_reached | (dist_tensor < 0.15)
         
         # Check grasp/droppable/in_cup per env (tensors)
         if "is_grasped" in task_state:
@@ -563,7 +563,25 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
         if done:
             episode_count += 1
             episode_rewards.append(current_episode_reward)
-            episode_flags.append(info.get("milestone_flags", {}))
+            # Prepare milestone flags for logging (interpret task_state for Isaac Lab)
+            # Both reached and controlled are needed for Iter summary
+            m_flags = info.get("milestone_flags", {})
+            if not m_flags and "task_state" in info:
+                # Isaac Lab fallback - interpret from task_state
+                is_grasped = info["task_state"].get("is_grasped", False)
+                if hasattr(is_grasped, "item"): is_grasped = is_grasped.item()
+                
+                m_flags = {
+                    "reached": min_gripper_cube_dist < 0.15,
+                    "controlled": is_grasped or (min_gripper_width < 0.03), # Heuristic for grasp
+                    "lifted": info["task_state"].get("is_droppable", False),
+                    "success": info["task_state"].get("is_in_cup", False)
+                }
+                # Handle potential tensors in task_state
+                for k, v in m_flags.items():
+                    if hasattr(v, "item"): m_flags[k] = bool(v.item())
+            
+            episode_flags.append(m_flags)
             episode_min_dists.append(min_gripper_cube_dist)
             episode_final_dists.append(final_gripper_cube_dist)
             
