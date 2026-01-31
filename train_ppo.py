@@ -329,8 +329,15 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
     batch_log_probs = []
     
     steps_collected = 0
+    total_steps = (n_steps // num_envs) * num_envs # Align to env batching
     
+    print(f"  [INFO] Collecting {n_steps} rollout steps ({n_steps//num_envs} steps per env)...")
+    
+    loop_step = 0
     while steps_collected < n_steps:
+        loop_step += 1
+        if loop_step % 20 == 0:
+            print(f"    [Heartbeat] Rollout step {steps_collected}/{n_steps}...")
         # Extract observations - shape: [num_envs, obs_dim]
         obs_tensor = obs_dict["policy"]
         if not obs_tensor.is_cuda and device.type == "cuda":
@@ -737,7 +744,10 @@ def train_ppo(
         metrics_history["value_loss"].append(metrics["value_loss"])
         
         # Log progress
-        if iteration % log_interval == 0 or total_episodes >= num_episodes:
+        # More aggressive logging for the first 50 iterations to show progress immediately
+        effective_log_interval = 1 if iteration <= 50 else log_interval
+        
+        if iteration % effective_log_interval == 0 or total_episodes >= num_episodes:
             # Count milestone percentages
             n_episodes = len(all_flags)
             if n_episodes > 0:
