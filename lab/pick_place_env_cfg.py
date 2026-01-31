@@ -47,7 +47,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=16,  # Render every 16 physics steps (~60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=True, # Prevent clipping through objects
+            enable_ccd=False, # Revert to False to reduce numerical noise
             min_position_iteration_count=64, # High count for hard rigid contact
             min_velocity_iteration_count=16, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
@@ -93,11 +93,11 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
                 stiffness=1500.0,
-                damping=100.0,
+                damping=200.0, # Increased damping to reduce oscillations
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=5000.0,
+                stiffness=2000.0, # Reduced from 5000 to prevent post-grasp jitter
                 damping=100.0,
             ),
         },
