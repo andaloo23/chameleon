@@ -33,7 +33,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     """Configuration for the SO-100 pick-and-place environment."""
 
     # ===== Environment Settings =====
-    decimation = 16  # Matches 1000Hz / 16 = 62.5Hz RL step
+    decimation = 8  # Reduced for 500Hz physics (500/8 = 62.5Hz RL step)
     episode_length_s = 8.0
     
     # Action and observation space dimensions
@@ -43,12 +43,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Simulation Settings =====
     sim: SimulationCfg = SimulationCfg(
-        dt=1.0 / 1000.0,  # ~1000Hz physics for high-speed collision stability
-        render_interval=16,  # Render every 16 physics steps (~60Hz)
+        dt=1.0 / 500.0,  # 500Hz for better performance on VMs
+        render_interval=8,  # Match decimation
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
             enable_ccd=False, # Revert to False to reduce numerical noise
-            min_position_iteration_count=64, # High count for hard rigid contact
+            min_position_iteration_count=32, # Balanced for performance/stability
             min_velocity_iteration_count=16, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
