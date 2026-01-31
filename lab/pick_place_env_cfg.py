@@ -47,7 +47,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=16,  # Render every 16 physics steps (~60Hz)
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=False, # Sometimes CCD causes snapping/clipping with thin rotators
+            enable_ccd=True, # Prevent clipping through objects
             min_position_iteration_count=64, # High count for hard rigid contact
             min_velocity_iteration_count=16, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
@@ -129,14 +129,14 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=0.5, # Very low to prevent any "launching"
+                max_depenetration_velocity=2.0, # Stronger push-out but still safe
                 linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.1), # Heavier cube for stability (100g)
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.005,  # Larger buffer for stability
+                contact_offset=0.001,  # 1mm for a very "hard" feel
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,
