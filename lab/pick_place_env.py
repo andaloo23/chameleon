@@ -128,13 +128,11 @@ class PickPlaceEnv(DirectRLEnv):
                     physx_col_api.CreateContactOffsetAttr().Set(0.005) # Larger buffer
                     
                     # Limit depenetration velocity on all robot links to prevent explosions
-                    # This attribute belongs to PhysxRigidBodyAPI
                     physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
-                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
+                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.5)
                     
-                    # Apply a negative rest offset to fingers for a tighter "squeeze" grip
-                    rest_offset = -0.002 if any(name in prim_path for name in ["/gripper", "/jaw"]) else 0.0
-                    physx_col_api.CreateRestOffsetAttr().Set(rest_offset)
+                    # Ensure rest offset is zero for safety
+                    physx_col_api.CreateRestOffsetAttr().Set(0.0)
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
@@ -153,7 +151,7 @@ class PickPlaceEnv(DirectRLEnv):
             ground_physx = PhysxSchema.PhysxCollisionAPI.Apply(ground_prim)
             ground_physx.CreateContactOffsetAttr().Set(0.005)
             ground_physx.CreateRestOffsetAttr().Set(0.0)
-            # Static colliders don't have maxDepenetrationVelocity
+            # Static colliders don't have maxDepenetrationVelocity attributes that we need to set manually here
         
         # Create hollow cup at env_0 (will be cloned)
         self._create_cup_prim("/World/envs/env_0/Cup", (0.0, -0.3, 0.0))

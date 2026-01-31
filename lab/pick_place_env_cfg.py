@@ -129,12 +129,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=1.0,
-                linear_damping=0.5, # Prevent flying
+                max_depenetration_velocity=0.5, # Very low to prevent any "launching"
+                linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for stability
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1), # Heavier cube for stability (100g)
             collision_props=sim_utils.CollisionPropertiesCfg(
                 contact_offset=0.005,  # Larger buffer for stability
                 rest_offset=0.0,
