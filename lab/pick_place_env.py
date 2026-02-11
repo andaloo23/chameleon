@@ -126,11 +126,11 @@ class PickPlaceEnv(DirectRLEnv):
                 # Set contact offsets for all collision prims (1mm for precision)
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
                     physx_col_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-                    physx_col_api.CreateContactOffsetAttr().Set(0.002)
+                    physx_col_api.CreateContactOffsetAttr().Set(0.001)
                     
                     # Stronger but controlled depenetration
                     physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
-                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.5)
+                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
                     
                     # Ensure rest offset is zero for safety
                     physx_col_api.CreateRestOffsetAttr().Set(0.0)
@@ -150,7 +150,7 @@ class PickPlaceEnv(DirectRLEnv):
                     break
         if ground_prim:
             ground_physx = PhysxSchema.PhysxCollisionAPI.Apply(ground_prim)
-            ground_physx.CreateContactOffsetAttr().Set(0.002)
+            ground_physx.CreateContactOffsetAttr().Set(0.001)
             ground_physx.CreateRestOffsetAttr().Set(0.0)
             # Static colliders don't have maxDepenetrationVelocity attributes that we need to set manually here
         
@@ -222,7 +222,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Apply physics
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
         physx_col_api = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
-        physx_col_api.CreateContactOffsetAttr().Set(0.002)
+        physx_col_api.CreateContactOffsetAttr().Set(0.001)
         physx_col_api.CreateRestOffsetAttr().Set(0.0)
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set("convexDecomposition")
         
@@ -234,7 +234,7 @@ class PickPlaceEnv(DirectRLEnv):
         xform_prim = xform.GetPrim()
         UsdPhysics.RigidBodyAPI.Apply(xform_prim)
         physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(xform_prim)
-        physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.5)
+        physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
         
         mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
         mass_api.CreateMassAttr().Set(10.0)  # Heavy so it doesn't move
