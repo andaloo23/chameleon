@@ -130,7 +130,7 @@ class PickPlaceEnv(DirectRLEnv):
                     
                     # Stronger but controlled depenetration
                     physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
-                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
+                    physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.7)
                     
                     # Ensure rest offset is zero for safety
                     physx_col_api.CreateRestOffsetAttr().Set(0.0)
@@ -234,7 +234,7 @@ class PickPlaceEnv(DirectRLEnv):
         xform_prim = xform.GetPrim()
         UsdPhysics.RigidBodyAPI.Apply(xform_prim)
         physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(xform_prim)
-        physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(1.0)
+        physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.7)
         
         mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
         mass_api.CreateMassAttr().Set(10.0)  # Heavy so it doesn't move

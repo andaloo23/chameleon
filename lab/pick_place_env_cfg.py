@@ -47,8 +47,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=8,  # Match decimation
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=True, # Help with thin mesh collisions
-            min_position_iteration_count=32, # Balanced for performance/stability
+            enable_ccd=False, # Disable to see if it reduces numerical drift
+            min_position_iteration_count=64, # Increased for better stability
             min_velocity_iteration_count=32, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
             gpu_total_aggregate_pairs_capacity=2**21,
@@ -92,12 +92,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         actuators={
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
-                stiffness=1500.0,
-                damping=200.0, # Increased damping to reduce oscillations
+                stiffness=3000.0, # Increased to handle payload
+                damping=300.0, # Increased for stabilization
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=2000.0, # Reduced from 5000 to prevent post-grasp jitter
+                stiffness=2000.0,
                 damping=100.0,
             ),
         },
@@ -129,7 +129,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=1.0, # Increased for a decisively firm grasp
+                max_depenetration_velocity=0.7, # Reduced to minimize impulsive drift
                 linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
