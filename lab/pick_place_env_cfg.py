@@ -47,7 +47,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=8,  # Match decimation
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=False, # Disable to see if it reduces numerical drift
+            enable_ccd=True, # Re-enabled with 64 iterations for reliable contact
             min_position_iteration_count=64, # Increased for better stability
             min_velocity_iteration_count=32, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
@@ -129,7 +129,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=0.7, # Reduced to minimize impulsive drift
+                max_depenetration_velocity=1.0, # Increased for firmer grasp force
                 linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
@@ -199,9 +199,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Grasp Detection Thresholds =====
     grasp_close_command_threshold = 0.1
-    grasp_stall_threshold = 0.005 # Relaxed from 0.001 to allow for PD jitter
+    grasp_stall_threshold = 0.01 # Relaxed to catch grasp consistently
     grasp_lift_threshold = 0.022 # Detect lift earlier
-    grasp_following_threshold = 0.01 # Relaxed from 0.002 (allow 1cm drift)
+    grasp_following_threshold = 0.02 # Relaxed to handle lift jitter
     grasp_frames_to_grasp = 3 # More responsive
     grasp_frames_to_drop = 15
     grasp_history_len = 3 # More responsive
