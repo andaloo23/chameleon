@@ -6,6 +6,7 @@ Pillow
 scipy
 timm==0.9.10
 torch==2.7.0
-torchvision==0.17.2
+torchvision==0.22.0
 transformers==4.57.6
 tokenizers==0.19.1
+torchaudio==2.7.0
