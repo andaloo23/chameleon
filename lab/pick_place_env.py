@@ -107,8 +107,8 @@ class PickPlaceEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         
         from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
-        import isaaclab.sim as sim_utils
-        stage = sim_utils.stage_utils.get_current_stage()
+        import isaaclab.sim.utils.stage as stage_utils
+        stage = stage_utils.get_current_stage()
         
         # Spawn the high friction material once globally
         material_path = "/World/Materials/HighFrictionMaterial"
@@ -186,10 +186,10 @@ class PickPlaceEnv(DirectRLEnv):
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
-        import isaaclab.sim as sim_utils
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
+        import isaaclab.sim.utils.stage as stage_utils
         
-        stage = sim_utils.stage_utils.get_current_stage()
+        stage = stage_utils.get_current_stage()
         
         # Cup dimensions from config
         outer_r_top = self.cfg.cup_outer_radius_top
