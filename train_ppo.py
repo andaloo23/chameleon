@@ -441,13 +441,11 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
                     ep_num = len(all_episode_rewards)
                     msg = (f"  [Ep {ep_num}] "
                            f"MinDist: {min_gripper_cube_dists[env_idx]:.3f}m | "
-                           f"Reward: {current_episode_rewards[env_idx]:.2f} | ")
-                    
-                    if current_episode_rewards[env_idx] < 0:
-                        msg += (f"P: Action:{current_episode_penalties['action'][env_idx]:.2f} "
-                                f"Drop:{current_episode_penalties['drop'][env_idx]:.2f} "
-                                f"Cup:{current_episode_penalties['cup'][env_idx]:.2f} "
-                                f"Self:{current_episode_penalties['self'][env_idx]:.2f} | ")
+                           f"Reward: {current_episode_rewards[env_idx]:.2f} | "
+                           f"P: Action:{current_episode_penalties['action'][env_idx]:.2f} "
+                           f"Drop:{current_episode_penalties['drop'][env_idx]:.2f} "
+                           f"Cup:{current_episode_penalties['cup'][env_idx]:.2f} "
+                           f"Self:{current_episode_penalties['self'][env_idx]:.2f} | ")
                         
                     msg += f"R:{int(flags['reached'])} G:{int(flags['controlled'])} L:{int(flags['lifted'])} S:{int(flags['success'])}"
                     print(msg)
@@ -635,13 +633,11 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
             msg = (f"  [Ep {episode_count}] "
                   f"MinDist: {min_gripper_cube_dist:.3f}m | "
                   f"GripperWidth: {min_gripper_width:.4f}m | "
-                  f"Reward: {current_episode_reward:.2f}")
-            
-            if current_episode_reward < 0:
-                msg += (f" | P: Action:{current_episode_penalties['action']:.2f} "
-                        f"Drop:{current_episode_penalties['drop']:.2f} "
-                        f"Cup:{current_episode_penalties['cup']:.2f} "
-                        f"Self:{current_episode_penalties['self']:.2f}")
+                  f"Reward: {current_episode_reward:.2f} | "
+                  f"P: Action:{current_episode_penalties['action']:.2f} "
+                  f"Drop:{current_episode_penalties['drop']:.2f} "
+                  f"Cup:{current_episode_penalties['cup']:.2f} "
+                  f"Self:{current_episode_penalties['self']:.2f}")
             print(msg)
             
             if first_episode_debug:
