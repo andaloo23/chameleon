@@ -183,7 +183,7 @@ def compute_pick_place_rewards(
     success_bonus: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
     
@@ -191,6 +191,7 @@ def compute_pick_place_rewards(
         total_reward: [num_envs] total reward
         curr_gripper_cube_dist: [num_envs] to cache for next step
         new_stage_grasped: [num_envs] updated latched grasp flag
+        penalty_sum: [num_envs] cumulative penalty for logging
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
