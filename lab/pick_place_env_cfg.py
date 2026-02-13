@@ -47,7 +47,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=8,  # Match decimation
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=False, # Disable to prevent arm "sticking" to ground
+            enable_ccd=True, # Re-enabled to prevent tunneling during "soft" contact
             min_position_iteration_count=64, # Increased for better stability
             min_velocity_iteration_count=32, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
@@ -97,8 +97,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=2000.0,
-                damping=100.0,
+                stiffness=500.0, # Reduced to 500.0 for softer engagement
+                damping=50.0,
             ),
         },
     )
@@ -129,14 +129,14 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=2.0, # Increased to help arm pop out of ground
+                max_depenetration_velocity=0.5, # Reduced for "softer" resolve to prevent kicking
                 linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.1), # Heavier cube for stability (100g)
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.001,  # Tighten back to 1mm for precision
+                contact_offset=0.002,  # Increased to 2mm for smoother contact resolution
                 rest_offset=0.0,
             ),
             physics_material=high_friction_material,
