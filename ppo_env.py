@@ -126,7 +126,7 @@ class PPOEnv:
         flags = {
             # Use latched flag from reward_engine (stays True once reached)
             "reached": bool(stage_flags.get("reached", False)),
-            "controlled": bool(stage_flags.get("grasped", False)),
+            "grasped": bool(stage_flags.get("grasped", False)),
             "lifted": cube_height > 0.03 if cube_height is not None else False,
             "above_cup": bool(getattr(gripper_detector, "is_droppable_range", False) if gripper_detector else False),
             "released": bool(stage_flags.get("droppable_reached", False)),

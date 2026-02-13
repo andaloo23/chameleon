@@ -2,7 +2,7 @@
 Minimal PPO training script for the pick-and-place task.
 
 Uses a tiny MLP policy and trains on the PPOEnv wrapper.
-Outputs statistics: avg reward, % reached, % controlled, % lifted.
+Outputs statistics: avg reward, % reached, % grasped, % lifted.
 
 Supports two backends:
 - Isaac Sim (default): Uses ppo_env.py and vec_env.py
@@ -292,7 +292,7 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
     device = next(policy.parameters()).device
     
     # Initialize or restore state
-    if state is None:
+    if state == None:
         # Initial rollout
         obs_dict, info = env.reset()
         current_episode_rewards = torch.zeros(num_envs, device=device)
@@ -431,7 +431,7 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
                     # Record milestone flags for this episode
                     flags = {
                         "reached": ever_reached[env_idx].item(),
-                        "controlled": ever_grasped[env_idx].item(),
+                        "grasped": ever_grasped[env_idx].item(),
                         "lifted": ever_droppable[env_idx].item(),
                         "success": ever_in_cup[env_idx].item(),
                     }
@@ -447,7 +447,7 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
                            f"Cup:{current_episode_penalties['cup'][env_idx]:.2f} "
                            f"Self:{current_episode_penalties['self'][env_idx]:.2f} | ")
                         
-                    msg += f"R:{int(flags['reached'])} G:{int(flags['controlled'])} L:{int(flags['lifted'])} S:{int(flags['success'])}"
+                    msg += f"R:{int(flags['reached'])} G:{int(flags['grasped'])} L:{int(flags['lifted'])} S:{int(flags['success'])}"
                     print(msg)
                     
                     # Reset this env's tracking
@@ -515,10 +515,14 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
         "self": 0.0
     }
     
-    # Per-episode tracking
+    # Per-episode tracking (latched flags)
     min_gripper_cube_dist = float("inf")
     final_gripper_cube_dist = float("inf")
     min_gripper_width = float("inf")
+    ever_reached = False
+    ever_grasped = False
+    ever_droppable = False
+    ever_success = False
     episode_count = 0
     step_count = 0
     first_episode_debug = True
@@ -597,9 +601,16 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
         if gripper_cube_dist is not None:
             min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
             final_gripper_cube_dist = gripper_cube_dist
+            if gripper_cube_dist < 0.15:
+                ever_reached = True
         
         if gripper_width is not None:
             min_gripper_width = min(min_gripper_width, gripper_width)
+
+        # Update latched flags from task_state
+        if task_state.get("is_grasped", False): ever_grasped = True
+        if task_state.get("is_droppable", False): ever_droppable = True
+        if task_state.get("is_in_cup", False): ever_success = True
         
         buffer.add(obs_array, action, reward, value, done, log_prob)
         current_episode_reward += reward
@@ -609,22 +620,24 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
             episode_count += 1
             episode_rewards.append(current_episode_reward)
             # Prepare milestone flags for logging (interpret task_state for Isaac Lab)
-            # Both reached and controlled are needed for Iter summary
+            # Both reached and grasped are needed for Iter summary
             m_flags = info.get("milestone_flags", {})
             if not m_flags and "task_state" in info:
-                # Isaac Lab fallback - interpret from task_state
-                is_grasped = info["task_state"].get("is_grasped", False)
-                if hasattr(is_grasped, "item"): is_grasped = is_grasped.item()
-                
+                # Isaac Lab fallback - use latched flags
                 m_flags = {
-                    "reached": min_gripper_cube_dist < 0.15,
-                    "controlled": is_grasped or (min_gripper_width < 0.03), # Heuristic for grasp
-                    "lifted": info["task_state"].get("is_droppable", False),
-                    "success": info["task_state"].get("is_in_cup", False)
+                    "reached": ever_reached,
+                    "grasped": ever_grasped or (min_gripper_width < 0.03), # Heuristic for grasp
+                    "lifted": ever_droppable,
+                    "success": ever_success
                 }
-                # Handle potential tensors in task_state
-                for k, v in m_flags.items():
-                    if hasattr(v, "item"): m_flags[k] = bool(v.item())
+            
+            # Ensure keys are unified for summary
+            if "controlled" in m_flags:
+                m_flags["grasped"] = m_flags.get("grasped") or m_flags["controlled"]
+            
+            # Handle potential tensors in task_state
+            for k, v in m_flags.items():
+                if hasattr(v, "item"): m_flags[k] = bool(v.item())
             
             episode_flags.append(m_flags)
             episode_min_dists.append(min_gripper_cube_dist)
@@ -651,6 +664,10 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
             min_gripper_cube_dist = float("inf")
             final_gripper_cube_dist = float("inf")
             min_gripper_width = float("inf")
+            ever_reached = False
+            ever_grasped = False
+            ever_droppable = False
+            ever_success = False
             sum_approach = 0.0
             sum_action_cost = 0.0
             sum_joint_limit = 0.0
@@ -803,7 +820,7 @@ def train_ppo(
             metrics_history["reward"].append(reward)
             metrics_history["min_dist"].append(min_d if min_d != float("inf") else 0.0)
             metrics_history["reached"].append(flags.get("reached", False))
-            metrics_history["grasped"].append(flags.get("controlled", False))
+            metrics_history["grasped"].append(flags.get("grasped", False))
             metrics_history["lifted"].append(flags.get("lifted", False))
             metrics_history["success"].append(flags.get("success", False))
         
@@ -822,17 +839,17 @@ def train_ppo(
             n_episodes = len(all_flags)
             if n_episodes > 0:
                 pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
-                pct_controlled = 100 * sum(1 for f in all_flags if f.get("controlled")) / n_episodes
+                pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
                 pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
                 pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
             else:
-                pct_reached = pct_controlled = pct_lifted = pct_success = 0.0
+                pct_reached = pct_grasped = pct_lifted = pct_success = 0.0
             
             print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} | "
                   f"Reward: {avg_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
-            print(f"           Reached: {pct_reached:5.1f}% | Controlled: {pct_controlled:5.1f}% | "
+            print(f"           Reached: {pct_reached:5.1f}% | Grasped: {pct_grasped:5.1f}% | "
                   f"Lifted: {pct_lifted:5.1f}% | Success: {pct_success:5.1f}%")
     
     # Final statistics
@@ -844,13 +861,13 @@ def train_ppo(
     if n_episodes > 0:
         avg_reward = np.mean(all_rewards)
         pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
-        pct_controlled = 100 * sum(1 for f in all_flags if f.get("controlled")) / n_episodes
+        pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
         pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
         pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
         
         print(f"Average Episode Reward: {avg_reward:.2f}")
         print(f"% Reached:   {pct_reached:.1f}%")
-        print(f"% Controlled: {pct_controlled:.1f}%")
+        print(f"% Grasped:   {pct_grasped:.1f}%")
         print(f"% Lifted:    {pct_lifted:.1f}%")
         print(f"% Success:   {pct_success:.1f}%")
     

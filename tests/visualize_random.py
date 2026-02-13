@@ -88,7 +88,7 @@ def run_random_episode(max_steps: int = 300):
     
     flags = info.get("milestone_flags", {})
     print(f"Milestones: Reached={flags.get('reached')}, "
-          f"Controlled={flags.get('controlled')}, "
+          f"Grasped={flags.get('grasped')}, "
           f"Lifted={flags.get('lifted')}, "
           f"Success={flags.get('success')}")
     

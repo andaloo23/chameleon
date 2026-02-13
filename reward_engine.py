@@ -67,7 +67,6 @@ class RewardEngine:
             "success": False,           # Stage 5: one-time success bonus
             # New milestone flags for PPO tracking
             "reached": False,           # Gripper within reach distance of cube
-            "controlled": False,        # Alias for grasped (grasp detected)
             "lifted": False,            # Cube lifted above ground threshold
             "above_cup": False,         # Cube positioned above cup XY
             "released": False,          # Gripper opened after grasp
@@ -249,12 +248,8 @@ class RewardEngine:
         # These are one-way latching flags for PPO tracking
         
         # Reached: gripper within 14cm of cube
-        if gripper_cube_distance is not None and gripper_cube_distance < 0.14:
-            self.stage_flags["reached"] = True
-        
-        # Controlled: same as grasped (grasp detected)
-        if grasp_detected:
-            self.stage_flags["controlled"] = True
+        # Reached: within distance threshold
+        self.stage_flags["reached"] = gripper_cube_distance < 0.15 if gripper_cube_distance is not None else False
         
         # Lifted: cube above ground threshold (3cm) AND being grasped
         if cube_height is not None and cube_height > 0.03 and grasp_detected:
