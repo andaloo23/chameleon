@@ -170,8 +170,8 @@ class GraspDetectorTensor:
             is_grasped: Boolean tensor [num_envs] indicating grasp state
         """
         # 1. Update closing intent based on target changes
-        target_decreasing = target_gripper < self.prev_target_gripper
-        target_increasing = target_gripper > self.prev_target_gripper
+        target_decreasing = target_gripper < (self.prev_target_gripper - 1e-4)
+        target_increasing = target_gripper > (self.prev_target_gripper + 1e-4)
         self.closing_intent = torch.where(target_decreasing, torch.ones_like(self.closing_intent), self.closing_intent)
         self.closing_intent = torch.where(target_increasing, torch.zeros_like(self.closing_intent), self.closing_intent)
         self.prev_target_gripper = target_gripper.clone()

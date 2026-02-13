@@ -185,7 +185,8 @@ def main():
                 if grasped and not detector_state["grasped"]:
                     print("[GRASPED] Cube is being held!")
                 elif not grasped and detector_state["grasped"]:
-                    print("[GRASPED OFF] Cube released")
+                    cube_z = env.cube.data.root_pos_w[0, 2].item()
+                    print(f"[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
                 detector_state["grasped"] = grasped
             
             # Check droppable (cube over cup)
