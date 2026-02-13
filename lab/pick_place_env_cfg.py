@@ -209,7 +209,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
-    droppable_min_height = 0.005
+    droppable_min_height = 0.0
     in_cup_xy_margin = 1.0
     in_cup_height_margin = 0.02
 

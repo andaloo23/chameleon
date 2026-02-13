@@ -214,7 +214,7 @@ class GraspDetectorTensor:
         cube_bottom_z = cube_z - cube_half_size
         
         xy_in_range = cube_cup_xy_dist <= cup_inner_radius
-        above_cup = cube_bottom_z > (cup_top_z + droppable_min_height)
+        above_cup = cube_bottom_z >= (cup_top_z + droppable_min_height)
         self.is_droppable = xy_in_range & above_cup
         
         # 6. In-cup detection: cube XY aligned AND cube bottom inside cup height
