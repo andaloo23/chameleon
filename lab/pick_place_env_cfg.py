@@ -201,7 +201,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_close_command_threshold = 0.1
     grasp_stall_threshold = 0.01 # Relaxed to catch grasp consistently
     grasp_lift_threshold = 0.022 # Detect lift earlier
-    grasp_following_threshold = 0.005 # Tightened back to 5mm for better drop detection
+    grasp_following_threshold = 0.01 # Loosened slightly now that state is stabilized by floor check
     grasp_frames_to_grasp = 3 # More responsive
     grasp_frames_to_drop = 5 # Faster drop registration
     grasp_history_len = 5 # More robust following checks

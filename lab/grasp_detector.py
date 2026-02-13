@@ -238,10 +238,10 @@ class GraspDetectorTensor:
         self.is_grasped = self.is_grasped | new_grasps
         self.following_frames = torch.where(new_grasps, torch.zeros_like(self.following_frames), self.following_frames)
         
-        # If grasped: lose grasp if not following OR actively opening for M frames
-        # Opening intent is a very strong signal for intentional drop
+        # If grasped: lose grasp if actively opening OR (not following AND not lifted)
+        # This prevents toggling "Released" messages if the cube slips during transport
         opening_intent = target_increasing
-        lost_grasp_condition = ~following | opening_intent
+        lost_grasp_condition = opening_intent | (~following & ~lifted)
         
         self.not_following_frames = torch.where(
             self.is_grasped & lost_grasp_condition,
