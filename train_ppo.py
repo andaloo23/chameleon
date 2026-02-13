@@ -293,7 +293,7 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
     
     # Initialize or restore state
     if state is None:
-        # First call - reset environment
+        # Initial rollout
         obs_dict, info = env.reset()
         current_episode_rewards = torch.zeros(num_envs, device=device)
         min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
@@ -302,7 +302,12 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_in_cup = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        current_episode_penalties = torch.zeros(num_envs, device=device)
+        current_episode_penalties = {
+            "action": torch.zeros(num_envs, device=device),
+            "drop": torch.zeros(num_envs, device=device),
+            "cup": torch.zeros(num_envs, device=device),
+            "self": torch.zeros(num_envs, device=device),
+        }
     else:
         # Restore from previous rollout
         obs_dict = state['obs_dict']
@@ -313,7 +318,13 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         ever_grasped = state['ever_grasped']
         ever_droppable = state['ever_droppable']
         ever_in_cup = state['ever_in_cup']
-        current_episode_penalties = state.get('current_episode_penalties', torch.zeros(num_envs, device=device))
+        # Expanded penalty tracking
+        current_episode_penalties = state.get('current_episode_penalties', {
+            "action": torch.zeros(num_envs, device=device),
+            "drop": torch.zeros(num_envs, device=device),
+            "cup": torch.zeros(num_envs, device=device),
+            "self": torch.zeros(num_envs, device=device),
+        })
     
     # Completed episodes across all envs
     all_episode_rewards = []
@@ -369,9 +380,16 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         # Get task_state from info (has per-step milestone info as per-env tensors)
         task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
         
-        # Track penalties
-        if "penalty_sum" in task_state:
-            current_episode_penalties += task_state["penalty_sum"]
+        # Track penalties breakdown
+        if "penalties" in task_state:
+            p = task_state["penalties"]
+            current_episode_penalties["action"] += p.get("action_cost", 0.0)
+            current_episode_penalties["drop"] += p.get("drop_penalty", 0.0)
+            current_episode_penalties["cup"] += p.get("cup_collision", 0.0)
+            current_episode_penalties["self"] += p.get("self_collision", 0.0)
+        elif "penalty_sum" in task_state:
+             # Fallback for old style
+             current_episode_penalties["action"] += task_state["penalty_sum"]
         
         # Update per-env milestone tracking using tensor operations
         if "gripper_cube_distance" in task_state:
@@ -426,14 +444,18 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
                            f"Reward: {current_episode_rewards[env_idx]:.2f} | ")
                     
                     if current_episode_rewards[env_idx] < 0:
-                        msg += f"Penalty: {current_episode_penalties[env_idx]:.2f} | "
+                        msg += (f"P: Action:{current_episode_penalties['action'][env_idx]:.2f} "
+                                f"Drop:{current_episode_penalties['drop'][env_idx]:.2f} "
+                                f"Cup:{current_episode_penalties['cup'][env_idx]:.2f} "
+                                f"Self:{current_episode_penalties['self'][env_idx]:.2f} | ")
                         
                     msg += f"R:{int(flags['reached'])} G:{int(flags['controlled'])} L:{int(flags['lifted'])} S:{int(flags['success'])}"
                     print(msg)
                     
                     # Reset this env's tracking
                     current_episode_rewards[env_idx] = 0.0
-                    current_episode_penalties[env_idx] = 0.0
+                    for k in current_episode_penalties:
+                        current_episode_penalties[k][env_idx] = 0.0
                     min_gripper_cube_dists[env_idx] = float("inf")
                     final_gripper_cube_dists[env_idx] = 0.0
                     ever_reached[env_idx] = False
@@ -488,7 +510,12 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
     episode_min_dists = []
     episode_final_dists = []
     current_episode_reward = 0.0
-    current_episode_penalty = 0.0
+    current_episode_penalties = {
+        "action": 0.0,
+        "drop": 0.0,
+        "cup": 0.0,
+        "self": 0.0
+    }
     
     # Per-episode tracking
     min_gripper_cube_dist = float("inf")
@@ -563,14 +590,11 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
         sum_joint_limit += reward_components.get("joint_limit_penalty", 0.0)
         sum_self_keepout += reward_components.get("self_collision_penalty", 0.0)
         
-        # Track cumulative penalty for logging
-        step_penalty = (
-            reward_components.get("action_cost", 0.0) +
-            reward_components.get("cup_collision_penalty", 0.0) +
-            reward_components.get("drop_penalty", 0.0) +
-            reward_components.get("self_collision_penalty", 0.0)
-        )
-        current_episode_penalty += step_penalty
+        # Track cumulative penalties for breakdown logging
+        current_episode_penalties["action"] += reward_components.get("action_cost", 0.0)
+        current_episode_penalties["drop"] += reward_components.get("drop_penalty", 0.0)
+        current_episode_penalties["cup"] += reward_components.get("cup_collision_penalty", 0.0)
+        current_episode_penalties["self"] += reward_components.get("self_collision_penalty", 0.0)
         
         if gripper_cube_dist is not None:
             min_gripper_cube_dist = min(min_gripper_cube_dist, gripper_cube_dist)
@@ -614,7 +638,10 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
                   f"Reward: {current_episode_reward:.2f}")
             
             if current_episode_reward < 0:
-                msg += f" | Penalty: {current_episode_penalty:.2f}"
+                msg += (f" | P: Action:{current_episode_penalties['action']:.2f} "
+                        f"Drop:{current_episode_penalties['drop']:.2f} "
+                        f"Cup:{current_episode_penalties['cup']:.2f} "
+                        f"Self:{current_episode_penalties['self']:.2f}")
             print(msg)
             
             if first_episode_debug:
@@ -623,7 +650,8 @@ def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps
             
             # Reset tracking
             current_episode_reward = 0.0
-            current_episode_penalty = 0.0
+            for k in current_episode_penalties:
+                current_episode_penalties[k] = 0.0
             min_gripper_cube_dist = float("inf")
             final_gripper_cube_dist = float("inf")
             min_gripper_width = float("inf")
