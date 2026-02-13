@@ -2,20 +2,24 @@ import numpy as np
 
 # Reward weights for 5-stage task
 # Stage 1: Approach cube (delta-based shaping)
-APPROACH_DELTA_WEIGHT = 20.0  # Reward per meter closer to cube
+APPROACH_DELTA_WEIGHT = 2.0  # Reward per meter closer to cube
 
 # Stage 2: Grasp cube (one-time bonus)
-GRASP_BONUS = 2.0
+GRASP_BONUS = 10.0
 
 # Stage 3: Transport to cup (dense shaping) 
 TRANSPORT_DISTANCE_MAX = 0.5  # Max XY distance for shaping
 TRANSPORT_WEIGHT = 2.0        # Higher weight for transport (post-grasp)
 
-# Stage 4: Droppable range (one-time bonus)
-DROPPABLE_BONUS = 1.5
+# Stage 4: Lift cube (one-time bonus and dense term)
+LIFT_BONUS = 15.0
+LIFT_WEIGHT = 5.0             # Per meter of height
 
-# Stage 5: Success (one-time bonus)
-SUCCESS_BONUS = 10.0
+# Stage 5: Droppable range (one-time bonus)
+DROPPABLE_BONUS = 20.0
+
+# Stage 6: Success (one-time bonus)
+SUCCESS_BONUS = 50.0
 
 # Penalties
 ACTION_COST_WEIGHT = 0.0002   # Per-step action cost (reduced)
@@ -25,7 +29,7 @@ JOINT_LIMIT_PENALTY_WEIGHT = 1.0
 
 # Self-collision prevention
 SELF_COLLISION_THRESHOLD = 0.10  # 10cm - distance threshold for penalty
-SELF_COLLISION_PENALTY_WEIGHT = 5.0  # Weight for self-collision penalty (increased)
+SELF_COLLISION_PENALTY_WEIGHT = 0.1  # Weight for self-collision penalty (reduced for smooth penalty)
 
 
 class RewardEngine:
@@ -124,7 +128,8 @@ class RewardEngine:
         
         # ===== STAGE 1: Approach Cube =====
         # Delta-based shaping: reward only for moving closer (no penalty for moving away)
-        if gripper_cube_distance is not None:
+        # Disable once grasp is detected
+        if gripper_cube_distance is not None and not self.stage_flags.get("grasped"):
             if self._prev_gripper_cube_distance is not None:
                 # Reward = k * max(0, d_prev - d_now) -> only reward getting closer
                 delta = self._prev_gripper_cube_distance - gripper_cube_distance
@@ -135,11 +140,7 @@ class RewardEngine:
         else:
             components["approach_shaping"] = 0.0
         
-        # Stay-near reward: encourage staying close to cube before grasping
-        if gripper_cube_distance is not None and gripper_cube_distance < 0.14 and not grasp_detected:
-            components["stay_near_reward"] = 0.02  # Per-step bonus for being close
-        else:
-            components["stay_near_reward"] = 0.0
+        # Component removed: stay_near_reward
         
         # ===== STAGE 2: Grasp Cube =====
         # One-time bonus when grasp is detected
@@ -159,7 +160,22 @@ class RewardEngine:
         else:
             components["transport_shaping"] = 0.0
         
-        # ===== STAGE 4: Droppable Range =====
+        # ===== STAGE 4: Lift Cube =====
+        # One-time bonus when lifted
+        if not self.stage_flags.get("lifted") and self.stage_flags.get("grasped") and cube_height is not None and cube_height > 0.03:
+            self.stage_flags["lifted"] = True
+            components["lift_bonus"] = LIFT_BONUS
+        else:
+            components["lift_bonus"] = 0.0
+            
+        # Dense lift shaping: reward for getting cube off the table
+        if self.stage_flags.get("grasped") and cube_height is not None:
+            # table_height is assumed to be 0.0
+            components["lift_shaping"] = LIFT_WEIGHT * max(0.0, cube_height)
+        else:
+            components["lift_shaping"] = 0.0
+            
+        # ===== STAGE 5: Droppable Range =====
         # One-time bonus when cube is positioned above cup (ready to drop)
         if not self.stage_flags.get("droppable_reached") and droppable_detected:
             self.stage_flags["droppable_reached"] = True
@@ -167,7 +183,7 @@ class RewardEngine:
         else:
             components["droppable_bonus"] = 0.0
         
-        # ===== STAGE 5: Success =====
+        # ===== STAGE 6: Success =====
         # One-time bonus when cube is inside the cup
         if not self.stage_flags.get("success") and in_cup_detected:
             self.stage_flags["success"] = True
