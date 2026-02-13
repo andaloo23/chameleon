@@ -100,13 +100,13 @@ def main():
             if event.input == carb.input.KeyboardInput.ESCAPE:
                 input_state["is_running"] = False
             elif event.input == carb.input.KeyboardInput.Y:
-                # Gripper fully open
+                # Discrete: Gripper fully open
                 joint_targets[5] = GRIPPER_OPEN
-                print(f"[GRIPPER] Opening -> target={GRIPPER_OPEN}")
+                print(f"[GRIPPER] Snap Open -> target={GRIPPER_OPEN}")
             elif event.input == carb.input.KeyboardInput.U:
-                # Gripper fully close
-                joint_targets[5] = GRIPPER_CLOSE
-                print(f"[GRIPPER] Closing -> target={GRIPPER_CLOSE}")
+                # Continuous: Gripper incremental close
+                joint_targets[5] = torch.clamp(joint_targets[5] - GRIPPER_STEP, float(GRIPPER_CLOSE), float(GRIPPER_OPEN))
+                print(f"[GRIPPER] Closing -> target={joint_targets[5]:.2f}")
             elif event.input in mapping:
                 idx, direction = mapping[event.input]
                 step = STEP_SIZE
