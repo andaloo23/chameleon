@@ -1,12 +1,8 @@
 """
-Minimal PPO training script for the pick-and-place task.
+Minimal PPO training script for the pick-and-place task in Isaac Lab.
 
-Uses a tiny MLP policy and trains on the PPOEnv wrapper.
-Outputs statistics: avg reward, % reached, % grasped, % lifted.
-
-Supports two backends:
-- Isaac Sim (default): Uses ppo_env.py and vec_env.py
-- Isaac Lab (--isaac-lab): Uses lab/pick_place_env.py with GPU parallelization
+Uses a tiny MLP policy and trains on the PickPlaceEnv across parallel GPU environments.
+Outputs statistics: avg reward, % reached, % grasped, % lifted, % success.
 """
 
 import argparse
@@ -21,28 +17,21 @@ from torch.distributions import Normal
 
 
 def _extract_obs(obs):
-    """Extract observation tensor from either dict (Isaac Lab) or array (legacy) format.
-    
-    Isaac Lab returns: {"policy": tensor} where tensor is [batch, obs_dim] on GPU
-    Legacy returns: numpy array of shape [obs_dim]
+    """Extract observation tensor from Isaac Lab dict format.
     
     Returns: 1D numpy array suitable for training
     """
-    if isinstance(obs, dict):
-        # Isaac Lab format - extract policy tensor
-        policy_obs = obs.get("policy", obs.get("obs", None))
-        if policy_obs is None:
-            raise ValueError(f"Unknown observation dict keys: {obs.keys()}")
-        # Handle batched tensor (take first env for single-env training)
-        if hasattr(policy_obs, "cpu"):
-            # It's a tensor - move to CPU and convert
-            if policy_obs.dim() > 1:
-                policy_obs = policy_obs[0]  # Take first environment
-            return policy_obs.cpu().numpy()
-        return np.array(policy_obs)
-    else:
-        # Legacy numpy array format
-        return np.asarray(obs)
+    # Isaac Lab format - extract policy tensor
+    policy_obs = obs.get("policy", obs.get("obs", None))
+    if policy_obs is None:
+        raise ValueError(f"Unknown observation dict keys: {obs.keys()}")
+    
+    # Handle batched tensor (take first env for single-env training inference if needed)
+    if hasattr(policy_obs, "cpu"):
+        if policy_obs.dim() > 1:
+            policy_obs = policy_obs[0]  # Take first environment for metrics
+        return policy_obs.cpu().numpy()
+    return np.array(policy_obs)
 
 
 class TinyMLP(nn.Module):
@@ -265,239 +254,141 @@ def ppo_update(
     return metrics
 
 
-def collect_rollout(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int = 2048, 
-                    is_isaac_lab: bool = False, num_envs: int = 1, state: dict = None):
-    """Collect rollout data from environment(s).
+def collect_rollout(
+    env,
+    policy: TinyMLP,
+    buffer: RolloutBuffer,
+    n_steps: int = 2048,
+    num_envs: int = 1,
+    state: Dict = None,
+) -> Tuple[float, List[float], List[Dict], float, List[float], List[float], Dict]:
+    """Collect rollout using Isaac Lab parallel environments.
     
-    When is_isaac_lab=True, uses batched processing for all num_envs environments.
-    Otherwise, uses single-env processing for legacy compatibility.
-    
-    Args:
-        state: Optional state dict with 'obs_dict' and tracking tensors. If None, will reset env.
-    
-    Returns: 
-        (last_value, episode_rewards, episode_flags, mean_action_mag, episode_min_dists, episode_final_dists, next_state)
+    Returns:
+        (last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists, next_state)
     """
-    if is_isaac_lab and num_envs > 1:
-        return _collect_rollout_batched(env, policy, buffer, n_steps, num_envs, state)
-    else:
-        result = _collect_rollout_single(env, policy, buffer, n_steps)
-        return result + (None,)  # Add None for state return
-
-
-def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int, num_envs: int, state: dict = None):
-    """Batched rollout collection for Isaac Lab with multiple parallel environments."""
-    
-    # Get device from policy
-    device = next(policy.parameters()).device
+    device = env.device
     
     # Initialize or restore state
-    if state == None:
-        # Initial rollout
+    if state is None:
         obs_dict, info = env.reset()
-        current_episode_rewards = torch.zeros(num_envs, device=device)
-        min_gripper_cube_dists = torch.full((num_envs,), float("inf"), device=device)
-        final_gripper_cube_dists = torch.zeros(num_envs, device=device)
+        current_rewards = torch.zeros(num_envs, device=device)
+        min_dists = torch.full((num_envs,), float("inf"), device=device)
+        final_dists = torch.zeros(num_envs, device=device)
+        
+        # Latched milestone flags for each environment
         ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        ever_in_cup = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        current_episode_penalties = {
+        ever_lifted = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        ever_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        
+        penalties = {
             "action": torch.zeros(num_envs, device=device),
             "drop": torch.zeros(num_envs, device=device),
             "cup": torch.zeros(num_envs, device=device),
             "self": torch.zeros(num_envs, device=device),
         }
     else:
-        # Restore from previous rollout
-        obs_dict = state['obs_dict']
-        current_episode_rewards = state['current_episode_rewards']
-        min_gripper_cube_dists = state['min_gripper_cube_dists']
-        final_gripper_cube_dists = state['final_gripper_cube_dists']
-        ever_reached = state['ever_reached']
-        ever_grasped = state['ever_grasped']
-        ever_droppable = state['ever_droppable']
-        ever_in_cup = state['ever_in_cup']
-        # Expanded penalty tracking
-        current_episode_penalties = state.get('current_episode_penalties', {
-            "action": torch.zeros(num_envs, device=device),
-            "drop": torch.zeros(num_envs, device=device),
-            "cup": torch.zeros(num_envs, device=device),
-            "self": torch.zeros(num_envs, device=device),
-        })
-    
-    # Completed episodes across all envs
-    all_episode_rewards = []
-    all_episode_min_dists = []
-    all_episode_final_dists = []
-    all_episode_flags = []
+        obs_dict = state["obs_dict"]
+        current_rewards = state["current_rewards"]
+        min_dists = state["min_dists"]
+        final_dists = state["final_dists"]
+        ever_reached = state["ever_reached"]
+        ever_grasped = state["ever_grasped"]
+        ever_lifted = state["ever_lifted"]
+        ever_success = state["ever_success"]
+        penalties = state["penalties"]
+        info = state["info"]
+
+    episode_rewards, episode_flags, episode_min_dists, episode_final_dists = [], [], [], []
     action_magnitudes = []
     
-    # Batch storage for buffer (collect all experiences, add at end)
-    batch_obs = []
-    batch_actions = []
-    batch_rewards = []
-    batch_values = []
-    batch_dones = []
-    batch_log_probs = []
+    steps_per_env = max(1, n_steps // num_envs)
     
-    steps_collected = 0
-    total_steps = (n_steps // num_envs) * num_envs # Align to env batching
-    
-    print(f"  [INFO] Collecting {n_steps} rollout steps ({n_steps//num_envs} steps per env)...")
-    
-    loop_step = 0
-    while steps_collected < n_steps:
-        loop_step += 1
-        if loop_step % 20 == 0:
-            print(f"    [Heartbeat] Rollout step {steps_collected}/{n_steps}...")
-        # Extract observations - shape: [num_envs, obs_dim]
-        obs_tensor = obs_dict["policy"]
-        if not obs_tensor.is_cuda and device.type == "cuda":
-            obs_tensor = obs_tensor.to(device)
-        
+    for _ in range(steps_per_env):
+        policy_obs = obs_dict["policy"]
+        if not policy_obs.is_cuda and device.type == "cuda":
+            policy_obs = policy_obs.to(device)
+            
         with torch.no_grad():
-            # Batched policy forward pass
-            action_mean, values = policy.forward(obs_tensor)
+            action_mean, values = policy.forward(policy_obs)
             action_std = torch.exp(policy.policy_log_std)
             dist = Normal(action_mean, action_std)
             actions = dist.sample()
             log_probs = dist.log_prob(actions).sum(dim=-1)
             values = values.squeeze(-1)
-        
-        # Track action magnitudes
+            
         action_magnitudes.append(actions.abs().mean().item())
         
-        # Step environment with batched actions
+        # Step environment
         next_obs_dict, rewards, terminated, truncated, info = env.step(actions)
-        
-        # Combine done flags
         dones = terminated | truncated
         
-        # Update per-env tracking
-        current_episode_rewards += rewards
+        current_rewards += rewards
         
-        # Get task_state from info (has per-step milestone info as per-env tensors)
-        task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
+        task_state = info.get("task_state", {})
+        if "gripper_cube_distance" in task_state:
+            d = task_state["gripper_cube_distance"]
+            min_dists = torch.minimum(min_dists, d)
+            final_dists = d.clone()
+            ever_reached |= (d < 0.15)
+            
+        ever_grasped |= task_state.get("is_grasped", torch.zeros_like(ever_grasped))
+        ever_lifted |= task_state.get("is_droppable", torch.zeros_like(ever_lifted))
+        ever_success |= task_state.get("is_in_cup", torch.zeros_like(ever_success))
         
-        # Track penalties breakdown
+        # Penalties breakdown
         if "penalties" in task_state:
             p = task_state["penalties"]
-            current_episode_penalties["action"] += p.get("action_cost", 0.0)
-            current_episode_penalties["drop"] += p.get("drop_penalty", 0.0)
-            current_episode_penalties["cup"] += p.get("cup_collision", 0.0)
-            current_episode_penalties["self"] += p.get("self_collision", 0.0)
-        elif "penalty_sum" in task_state:
-             # Fallback for old style
-             current_episode_penalties["action"] += task_state["penalty_sum"]
+            penalties["action"] += p.get("action_cost", 0.0)
+            penalties["drop"] += p.get("drop_penalty", 0.0)
+            penalties["cup"] += p.get("cup_collision", 0.0)
+            penalties["self"] += p.get("self_collision", 0.0)
+            
+        # Store in buffer
+        po_np = policy_obs.cpu().numpy()
+        ac_np = actions.cpu().numpy()
+        re_np = rewards.cpu().numpy()
+        va_np = values.cpu().numpy()
+        do_np = dones.cpu().numpy()
+        lp_np = log_probs.cpu().numpy()
         
-        # Update per-env milestone tracking using tensor operations
-        if "gripper_cube_distance" in task_state:
-            dist_tensor = task_state["gripper_cube_distance"]  # [num_envs] tensor
-            # Update min distances per env
-            min_gripper_cube_dists = torch.minimum(min_gripper_cube_dists, dist_tensor)
-            final_gripper_cube_dists = dist_tensor.clone()
-            # Consider "reached" if distance < 0.15m for each env (gripper center to cube center)
-            ever_reached = ever_reached | (dist_tensor < 0.15)
-        
-        # Check grasp/droppable/in_cup per env (tensors)
-        if "is_grasped" in task_state:
-            ever_grasped = ever_grasped | task_state["is_grasped"]
-        if "is_droppable" in task_state:
-            ever_droppable = ever_droppable | task_state["is_droppable"]
-        if "is_in_cup" in task_state:
-            ever_in_cup = ever_in_cup | task_state["is_in_cup"]
-        
-        # Store in batch (vectorized)
-        batch_obs.append(obs_tensor.cpu().numpy())
-        batch_actions.append(actions.cpu().numpy())
-        batch_rewards.append(rewards.cpu().numpy())
-        batch_values.append(values.cpu().numpy())
-        batch_dones.append(dones.cpu().numpy())
-        batch_log_probs.append(log_probs.cpu().numpy())
-        
-        steps_collected += num_envs
-        
-        # Handle episode completions
-        done_envs = dones.nonzero(as_tuple=False).squeeze(-1)
-        if done_envs.numel() > 0:
-            for env_idx in done_envs.tolist():
-                if isinstance(env_idx, int):
-                    # Record episode stats
-                    all_episode_rewards.append(current_episode_rewards[env_idx].item())
-                    all_episode_min_dists.append(min_gripper_cube_dists[env_idx].item())
-                    all_episode_final_dists.append(final_gripper_cube_dists[env_idx].item())
-                    
-                    # Record milestone flags for this episode
-                    flags = {
-                        "reached": ever_reached[env_idx].item(),
-                        "grasped": ever_grasped[env_idx].item(),
-                        "lifted": ever_droppable[env_idx].item(),
-                        "success": ever_in_cup[env_idx].item(),
-                    }
-                    all_episode_flags.append(flags)
-                    
-                    # Print episode summary
-                    ep_num = len(all_episode_rewards)
-                    msg = (f"  [Ep {ep_num}] "
-                           f"MinDist: {min_gripper_cube_dists[env_idx]:.3f}m | "
-                           f"Reward: {current_episode_rewards[env_idx]:.2f} | "
-                           f"P: Action:{current_episode_penalties['action'][env_idx]:.2f} "
-                           f"Drop:{current_episode_penalties['drop'][env_idx]:.2f} "
-                           f"Cup:{current_episode_penalties['cup'][env_idx]:.2f} "
-                           f"Self:{current_episode_penalties['self'][env_idx]:.2f} | ")
-                        
-                    msg += f"R:{int(flags['reached'])} G:{int(flags['grasped'])} L:{int(flags['lifted'])} S:{int(flags['success'])}"
-                    print(msg)
-                    
-                    # Reset this env's tracking
-                    current_episode_rewards[env_idx] = 0.0
-                    for k in current_episode_penalties:
-                        current_episode_penalties[k][env_idx] = 0.0
-                    min_gripper_cube_dists[env_idx] = float("inf")
-                    final_gripper_cube_dists[env_idx] = 0.0
-                    ever_reached[env_idx] = False
-                    ever_grasped[env_idx] = False
-                    ever_droppable[env_idx] = False
-                    ever_in_cup[env_idx] = False
-        
+        for i in range(num_envs):
+            buffer.add(po_np[i], ac_np[i], re_np[i], va_np[i], do_np[i], lp_np[i])
+            
+            if do_np[i]:
+                episode_rewards.append(current_rewards[i].item())
+                episode_min_dists.append(min_dists[i].item())
+                episode_final_dists.append(final_dists[i].item())
+                episode_flags.append({
+                    "reached": ever_reached[i].item(),
+                    "grasped": ever_grasped[i].item(),
+                    "lifted": ever_lifted[i].item(),
+                    "success": ever_success[i].item()
+                })
+                
+                # Reset per-env
+                current_rewards[i] = 0.0
+                min_dists[i] = float("inf")
+                ever_reached[i], ever_grasped[i], ever_lifted[i], ever_success[i] = False, False, False, False
+                for k in penalties: penalties[k][i] = 0.0
+                
         obs_dict = next_obs_dict
-    
-    # Add all experiences to buffer at once
-    for step_idx in range(len(batch_obs)):
-        for env_idx in range(num_envs):
-            buffer.add(
-                batch_obs[step_idx][env_idx],
-                batch_actions[step_idx][env_idx],
-                batch_rewards[step_idx][env_idx],
-                batch_values[step_idx][env_idx],
-                batch_dones[step_idx][env_idx],
-                batch_log_probs[step_idx][env_idx]
-            )
-    
-    # Get last value for GAE
+        
+    # Last value for GAE
     with torch.no_grad():
-        obs_tensor = obs_dict["policy"]
-        if not obs_tensor.is_cuda and device.type == "cuda":
-            obs_tensor = obs_tensor.to(device)
-        _, last_values = policy.forward(obs_tensor)
-        last_value = last_values[0].item()  # Use first env's value
-    
-    # Build state dict for next rollout
+        _, last_values = policy.forward(obs_dict["policy"].to(device))
+        last_value = last_values[0].item()
+        
     next_state = {
-        'obs_dict': obs_dict,
-        'current_episode_rewards': current_episode_rewards,
-        'min_gripper_cube_dists': min_gripper_cube_dists,
-        'final_gripper_cube_dists': final_gripper_cube_dists,
-        'ever_reached': ever_reached,
-        'ever_grasped': ever_grasped,
-        'ever_droppable': ever_droppable,
-        'ever_in_cup': ever_in_cup,
-        'current_episode_penalties': current_episode_penalties,
+        "obs_dict": obs_dict, "current_rewards": current_rewards, "min_dists": min_dists,
+        "final_dists": final_dists, "ever_reached": ever_reached, "ever_grasped": ever_grasped,
+        "ever_lifted": ever_lifted, "ever_success": ever_success, "penalties": penalties, "info": info
     }
     
-    mean_action_mag = np.mean(action_magnitudes) if action_magnitudes else 0.0
-    return last_value, all_episode_rewards, all_episode_flags, mean_action_mag, all_episode_min_dists, all_episode_final_dists, next_state
+    return last_value, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
+
+
 
 
 def _collect_rollout_single(env, policy: TinyMLP, buffer: RolloutBuffer, n_steps: int):
@@ -696,10 +587,9 @@ def train_ppo(
     rollout_steps: int = 2048,
     log_interval: int = 10,
     n_envs: int = 1,
-    isaac_lab: bool = False,
 ):
     """
-    Train PPO on the pick-and-place task.
+    Train PPO on the pick-and-place task using Isaac Lab.
     
     Args:
         num_episodes: Target number of episodes to collect
@@ -709,46 +599,28 @@ def train_ppo(
         rollout_steps: Steps per rollout before update
         log_interval: Episodes between logging
         n_envs: Number of parallel environments
-        isaac_lab: Use Isaac Lab backend (GPU-accelerated)
     """
     print("=" * 60)
-    print("PPO Training for Pick-and-Place Task")
-    if isaac_lab:
-        print("Backend: Isaac Lab (GPU-accelerated)")
-    else:
-        print("Backend: Isaac Sim (legacy)")
+    print("PPO Training for Pick-and-Place Task (Isaac Lab)")
     print("=" * 60)
     
     # Create environment(s)
-    if isaac_lab:
-        # Isaac Lab: GPU-accelerated parallel environments
-        from isaaclab.app import AppLauncher
-        app_launcher = AppLauncher(headless=headless)
-        simulation_app = app_launcher.app
-        
-        from lab.pick_place_env import PickPlaceEnv
-        from lab.pick_place_env_cfg import PickPlaceEnvCfg
-        
-        cfg = PickPlaceEnvCfg()
-        cfg.scene.num_envs = n_envs
-        cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
-        env = PickPlaceEnv(cfg)
-        print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
-        
-        # Isaac Lab uses gymnasium-style API with dict observations
-        obs_dim = cfg.observation_space
-        act_dim = cfg.action_space
-    elif n_envs > 1:
-        from vec_env import VecEnv
-        env = VecEnv(n_envs=n_envs, headless=headless, max_steps=max_steps)
-        print(f"Using {n_envs} parallel environments (legacy VecEnv)")
-        obs_dim = env.observation_space.shape[0]
-        act_dim = env.action_space.shape[0]
-    else:
-        from ppo_env import PPOEnv
-        env = PPOEnv(headless=headless, max_steps=max_steps)
-        obs_dim = env.observation_space.shape[0]
-        act_dim = env.action_space.shape[0]
+    from isaaclab.app import AppLauncher
+    app_launcher = AppLauncher(headless=headless)
+    simulation_app = app_launcher.app
+    
+    from lab.pick_place_env import PickPlaceEnv
+    from lab.pick_place_env_cfg import PickPlaceEnvCfg
+    
+    cfg = PickPlaceEnvCfg()
+    cfg.scene.num_envs = n_envs
+    cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
+    env = PickPlaceEnv(cfg)
+    print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
+    
+    # Isaac Lab uses gymnasium-style API with dict observations
+    obs_dim = cfg.observation_space
+    act_dim = cfg.action_space
     
     print(f"Observation space: {obs_dim}")
     print(f"Action space: {act_dim}")
@@ -756,10 +628,9 @@ def train_ppo(
     # Create policy and optimizer
     policy = TinyMLP(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=64)
     
-    # Move policy to GPU for Isaac Lab (batched GPU inference)
-    if isaac_lab and torch.cuda.is_available():
+    if torch.cuda.is_available():
         policy = policy.cuda()
-        print("Policy moved to GPU for Isaac Lab")
+        print("Policy moved to GPU")
     
     optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
     
@@ -799,9 +670,8 @@ def train_ppo(
         iteration += 1
         buffer.clear()
         
-        # Collect rollout (pass state to persist observation across rollouts)
         last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists, rollout_state = collect_rollout(
-            env, policy, buffer, n_steps=rollout_steps, is_isaac_lab=isaac_lab, num_envs=n_envs, state=rollout_state
+            env, policy, buffer, n_steps=rollout_steps, num_envs=n_envs, state=rollout_state
         )
         
         # Update policy
@@ -973,32 +843,18 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train PPO on pick-and-place task")
+    parser = argparse.ArgumentParser(description="Train PPO on pick-and-place task (Isaac Lab)")
     parser.add_argument("--episodes", type=int, default=100, help="Number of episodes to train")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
     parser.add_argument("--headless", action="store_true", help="Run headless")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=2048, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments")
-    parser.add_argument("--isaac-lab", action="store_true", 
-                        help="Use Isaac Lab backend (GPU-accelerated, supports 1000+ parallel envs)")
     
     args = parser.parse_args()
     
-    if args.isaac_lab:
-        print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
-        print(f"[INFO] Parallel environments: {args.n_envs} (can scale to 1000+)")
-        print("[INFO] Note: Requires Isaac Lab installation. See implementation_plan.md for setup.")
-    else:
-        # Legacy Isaac Sim mode warnings
-        if args.n_envs > 8:
-            print(f"[WARNING] {args.n_envs} parallel Isaac Sim instances may exceed GPU memory.")
-            print("[WARNING] Consider using --isaac-lab for true GPU parallelization.")
-        
-        if args.n_envs > 1:
-            print(f"[INFO] Parallel environments requested: {args.n_envs}")
-            print("[INFO] Note: Each env runs a separate Isaac Sim instance. GPU memory limited to ~4-8 envs.")
-            print("[INFO] Use --isaac-lab for native GPU parallelization (1000+ envs).")
+    print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
+    print(f"[INFO] Parallel environments: {args.n_envs} (can scale to 1000+)")
     
     train_ppo(
         num_episodes=args.episodes,
@@ -1007,6 +863,5 @@ if __name__ == "__main__":
         learning_rate=args.lr,
         rollout_steps=args.rollout_steps,
         n_envs=args.n_envs,
-        isaac_lab=args.isaac_lab,
     )
 

@@ -19,6 +19,7 @@ def compute_approach_reward(
     gripper_pos: Tensor,
     cube_pos: Tensor,
     prev_gripper_cube_dist: Tensor,
+    stage_grasped: Tensor,
     approach_weight: float,
 ) -> tuple[Tensor, Tensor]:
     """
@@ -39,8 +40,29 @@ def compute_approach_reward(
     """
     curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)
     delta = prev_gripper_cube_dist - curr_dist
-    reward = approach_weight * torch.clamp(delta, min=0.0)
+    
+    # Only award if NOT yet grasped
+    reward = approach_weight * torch.clamp(delta, min=0.0) * (~stage_grasped).float()
     return reward, curr_dist
+
+
+@torch.jit.script
+def compute_lift_shaping(
+    cube_height: Tensor,
+    stage_grasped: Tensor,
+    lift_weight: float,
+) -> Tensor:
+    """
+    Compute dense lift shaping reward.
+    
+    Args:
+        cube_height: [num_envs] cube Z height
+        stage_grasped: [num_envs] latched grasp flag
+        lift_weight: Reward per meter of height
+    """
+    # Only active after grasping
+    reward = lift_weight * torch.clamp(cube_height, min=0.0) * stage_grasped.float()
+    return reward
 
 
 @torch.jit.script
@@ -189,6 +211,7 @@ def compute_pick_place_rewards(
     transport_weight: float,
     transport_distance_max: float,
     lift_bonus: float,
+    lift_weight_shaping: float,
     droppable_bonus: float,
     success_bonus: float,
     action_cost_weight: float,
@@ -211,13 +234,17 @@ def compute_pick_place_rewards(
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
-        gripper_pos, cube_pos, prev_gripper_cube_dist, approach_weight
+        gripper_pos, cube_pos, prev_gripper_cube_dist, stage_grasped, approach_weight
     )
     
     # Stage 3: Transport shaping
     transport_reward = compute_transport_reward(
         cube_pos, cup_pos, is_grasped, transport_weight, transport_distance_max
     )
+    
+    # Stage 4: Lift shaping (dense)
+    cube_z = cube_pos[:, 2]
+    lift_shaping_reward = compute_lift_shaping(cube_z, stage_grasped, lift_weight_shaping)
     
     # Stages 2, 4, 5, 6: One-time bonuses
     cube_z = cube_pos[:, 2]
@@ -244,6 +271,7 @@ def compute_pick_place_rewards(
         approach_reward +
         grasp_reward +
         lift_reward +
+        lift_shaping_reward +
         transport_reward +
         droppable_reward +
         success_reward +

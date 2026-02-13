@@ -177,23 +177,26 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
-    rew_approach_delta_weight = 10.0  # Reduced to prevent aggressive collision behavior
+    rew_approach_delta_weight = 2.0  # Synced with Sim
     
     # Stage 2: Grasp cube (one-time bonus)
-    rew_grasp_bonus = 2.0
+    rew_grasp_bonus = 10.0
     
-    # Stage 4: Lift cube (one-time bonus) (NEW)
-    rew_lift_bonus = 1.5
+    # Stage 4: Lift cube (one-time bonus)
+    rew_lift_bonus = 15.0
+    
+    # Stage 4: Lift cube (dense shaping) (NEW)
+    rew_lift_weight = 5.0
     
     # Stage 3: Transport to cup (dense shaping)
     rew_transport_distance_max = 0.5  # Max XY distance for shaping
     rew_transport_weight = 2.0
     
     # Stage 4: Droppable range (one-time bonus)
-    rew_droppable_bonus = 1.5
+    rew_droppable_bonus = 20.0
     
     # Stage 5: Success (one-time bonus)
-    rew_success_bonus = 10.0
+    rew_success_bonus = 50.0
     
     # Penalties
     rew_action_cost_weight = 0.0002
