@@ -47,7 +47,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         render_interval=8,  # Match decimation
         physx=PhysxCfg(
             solver_type=1,  # TGS solver
-            enable_ccd=True, # Re-enabled with 64 iterations for reliable contact
+            enable_ccd=False, # Disable to prevent arm "sticking" to ground
             min_position_iteration_count=64, # Increased for better stability
             min_velocity_iteration_count=32, # Better energy dissipation
             gpu_found_lost_pairs_capacity=2**21,
@@ -92,8 +92,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         actuators={
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
-                stiffness=3000.0, # Increased to handle payload
-                damping=300.0, # Increased for stabilization
+                stiffness=2000.0, # Balanced for payload and movement
+                damping=200.0,
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
@@ -118,8 +118,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Physics material for higher friction
     high_friction_material = sim_utils.RigidBodyMaterialCfg(
-        static_friction=2.0,
-        dynamic_friction=2.0,
+        static_friction=1.0, # Normalized to prevent "sticking" to floor
+        dynamic_friction=1.0,
         restitution=0.0,
     )
 
@@ -129,7 +129,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=1.0, # Increased for firmer grasp force
+                max_depenetration_velocity=2.0, # Increased to help arm pop out of ground
                 linear_damping=0.5,
                 angular_damping=0.5,
                 disable_gravity=False,
