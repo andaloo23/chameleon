@@ -376,7 +376,7 @@ class PickPlaceEnv(DirectRLEnv):
         )
         
         # Compute rewards
-        total_reward, new_dist, new_stage_grasped = compute_pick_place_rewards(
+        total_reward, new_dist, new_stage_grasped, penalty_sum = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
@@ -418,6 +418,7 @@ class PickPlaceEnv(DirectRLEnv):
             "is_grasped": self.grasp_detector.is_grasped,  # [num_envs] bool tensor
             "is_droppable": self.grasp_detector.is_droppable,  # [num_envs] bool tensor
             "is_in_cup": self.grasp_detector.is_in_cup,  # [num_envs] bool tensor
+            "penalty_sum": penalty_sum, # [num_envs] tensor
         }
         
         return total_reward

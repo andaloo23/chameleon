@@ -227,7 +227,10 @@ def compute_pick_place_rewards(
         drop_penalty_reward
     )
     
+    # Penalty sum (for logging)
+    penalty_sum = action_cost + drop_penalty_reward
+    
     # Update latched stage flags
     new_stage_grasped = stage_grasped | is_grasped
     
-    return total_reward, curr_dist, new_stage_grasped
+    return total_reward, curr_dist, new_stage_grasped, penalty_sum
