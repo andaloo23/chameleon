@@ -366,12 +366,12 @@ def _collect_rollout_batched(env, policy: TinyMLP, buffer: RolloutBuffer, n_step
         # Update per-env tracking
         current_episode_rewards += rewards
         
+        # Get task_state from info (has per-step milestone info as per-env tensors)
+        task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
+        
         # Track penalties
         if "penalty_sum" in task_state:
             current_episode_penalties += task_state["penalty_sum"]
-        
-        # Get task_state from info (has per-step milestone info as per-env tensors)
-        task_state = info.get("task_state", {}) if isinstance(info, dict) else {}
         
         # Update per-env milestone tracking using tensor operations
         if "gripper_cube_distance" in task_state:
