@@ -97,8 +97,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             ),
             "gripper": ImplicitActuatorCfg(
                 joint_names_expr=["gripper"],
-                stiffness=750.0, # Final refinement for balance
-                damping=25.0, # Reduced for faster closing speed
+                stiffness=1000.0, # Boosted for faster response
+                damping=10.0, # Significantly reduced for max speed
             ),
         },
     )
@@ -173,7 +173,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cup_cube_min_distance = 0.10  # Minimum separation between cube and cup
 
     # ===== Action Scaling =====
-    action_scale = 0.05  # Delta joint position scale (radians)
+    action_scale = 0.1  # Increased from 0.05 for faster overall robot response
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
