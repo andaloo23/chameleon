@@ -223,7 +223,7 @@ class GraspDetectorTensor:
         self.is_in_cup = xy_in_range & cube_inside_height
         
         # 7. Apply grasp detection logic
-        # If not grasped: need closed + lifted + following for N frames
+        # If not grasped: need actively closing + lifted + following for N frames
         grasp_condition = closed & lifted & following
         
         # Increment following_frames where condition met, reset otherwise
@@ -238,9 +238,13 @@ class GraspDetectorTensor:
         self.is_grasped = self.is_grasped | new_grasps
         self.following_frames = torch.where(new_grasps, torch.zeros_like(self.following_frames), self.following_frames)
         
-        # If grasped: lose grasp if not following for M frames
+        # If grasped: lose grasp if not following OR actively opening for M frames
+        # Opening intent is a very strong signal for intentional drop
+        opening_intent = target_increasing
+        lost_grasp_condition = ~following | opening_intent
+        
         self.not_following_frames = torch.where(
-            self.is_grasped & ~following,
+            self.is_grasped & lost_grasp_condition,
             self.not_following_frames + 1,
             torch.zeros_like(self.not_following_frames)
         )
