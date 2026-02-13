@@ -24,7 +24,8 @@ SUCCESS_BONUS = 50.0
 # Penalties
 ACTION_COST_WEIGHT = 0.0002   # Per-step action cost (reduced)
 DROP_PENALTY = -3.0           # Dropping cube not in cup
-CUP_COLLISION_PENALTY = -0.5  # Per-step penalty for cup collision
+CUP_COLLISION_PENALTY = -0.05 # Per-step penalty for cup collision
+CUP_COLLISION_MIN_TOTAL = -5.0 # Max cumulative cup collision penalty
 JOINT_LIMIT_PENALTY_WEIGHT = 1.0
 
 # Self-collision prevention
@@ -40,6 +41,7 @@ class RewardEngine:
         self.stage_flags = {}
         self.reward_components = {}
         self.drop_detected = False
+        self.cumulative_cup_collision_penalty = 0.0
         self.task_state = {}
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
@@ -72,6 +74,7 @@ class RewardEngine:
         }
         self.reward_components = {}
         self.drop_detected = False
+        self.cumulative_cup_collision_penalty = 0.0
         self.task_state = {}
         self.latest_joint_positions = None
         self.latest_joint_velocities = None
@@ -200,11 +203,17 @@ class RewardEngine:
         else:
             components["action_cost"] = 0.0
         
-        # Cup collision: per-step penalty for gripper touching cup
+        # Cup collision: per-step penalty for gripper touching cup (clamped at -5.0 total per episode)
+        current_cup_penalty = 0.0
         if cup_collision:
-            components["cup_collision_penalty"] = CUP_COLLISION_PENALTY
-        else:
-            components["cup_collision_penalty"] = 0.0
+            if self.cumulative_cup_collision_penalty > CUP_COLLISION_MIN_TOTAL:
+                # Calculate remaining "budget" for penalty
+                remaining = CUP_COLLISION_MIN_TOTAL - self.cumulative_cup_collision_penalty
+                step_penalty = max(CUP_COLLISION_PENALTY, remaining)
+                current_cup_penalty = step_penalty
+                self.cumulative_cup_collision_penalty += step_penalty
+        
+        components["cup_collision_penalty"] = current_cup_penalty
         
         # Joint limit penalty: disabled
         components["joint_limit_penalty"] = 0.0
