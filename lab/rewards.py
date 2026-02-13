@@ -76,47 +76,46 @@ def compute_transport_reward(
     return reward
 
 
-@torch.jit.script
 def compute_one_time_bonuses(
     is_grasped: Tensor,
-    was_grasped: Tensor,
+    stage_grasped: Tensor,
+    is_lifted: Tensor,
+    stage_lifted: Tensor,
     is_droppable: Tensor,
-    was_droppable: Tensor,
+    stage_droppable: Tensor,
     is_in_cup: Tensor,
-    was_in_cup: Tensor,
+    stage_success: Tensor,
     grasp_bonus: float,
+    lift_bonus: float,
     droppable_bonus: float,
     success_bonus: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Compute one-time bonuses for stage transitions.
-    
-    Args:
-        is_grasped: [num_envs] current grasp state
-        was_grasped: [num_envs] previous grasp state (for detecting transition)
-        is_droppable: [num_envs] current droppable state
-        was_droppable: [num_envs] previous droppable state
-        is_in_cup: [num_envs] current in-cup state
-        was_in_cup: [num_envs] previous in-cup state
-        grasp_bonus: One-time bonus for grasping
-        droppable_bonus: One-time bonus for reaching droppable range
-        success_bonus: One-time bonus for success
+    Compute one-time bonuses for stage transitions with latching logic.
     
     Returns:
-        grasp_reward: [num_envs] grasp bonus (only on transition)
-        droppable_reward: [num_envs] droppable bonus (only on transition)
-        success_reward: [num_envs] success bonus (only on transition)
+        grasp_reward, lift_reward, droppable_reward, success_reward: [num_envs] bonuses
+        new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success: [num_envs] updated flags
     """
-    # Detect positive transitions (False -> True)
-    new_grasp = is_grasped & ~was_grasped
-    new_droppable = is_droppable & ~was_droppable
-    new_success = is_in_cup & ~was_in_cup
+    # Award bonus ONLY if condition is met AND it hasn't been awarded before
+    new_grasp = is_grasped & ~stage_grasped
+    new_lift = is_lifted & ~stage_lifted
+    new_droppable = is_droppable & ~stage_droppable
+    new_success = is_in_cup & ~stage_success
     
     grasp_reward = grasp_bonus * new_grasp.float()
+    lift_reward = lift_bonus * new_lift.float()
     droppable_reward = droppable_bonus * new_droppable.float()
     success_reward = success_bonus * new_success.float()
     
-    return grasp_reward, droppable_reward, success_reward
+    # Update latched flags
+    new_stage_grasped = stage_grasped | is_grasped
+    new_stage_lifted = stage_lifted | is_lifted
+    new_stage_droppable = stage_droppable | is_droppable
+    new_stage_success = stage_success | is_in_cup
+    
+    return (grasp_reward, lift_reward, droppable_reward, success_reward,
+            new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success)
 
 
 @torch.jit.script
@@ -142,10 +141,12 @@ def compute_penalties(
         cube_half_size: Half of cube side length
         action_cost_weight: Weight for action cost penalty
         drop_penalty: One-time penalty for dropping cube not in cup
+        stage_dropped: [num_envs] latched flag - was already penalized for drop
     
     Returns:
         action_cost: [num_envs] action cost penalty
         drop_penalty_reward: [num_envs] drop penalty (only on transition)
+        new_stage_dropped: [num_envs] updated latched drop flag
     """
     # Action cost: L2 norm of joint velocities
     action_cost = -action_cost_weight * torch.norm(joint_vel, dim=1)
@@ -154,9 +155,14 @@ def compute_penalties(
     cube_z = cube_pos[:, 2]
     low_height = cube_z <= cube_half_size * 1.5  # On ground threshold
     dropped = stage_grasped & ~is_grasped & low_height & ~is_in_cup
-    drop_penalty_reward = drop_penalty * dropped.float()
     
-    return action_cost, drop_penalty_reward
+    # Only apply penalty if not already penalized this episode
+    apply_drop_penalty = dropped & ~stage_dropped
+    drop_penalty_reward = drop_penalty * apply_drop_penalty.float()
+    
+    new_stage_dropped = stage_dropped | dropped
+    
+    return action_cost, drop_penalty_reward, new_stage_dropped
 
 
 @torch.jit.script
@@ -171,19 +177,23 @@ def compute_pick_place_rewards(
     is_droppable: Tensor,
     was_droppable: Tensor,
     is_in_cup: Tensor,
-    was_in_cup: Tensor,
     stage_grasped: Tensor,
+    stage_lifted: Tensor,
+    stage_droppable: Tensor,
+    stage_success: Tensor,
+    stage_dropped: Tensor,
     cube_half_size: float,
     # Reward weights
     approach_weight: float,
     grasp_bonus: float,
     transport_weight: float,
     transport_distance_max: float,
+    lift_bonus: float,
     droppable_bonus: float,
     success_bonus: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
     
@@ -193,6 +203,11 @@ def compute_pick_place_rewards(
         new_stage_grasped: [num_envs] updated latched grasp flag
         action_cost: [num_envs] action cost penalty
         drop_penalty: [num_envs] drop penalty
+        new_stage_grasped: [num_envs]
+        new_stage_lifted: [num_envs]
+        new_stage_droppable: [num_envs]
+        new_stage_success: [num_envs]
+        new_stage_dropped: [num_envs]
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
@@ -204,24 +219,31 @@ def compute_pick_place_rewards(
         cube_pos, cup_pos, is_grasped, transport_weight, transport_distance_max
     )
     
-    # Stages 2, 4, 5: One-time bonuses
-    grasp_reward, droppable_reward, success_reward = compute_one_time_bonuses(
-        is_grasped, was_grasped,
-        is_droppable, was_droppable,
-        is_in_cup, was_in_cup,
-        grasp_bonus, droppable_bonus, success_bonus
+    # Stages 2, 4, 5, 6: One-time bonuses
+    cube_z = cube_pos[:, 2]
+    is_lifted = is_grasped & (cube_z > 0.03)  # Table height threshold
+    
+    (grasp_reward, lift_reward, droppable_reward, success_reward,
+     new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success) = compute_one_time_bonuses(
+        is_grasped, stage_grasped,
+        is_lifted, stage_lifted,
+        is_droppable, stage_droppable,
+        is_in_cup, stage_success,
+        grasp_bonus, lift_bonus, droppable_bonus, success_bonus
     )
     
     # Penalties
-    action_cost, drop_penalty_reward = compute_penalties(
+    action_cost, drop_penalty_reward, new_stage_dropped = compute_penalties(
         joint_vel, cube_pos, is_grasped, stage_grasped,
-        is_in_cup, cube_half_size, action_cost_weight, drop_penalty
+        is_in_cup, cube_half_size, action_cost_weight, drop_penalty,
+        stage_dropped
     )
     
     # Total reward
     total_reward = (
         approach_reward +
         grasp_reward +
+        lift_reward +
         transport_reward +
         droppable_reward +
         success_reward +
@@ -229,7 +251,6 @@ def compute_pick_place_rewards(
         drop_penalty_reward
     )
     
-    # Update latched stage flags
-    new_stage_grasped = stage_grasped | is_grasped
-    
-    return total_reward, curr_dist, new_stage_grasped, action_cost, drop_penalty_reward
+    return (total_reward, curr_dist, 
+            new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
+            action_cost, drop_penalty_reward)

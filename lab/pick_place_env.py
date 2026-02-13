@@ -91,6 +91,10 @@ class PickPlaceEnv(DirectRLEnv):
         self._was_droppable = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_in_cup = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._stage_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._stage_lifted = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._stage_droppable = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._stage_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._stage_dropped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
         # Current action buffer
         self.actions = torch.zeros(self.num_envs, 6, device=self.device)
@@ -376,24 +380,26 @@ class PickPlaceEnv(DirectRLEnv):
         )
         
         # Compute rewards
-        total_reward, new_dist, new_stage_grasped, action_cost, drop_penalty = compute_pick_place_rewards(
+        total_reward, new_dist, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             joint_vel=self.joint_vel,
             prev_gripper_cube_dist=self._prev_gripper_cube_dist,
             is_grasped=self.grasp_detector.is_grasped,
-            was_grasped=self._was_grasped,
             is_droppable=self.grasp_detector.is_droppable,
-            was_droppable=self._was_droppable,
             is_in_cup=self.grasp_detector.is_in_cup,
-            was_in_cup=self._was_in_cup,
             stage_grasped=self._stage_grasped,
-            cube_half_size=self.cfg.cube_scale[2] / 2.0,
+            stage_lifted=self._stage_lifted,
+            stage_droppable=self._stage_droppable,
+            stage_success=self._stage_success,
+            stage_dropped=self._stage_dropped,
+            cube_half_size=self.cfg.cube_half_size if hasattr(self.cfg, "cube_half_size") else self.cfg.cube_scale[2] / 2.0,
             approach_weight=self.cfg.rew_approach_delta_weight,
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
             transport_distance_max=self.cfg.rew_transport_distance_max,
+            lift_bonus=self.cfg.rew_lift_bonus if hasattr(self.cfg, "rew_lift_bonus") else 1.5,
             droppable_bonus=self.cfg.rew_droppable_bonus,
             success_bonus=self.cfg.rew_success_bonus,
             action_cost_weight=self.cfg.rew_action_cost_weight,
@@ -406,6 +412,10 @@ class PickPlaceEnv(DirectRLEnv):
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
         self._stage_grasped = new_stage_grasped
+        self._stage_lifted = new_stage_lifted
+        self._stage_droppable = new_stage_droppable
+        self._stage_success = new_stage_success
+        self._stage_dropped = new_stage_dropped
         
         # Add debug metrics to extras (for training script monitoring)
         # Return per-env tensors so training script can track all environments
@@ -503,6 +513,10 @@ class PickPlaceEnv(DirectRLEnv):
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False
         self._stage_grasped[env_ids] = False
+        self._stage_lifted[env_ids] = False
+        self._stage_droppable[env_ids] = False
+        self._stage_success[env_ids] = False
+        self._stage_dropped[env_ids] = False
         
         # Reset joint targets
         self._joint_targets[env_ids] = self.robot.data.default_joint_pos[env_ids]
