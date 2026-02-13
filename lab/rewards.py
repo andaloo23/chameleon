@@ -76,6 +76,7 @@ def compute_transport_reward(
     return reward
 
 
+@torch.jit.script
 def compute_one_time_bonuses(
     is_grasped: Tensor,
     stage_grasped: Tensor,
@@ -128,7 +129,8 @@ def compute_penalties(
     cube_half_size: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor]:
+    stage_dropped: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
     """
     Compute penalty terms.
     
@@ -173,9 +175,7 @@ def compute_pick_place_rewards(
     joint_vel: Tensor,
     prev_gripper_cube_dist: Tensor,
     is_grasped: Tensor,
-    was_grasped: Tensor,
     is_droppable: Tensor,
-    was_droppable: Tensor,
     is_in_cup: Tensor,
     stage_grasped: Tensor,
     stage_lifted: Tensor,
