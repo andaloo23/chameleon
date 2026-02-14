@@ -185,12 +185,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 4: Lift cube (one-time bonus)
     rew_lift_bonus = 15.0
     
-    # Stage 4: Lift cube (dense shaping) (NEW)
-    rew_lift_weight = 5.0
     
-    # Stage 3: Transport to cup (dense shaping)
-    rew_transport_distance_max = 0.5  # Max XY distance for shaping
-    rew_transport_weight = 2.0
+    # Stage 3: Transport to cup (3D delta-based shaping)
+    rew_transport_weight = 20.0  # Increased since it's now delta-based in meters
     
     # Stage 4: Droppable range (one-time bonus)
     rew_droppable_bonus = 20.0

@@ -47,55 +47,42 @@ def compute_approach_reward(
 
 
 @torch.jit.script
-def compute_lift_shaping(
-    cube_height: Tensor,
-    stage_grasped: Tensor,
-    lift_weight: float,
-) -> Tensor:
-    """
-    Compute dense lift shaping reward.
-    
-    Args:
-        cube_height: [num_envs] cube Z height
-        stage_grasped: [num_envs] latched grasp flag
-        lift_weight: Reward per meter of height
-    """
-    # Only active after grasping
-    reward = lift_weight * torch.clamp(cube_height, min=0.0) * stage_grasped.float()
-    return reward
-
-
-@torch.jit.script
-def compute_transport_reward(
+def compute_transport_shaping_3d(
     cube_pos: Tensor,
     cup_pos: Tensor,
+    cup_height: float,
+    cube_half_size: float,
+    prev_transport_dist: Tensor,
     is_grasped: Tensor,
     transport_weight: float,
-    transport_distance_max: float,
-) -> Tensor:
+) -> tuple[Tensor, Tensor]:
     """
-    Compute transport shaping reward (distance to cup).
+    Compute 3D transport shaping reward (delta-based).
     
-    Only active after grasping. Reward increases as cube XY distance to cup decreases.
-    
-    Args:
-        cube_pos: [num_envs, 3] cube world position
-        cup_pos: [num_envs, 3] cup world position
-        is_grasped: [num_envs] boolean grasp state
-        transport_weight: Base reward weight
-        transport_distance_max: Max distance for normalization
-    
-    Returns:
-        reward: [num_envs] transport shaping reward
+    Target Z is cup_top + 2cm. Cube Z is based on bottom face.
+    Distance d = sqrt(dx^2 + dy^2 + 0.3 * dz^2)
+    Reward = w * (d_prev - d_curr)
     """
-    cube_xy = cube_pos[:, :2]
-    cup_xy = cup_pos[:, :2]
-    dist_xy = torch.norm(cube_xy - cup_xy, dim=1)
+    # Target Z: top of cup + 2cm margin
+    z_target = cup_pos[:, 2] + cup_height + 0.02
+    z_bottom = cube_pos[:, 2] - cube_half_size
     
-    # Normalize: 0 at max distance, 1 at cup
-    ratio = 1.0 - torch.clamp(dist_xy / transport_distance_max, max=1.0)
-    reward = transport_weight * ratio * is_grasped.float()
-    return reward
+    dx = cube_pos[:, 0] - cup_pos[:, 0]
+    dy = cube_pos[:, 1] - cup_pos[:, 1]
+    dz = z_bottom - z_target
+    
+    # 3D distance with Z-weighting (0.3)
+    curr_dist = torch.sqrt(dx**2 + dy**2 + 0.3 * dz**2)
+    
+    # Delta-based reward: positive if getting closer
+    delta = prev_transport_dist - curr_dist
+    
+    # Only award if CURRENTLY grasped
+    reward = transport_weight * delta * is_grasped.float()
+    
+    return reward, curr_dist
+
+
 
 
 @torch.jit.script
@@ -196,6 +183,7 @@ def compute_pick_place_rewards(
     cup_pos: Tensor,
     joint_vel: Tensor,
     prev_gripper_cube_dist: Tensor,
+    prev_transport_dist: Tensor,
     is_grasped: Tensor,
     is_droppable: Tensor,
     is_in_cup: Tensor,
@@ -204,19 +192,18 @@ def compute_pick_place_rewards(
     stage_droppable: Tensor,
     stage_success: Tensor,
     stage_dropped: Tensor,
+    cup_height: float,
     cube_half_size: float,
     # Reward weights
     approach_weight: float,
     grasp_bonus: float,
     transport_weight: float,
-    transport_distance_max: float,
     lift_bonus: float,
-    lift_weight_shaping: float,
     droppable_bonus: float,
     success_bonus: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
     
@@ -237,14 +224,11 @@ def compute_pick_place_rewards(
         gripper_pos, cube_pos, prev_gripper_cube_dist, stage_grasped, approach_weight
     )
     
-    # Stage 3: Transport shaping
-    transport_reward = compute_transport_reward(
-        cube_pos, cup_pos, is_grasped, transport_weight, transport_distance_max
+    # Stage 3: Unified 3D Transport shaping
+    transport_reward, curr_transport_dist = compute_transport_shaping_3d(
+        cube_pos, cup_pos, cup_height, cube_half_size,
+        prev_transport_dist, is_grasped, transport_weight
     )
-    
-    # Stage 4: Lift shaping (dense)
-    cube_z = cube_pos[:, 2]
-    lift_shaping_reward = compute_lift_shaping(cube_z, stage_grasped, lift_weight_shaping)
     
     # Stages 2, 4, 5, 6: One-time bonuses
     cube_z = cube_pos[:, 2]
@@ -271,7 +255,6 @@ def compute_pick_place_rewards(
         approach_reward +
         grasp_reward +
         lift_reward +
-        lift_shaping_reward +
         transport_reward +
         droppable_reward +
         success_reward +
@@ -279,6 +262,6 @@ def compute_pick_place_rewards(
         drop_penalty_reward
     )
     
-    return (total_reward, curr_dist, 
+    return (total_reward, curr_dist, curr_transport_dist,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward)

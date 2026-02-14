@@ -280,6 +280,7 @@ def collect_rollout(
         ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_lifted = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
         
         penalties = {
@@ -334,7 +335,8 @@ def collect_rollout(
             ever_reached |= (d < 0.15)
             
         ever_grasped |= task_state.get("is_grasped", torch.zeros_like(ever_grasped))
-        ever_lifted |= task_state.get("is_droppable", torch.zeros_like(ever_lifted))
+        ever_lifted |= info.get("milestone_flags", {}).get("lifted", torch.zeros_like(ever_lifted))
+        ever_droppable |= task_state.get("is_droppable", torch.zeros_like(ever_droppable))
         ever_success |= task_state.get("is_in_cup", torch.zeros_like(ever_success))
         
         # Penalties breakdown
@@ -364,13 +366,14 @@ def collect_rollout(
                     "reached": ever_reached[i].item(),
                     "grasped": ever_grasped[i].item(),
                     "lifted": ever_lifted[i].item(),
+                    "droppable": ever_droppable[i].item(),
                     "success": ever_success[i].item()
                 })
                 
                 # Reset per-env
                 current_rewards[i] = 0.0
                 min_dists[i] = float("inf")
-                ever_reached[i], ever_grasped[i], ever_lifted[i], ever_success[i] = False, False, False, False
+                ever_reached[i], ever_grasped[i], ever_lifted[i], ever_droppable[i], ever_success[i] = False, False, False, False, False
                 for k in penalties: penalties[k][i] = 0.0
                 
         obs_dict = next_obs_dict
@@ -383,7 +386,8 @@ def collect_rollout(
     next_state = {
         "obs_dict": obs_dict, "current_rewards": current_rewards, "min_dists": min_dists,
         "final_dists": final_dists, "ever_reached": ever_reached, "ever_grasped": ever_grasped,
-        "ever_lifted": ever_lifted, "ever_success": ever_success, "penalties": penalties, "info": info
+        "ever_lifted": ever_lifted, "ever_droppable": ever_droppable, "ever_success": ever_success, 
+        "penalties": penalties, "info": info
     }
     
     return last_value, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
@@ -653,7 +657,8 @@ def train_ppo(
         "min_dist": [],         # Min gripper-cube distance
         "reached": [],          # Boolean: did gripper reach cube
         "grasped": [],          # Boolean: did gripper grasp cube  
-        "lifted": [],           # Boolean: was cube lifted (droppable)
+        "lifted": [],           # Boolean: was cube lifted off ground
+        "droppable": [],         # Boolean: was cube aligned over cup
         "success": [],          # Boolean: was cube placed in cup
         
         # Per-iteration PPO metrics (for training diagnostics)
@@ -692,6 +697,7 @@ def train_ppo(
             metrics_history["reached"].append(flags.get("reached", False))
             metrics_history["grasped"].append(flags.get("grasped", False))
             metrics_history["lifted"].append(flags.get("lifted", False))
+            metrics_history["droppable"].append(flags.get("droppable", False))
             metrics_history["success"].append(flags.get("success", False))
         
         # Store per-iteration PPO metrics
@@ -711,16 +717,17 @@ def train_ppo(
                 pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
                 pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
                 pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
+                pct_droppable = 100 * sum(1 for f in all_flags if f.get("droppable")) / n_episodes
                 pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
             else:
-                pct_reached = pct_grasped = pct_lifted = pct_success = 0.0
+                pct_reached = pct_grasped = pct_lifted = pct_droppable = pct_success = 0.0
             
             print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} | "
                   f"Reward: {avg_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
-            print(f"           Reached: {pct_reached:5.1f}% | Grasped: {pct_grasped:5.1f}% | "
-                  f"Lifted: {pct_lifted:5.1f}% | Success: {pct_success:5.1f}%")
+            print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
+                  f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}%")
     
     # Final statistics
     print("\n" + "=" * 60)
@@ -733,12 +740,14 @@ def train_ppo(
         pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
         pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
         pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
+        pct_droppable = 100 * sum(1 for f in all_flags if f.get("droppable")) / n_episodes
         pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
         
         print(f"Average Episode Reward: {avg_reward:.2f}")
         print(f"% Reached:   {pct_reached:.1f}%")
         print(f"% Grasped:   {pct_grasped:.1f}%")
         print(f"% Lifted:    {pct_lifted:.1f}%")
+        print(f"% Droppable: {pct_droppable:.1f}%")
         print(f"% Success:   {pct_success:.1f}%")
     
     # Plot metrics
@@ -813,12 +822,12 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         axes[1, 1].set_ylim(0, 105)
         axes[1, 1].grid(True, alpha=0.3)
         
-        # Plot 5: % Lifted (smoothed success rate)
-        lifted_smoothed = moving_avg_bool(metrics["lifted"], w)
-        axes[2, 0].plot(ep_smoothed, lifted_smoothed, 'c-', linewidth=2)
+        # Plot 5: % Droppable (smoothed success rate)
+        droppable_smoothed = moving_avg_bool(metrics["droppable"], w)
+        axes[2, 0].plot(ep_smoothed, droppable_smoothed, 'c-', linewidth=2)
         axes[2, 0].set_xlabel("Episode")
-        axes[2, 0].set_ylabel("% Lifted")
-        axes[2, 0].set_title("Success Rate: Lifted Cube")
+        axes[2, 0].set_ylabel("% Droppable")
+        axes[2, 0].set_title("Success Rate: Aligned Above Cup")
         axes[2, 0].set_ylim(0, 105)
         axes[2, 0].grid(True, alpha=0.3)
         

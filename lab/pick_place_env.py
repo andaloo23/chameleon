@@ -87,7 +87,7 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Persistent state tensors for rewards
         self._prev_gripper_cube_dist = torch.zeros(self.num_envs, device=self.device)
-        self._was_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._prev_transport_dist = torch.zeros(self.num_envs, device=self.device)
         self._was_droppable = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_in_cup = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._stage_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -380,12 +380,13 @@ class PickPlaceEnv(DirectRLEnv):
         )
         
         # Compute rewards
-        total_reward, new_dist, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
+        total_reward, new_dist, new_transport_dist, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             joint_vel=self.joint_vel,
             prev_gripper_cube_dist=self._prev_gripper_cube_dist,
+            prev_transport_dist=self._prev_transport_dist,
             is_grasped=self.grasp_detector.is_grasped,
             is_droppable=self.grasp_detector.is_droppable,
             is_in_cup=self.grasp_detector.is_in_cup,
@@ -394,13 +395,12 @@ class PickPlaceEnv(DirectRLEnv):
             stage_droppable=self._stage_droppable,
             stage_success=self._stage_success,
             stage_dropped=self._stage_dropped,
-            cube_half_size=self.cfg.cube_half_size if hasattr(self.cfg, "cube_half_size") else self.cfg.cube_scale[2] / 2.0,
+            cup_height=self.cfg.cup_height,
+            cube_half_size=self.cfg.cube_scale[2] / 2.0,
             approach_weight=self.cfg.rew_approach_delta_weight,
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
-            transport_distance_max=self.cfg.rew_transport_distance_max,
             lift_bonus=self.cfg.rew_lift_bonus,
-            lift_weight_shaping=self.cfg.rew_lift_weight,
             droppable_bonus=self.cfg.rew_droppable_bonus,
             success_bonus=self.cfg.rew_success_bonus,
             action_cost_weight=self.cfg.rew_action_cost_weight,
@@ -409,6 +409,7 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
+        self._prev_transport_dist = new_transport_dist
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -432,10 +433,17 @@ class PickPlaceEnv(DirectRLEnv):
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,
-                # Placeholders for Lab (not implemented yet)
                 "cup_collision": torch.zeros_like(action_cost),
                 "self_collision": torch.zeros_like(action_cost),
             }
+        }
+        
+        # Expose latched flags for PPO metrics
+        self.extras["milestone_flags"] = {
+            "lifted": self._stage_lifted,
+            "droppable": self._stage_droppable,
+            "success": self._stage_success,
+            "grasped": self._stage_grasped,
         }
         
         return total_reward
