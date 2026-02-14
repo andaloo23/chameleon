@@ -88,6 +88,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Persistent state tensors for rewards
         self._prev_gripper_cube_dist = torch.zeros(self.num_envs, device=self.device)
         self._prev_transport_dist = torch.zeros(self.num_envs, device=self.device)
+        self._was_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_droppable = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_in_cup = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._stage_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
