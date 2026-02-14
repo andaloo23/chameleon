@@ -297,6 +297,7 @@ def collect_rollout(
         ever_reached = state["ever_reached"]
         ever_grasped = state["ever_grasped"]
         ever_lifted = state["ever_lifted"]
+        ever_droppable = state["ever_droppable"]
         ever_success = state["ever_success"]
         penalties = state["penalties"]
         info = state["info"]
