@@ -71,11 +71,11 @@ def compute_transport_shaping_3d(
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
     
-    # 3D distance with Z-weighting (0.3)
-    curr_dist = torch.sqrt(dx**2 + dy**2 + 0.3 * dz**2)
+    # 3D distance (balanced)
+    curr_dist = torch.sqrt(dx**2 + dy**2 + dz**2)
     
     # Delta-based reward: positive if getting closer
-    delta = prev_transport_dist - curr_dist
+    delta = torch.clamp(prev_transport_dist - curr_dist, min=0.0)
     
     # Only award if CURRENTLY grasped
     reward = transport_weight * delta * is_grasped.float()

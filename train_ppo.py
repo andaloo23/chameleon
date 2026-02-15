@@ -859,7 +859,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes to train")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
     parser.add_argument("--headless", action="store_true", help="Run headless")
-    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=32768, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
     

@@ -177,7 +177,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
-    rew_approach_delta_weight = 2.0  # Synced with Sim
+    rew_approach_delta_weight = 100.0  # Increased for stronger signal
     
     # Stage 2: Grasp cube (one-time bonus)
     rew_grasp_bonus = 10.0
@@ -187,7 +187,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     
     # Stage 3: Transport to cup (3D delta-based shaping)
-    rew_transport_weight = 20.0  # Increased since it's now delta-based in meters
+    rew_transport_weight = 100.0  # Increased for stronger signal
     
     # Stage 4: Droppable range (one-time bonus)
     rew_droppable_bonus = 20.0
@@ -196,7 +196,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_success_bonus = 50.0
     
     # Penalties
-    rew_action_cost_weight = 0.0002
+    rew_action_cost_weight = 0.00005  # Reduced to prevent "standing still" bias
     rew_drop_penalty = -3.0
     rew_cup_collision_penalty = -0.5
 
