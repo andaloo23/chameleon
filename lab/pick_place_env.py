@@ -393,11 +393,11 @@ class PickPlaceEnv(DirectRLEnv):
         # We use fixed mechanical offsets from the SO-100 design.
         # This makes (0,0,0) represent a PERFECT mechanical center grasp.
         # Any non-zero value is your direct alignment error.
-        # Debug offsets: Correct Y-alignment (-0.0244 shift for Fixed) and fix X-swap
-        # Moving jaw frame is at -0.0244 Y relative to fixed; we must compensate.
-        # User wants both moved -y (Forward) and fixed moved -x.
-        tip_offset_gripper = torch.tensor([-0.015 - 0.01, -0.082 - 0.0244 - 0.05, 0.080], device=self.device)
-        tip_offset_jaw = torch.tensor([0.015 - 0.035, -0.082 - 0.05, 0.080], device=self.device)
+        # Debug offsets: Sync Z-levels and fix Y-alignment/X-swap
+        # -Y is DOWN/FORWARD. We use -0.05 for base height.
+        # Fixed is now RIGHT (+x), Moving is LEFT (-x).
+        tip_offset_gripper = torch.tensor([0.015, -0.05, 0.080], device=self.device)
+        tip_offset_jaw = torch.tensor([-0.015, -0.05 + 0.0244, 0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
