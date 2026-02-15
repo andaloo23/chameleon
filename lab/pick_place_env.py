@@ -409,7 +409,7 @@ class PickPlaceEnv(DirectRLEnv):
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
         
         # Update fingertip markers (only for env 0 to avoid clutter)
-        tip_marker_positions = torch.stack([gripper_tip_pos[0], jaw_tip_pos[0]], dim=0).unsqueeze(0)
+        tip_marker_positions = torch.stack([gripper_tip_pos[0], jaw_tip_pos[0]], dim=0)
         self.tip_markers.visualize(tip_marker_positions)
         
         # Get gripper joint value and target
