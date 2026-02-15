@@ -21,6 +21,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform, quat_apply
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 
 from .pick_place_env_cfg import PickPlaceEnvCfg
 from .grasp_detector import GraspDetectorTensor
@@ -198,6 +199,18 @@ class PickPlaceEnv(DirectRLEnv):
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+        
+        # Add fingertip markers
+        tip_marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/Fingertips",
+            markers={
+                "fingertip": sim_utils.SphereCfg(
+                    radius=0.005,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.1, 1.0)), # Blue
+                )
+            },
+        )
+        self.tip_markers = VisualizationMarkers(tip_marker_cfg)
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
@@ -394,6 +407,10 @@ class PickPlaceEnv(DirectRLEnv):
         
         gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
+        
+        # Update fingertip markers (only for env 0 to avoid clutter)
+        tip_marker_positions = torch.stack([gripper_tip_pos[0], jaw_tip_pos[0]], dim=0).unsqueeze(0)
+        self.tip_markers.visualize(tip_marker_positions)
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
