@@ -2,19 +2,22 @@
 """
 Keyboard control script for Isaac Lab pick-and-place environment.
 
-Tests the various detectors:
-- Reach detector (gripper close to cube)
-- Grasp detector
-- Droppable detector (cube over cup)
-- In-cup detector
-
-Controls:
+Joint Controls:
   Q/A: Shoulder Pan
   W/S: Shoulder Lift
   E/D: Elbow Flex
   R/V: Wrist Flex
   T/G: Wrist Roll
   Y/U: Gripper (open/close)
+
+Sphere Offset Controls:
+  TAB:  Toggle active sphere (Green=fixed / Red=moving)
+  1/2:  Adjust X offset (-/+)
+  3/4:  Adjust Y offset (-/+)
+  5/6:  Adjust Z offset (-/+)
+  7/8:  Decrease/Increase step size
+  P:    Print current offsets
+
   ESC: Exit
 """
 import argparse
@@ -65,6 +68,10 @@ def main():
     STEP_SIZE = 0.05  # radians per keypress
     GRIPPER_STEP = 0.1
     
+    # Sphere offset tuning state
+    sphere_step = 0.005  # meters per keypress for sphere offset
+    active_sphere = "green"  # "green" (fixed/gripper) or "red" (moving/jaw)
+    
     # State tracking
     input_state = {"is_running": True}
     
@@ -95,7 +102,7 @@ def main():
     GRIPPER_CLOSE = -0.2
     
     def on_keyboard_event(event):
-        nonlocal joint_targets
+        nonlocal joint_targets, active_sphere, sphere_step
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if event.input == carb.input.KeyboardInput.ESCAPE:
                 input_state["is_running"] = False
@@ -109,8 +116,42 @@ def main():
                 print(f"[GRIPPER] Snap Close -> target={GRIPPER_CLOSE}")
             elif event.input in mapping:
                 idx, direction = mapping[event.input]
-                step = STEP_SIZE
-                joint_targets[idx] += direction * step
+                joint_targets[idx] += direction * STEP_SIZE
+            
+            # --- Sphere offset controls ---
+            elif event.input == carb.input.KeyboardInput.TAB:
+                active_sphere = "red" if active_sphere == "green" else "green"
+                label = "Green (Fixed)" if active_sphere == "green" else "Red (Moving)"
+                print(f"[SPHERE] Active: {label}")
+            elif event.input == carb.input.KeyboardInput.P:
+                g = env.tip_offset_gripper.cpu().numpy()
+                j = env.tip_offset_jaw.cpu().numpy()
+                print(f"[OFFSETS] Green: X={g[0]:.4f} Y={g[1]:.4f} Z={g[2]:.4f}")
+                print(f"[OFFSETS] Red:   X={j[0]:.4f} Y={j[1]:.4f} Z={j[2]:.4f}")
+            elif event.input in (carb.input.KeyboardInput.KEY_1, carb.input.KeyboardInput.KEY_2,
+                                 carb.input.KeyboardInput.KEY_3, carb.input.KeyboardInput.KEY_4,
+                                 carb.input.KeyboardInput.KEY_5, carb.input.KeyboardInput.KEY_6):
+                # Select which offset tensor to modify
+                offset = env.tip_offset_gripper if active_sphere == "green" else env.tip_offset_jaw
+                axis_map = {
+                    carb.input.KeyboardInput.KEY_1: (0, -1),  # X-
+                    carb.input.KeyboardInput.KEY_2: (0, +1),  # X+
+                    carb.input.KeyboardInput.KEY_3: (1, -1),  # Y-
+                    carb.input.KeyboardInput.KEY_4: (1, +1),  # Y+
+                    carb.input.KeyboardInput.KEY_5: (2, -1),  # Z-
+                    carb.input.KeyboardInput.KEY_6: (2, +1),  # Z+
+                }
+                axis, direction = axis_map[event.input]
+                offset[axis] += direction * sphere_step
+                axis_name = "XYZ"[axis]
+                label = "Green" if active_sphere == "green" else "Red"
+                print(f"[SPHERE {label}] {axis_name}={offset[axis]:.4f}  (step={sphere_step:.4f})")
+            elif event.input == carb.input.KeyboardInput.KEY_7:
+                sphere_step = max(0.001, sphere_step / 2.0)
+                print(f"[SPHERE] Step size: {sphere_step:.4f}")
+            elif event.input == carb.input.KeyboardInput.KEY_8:
+                sphere_step = min(0.05, sphere_step * 2.0)
+                print(f"[SPHERE] Step size: {sphere_step:.4f}")
         return True
     
     # Register keyboard listener
@@ -119,16 +160,22 @@ def main():
     keyboard = appwindow.get_keyboard()
     _sub = input_interface.subscribe_to_keyboard_events(keyboard, on_keyboard_event)
     
-    print("\nControls:")
+    print("\nJoint Controls:")
     print("  Shoulder Pan:  Q / A")
     print("  Shoulder Lift: W / S")
     print("  Elbow Flex:    E / D")
     print("  Wrist Flex:    R / V")
     print("  Wrist Roll:    T / G")
     print("  Gripper:       Y (open) / U (close)")
-    print("  Press ESC to Exit")
-    print("\nDetector events will print below:")
-    print("-" * 40)
+    print("\nSphere Controls:")
+    print("  TAB:  Toggle active sphere (Green/Red)")
+    print("  1/2:  X offset  -/+")
+    print("  3/4:  Y offset  -/+")
+    print("  5/6:  Z offset  -/+")
+    print("  7/8:  Step size -/+")
+    print("  P:    Print offsets")
+    print("\n  ESC to Exit")
+    print("-" * 50)
     
     REACH_THRESHOLD = 0.10  # meters
     warmup_frames = 60  # Skip detector checks during scene stabilization
@@ -189,6 +236,14 @@ def main():
                 gr_xyz = gr_local[0].cpu().numpy()
                 
                 if frame_count % 10 == 0:
+                    # Sphere world positions
+                    g_tip = task_state.get("gripper_tip_pos")
+                    j_tip = task_state.get("jaw_tip_pos")
+                    if g_tip is not None and j_tip is not None:
+                        gw = g_tip[0].cpu().numpy()
+                        jw = j_tip[0].cpu().numpy()
+                        print(f"Green XYZ: ({gw[0]:+.4f},{gw[1]:+.4f},{gw[2]:+.4f}) | "
+                              f"Red XYZ: ({jw[0]:+.4f},{jw[1]:+.4f},{jw[2]:+.4f})")
                     print(f"Local L-Tip | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
                           f"R-Tip | X:{gr_xyz[0]:.3f} Y:{gr_xyz[1]:.3f} Z:{gr_xyz[2]:.3f}")
             

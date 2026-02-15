@@ -115,6 +115,12 @@ class PickPlaceEnv(DirectRLEnv):
         # Current joint targets
         self._joint_targets = torch.zeros(self.num_envs, 6, device=self.device)
         
+        # Debug sphere offsets (mutable for keyboard tuning)
+        # Fixed (Green): offset in gripper's local frame
+        self.tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
+        # Moving (Red): offset in jaw's local frame (180° Y-rotated from gripper)
+        self.tip_offset_jaw = torch.tensor([-0.035, -0.088, -0.080], device=self.device)
+        
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -400,18 +406,9 @@ class PickPlaceEnv(DirectRLEnv):
         jaw_quat = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
         cube_pos = self.cube.data.root_pos_w
         
-        # DEBUG MAPPING TEST (Focusing on Red sphere Y-axis):
-        # Fixed (Green): Baseline offset in gripper's local frame
-        tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
-        # Moving (Red): Offset from jaw origin to fingertip in JAW's local frame
-        # Derived from URDF: jaw pivot at (-0.0202, -0.0244, 0) in gripper frame,
-        # jaw frame is 180° Y-rotated, so (x,y,z)_gripper → (-x,y,-z)_jaw
-        # Closed-position tip ≈ (+0.015, -0.082, 0.080) in gripper frame
-        # → jaw-local offset from pivot: (-0.035, -0.058, -0.080)
-        tip_offset_jaw = torch.tensor([-0.035, -0.088, -0.080], device=self.device)
-        
-        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
-        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
+        # Compute fingertip world positions from mutable offsets
+        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
+        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
