@@ -117,9 +117,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Debug sphere offsets (mutable for keyboard tuning)
         # Fixed (Green): offset in gripper's local frame
-        self.tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
+        self.tip_offset_gripper = torch.tensor([0.0100, -0.1020, 0.0], device=self.device)
         # Moving (Red): offset in jaw's local frame (180° Y-rotated from gripper)
-        self.tip_offset_jaw = torch.tensor([-0.035, -0.088, -0.080], device=self.device)
+        self.tip_offset_jaw = torch.tensor([-0.0100, -0.0780, 0.0], device=self.device)
         
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
