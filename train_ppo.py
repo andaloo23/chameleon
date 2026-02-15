@@ -188,7 +188,8 @@ def ppo_update(
     total_clip_fraction = 0.0
     n_updates = 0
     
-    for _ in range(n_epochs):
+    kl_brake_triggered = False
+    for epoch in range(n_epochs):
         np.random.shuffle(indices)
         
         for start in range(0, n_samples, batch_size):
@@ -236,6 +237,15 @@ def ppo_update(
             total_approx_kl += approx_kl
             total_clip_fraction += clip_fraction
             n_updates += 1
+            
+            # KL Safety Brake: if KL divergence is too high, stop updating to prevent collapse
+            if approx_kl > 0.02:
+                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.02")
+                kl_brake_triggered = True
+                break
+        
+        if kl_brake_triggered:
+            break
     
     # Compute explained variance
     with torch.no_grad():
