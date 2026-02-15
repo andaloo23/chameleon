@@ -200,17 +200,28 @@ class PickPlaceEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
         
-        # Add fingertip markers
-        tip_marker_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/Fingertips",
+        # Separate markers for Fixed (Green) and Moving (Red) for debugging
+        fixed_tip_marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/FixedFingertip",
             markers={
                 "fingertip": sim_utils.SphereCfg(
-                    radius=0.005,
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.1, 1.0)), # Blue
+                    radius=0.01,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)), # Green
                 )
             },
         )
-        self.tip_markers = VisualizationMarkers(tip_marker_cfg)
+        self.fixed_tip_markers = VisualizationMarkers(fixed_tip_marker_cfg)
+
+        moving_tip_marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/MovingFingertip",
+            markers={
+                "fingertip": sim_utils.SphereCfg(
+                    radius=0.01,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)), # Red
+                )
+            },
+        )
+        self.moving_tip_markers = VisualizationMarkers(moving_tip_marker_cfg)
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
@@ -391,13 +402,12 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Calculate fingertip positions (TARGETING MODE)
         # We use fixed mechanical offsets from the SO-100 design.
-        # This makes (0,0,0) represent a PERFECT mechanical center grasp.
-        # Any non-zero value is your direct alignment error.
-        # Debug offsets: Testing ONLY +0.10 Y on the moving jaw from baseline
-        # Fixed: Baseline
-        tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
-        # Moving: Baseline + 0.10 shift
-        tip_offset_jaw = torch.tensor([0.015, -0.082 + 0.10, 0.080], device=self.device)
+        
+        # DEBUG MAPPING TEST (Starting from clean baseline):
+        # Fixed (Green): Baseline + 0.10 Y shift
+        tip_offset_gripper = torch.tensor([-0.015, -0.082 + 0.10, 0.080], device=self.device)
+        # Moving (Red): Baseline + 0.10 X shift
+        tip_offset_jaw = torch.tensor([0.015 + 0.10, -0.082, 0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
@@ -412,8 +422,10 @@ class PickPlaceEnv(DirectRLEnv):
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
         
         # Update fingertip markers (only for env 0 to avoid clutter)
-        tip_marker_positions = torch.stack([gripper_tip_pos[0], jaw_tip_pos[0]], dim=0)
-        self.tip_markers.visualize(tip_marker_positions)
+        # Fixed (Green)
+        self.fixed_tip_markers.visualize(gripper_tip_pos[0].unsqueeze(0))
+        # Moving (Red)
+        self.moving_tip_markers.visualize(jaw_tip_pos[0].unsqueeze(0))
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
