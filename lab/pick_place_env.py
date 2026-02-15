@@ -20,7 +20,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform, quat_apply, quat_rotate_inv
+from isaaclab.utils.math import sample_uniform, quat_apply
 
 from .pick_place_env_cfg import PickPlaceEnvCfg
 from .grasp_detector import GraspDetectorTensor
@@ -388,8 +388,12 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
-        gripper_tip_local_dist = quat_rotate_inv(gripper_quat, cube_pos - gripper_tip_pos)
-        jaw_tip_local_dist = quat_rotate_inv(gripper_quat, cube_pos - jaw_tip_pos) # Use same gripper_quat for consistent local frame
+        # Inverse rotation = rotate by conjugate q* = (-x, -y, -z, w)
+        gripper_quat_inv = gripper_quat.clone()
+        gripper_quat_inv[:, :3] *= -1.0
+        
+        gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
+        jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
