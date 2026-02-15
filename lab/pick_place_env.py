@@ -428,14 +428,21 @@ class PickPlaceEnv(DirectRLEnv):
         # Compute cube grasp-face markers once at episode start, then just visualize cached positions
         first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
-            cube_quat_w = self.cube.data.root_quat_w
-            grip_x_world = quat_apply(gripper_quat, torch.tensor([1.0, 0.0, 0.0], device=self.device))
-            cube_x_world = quat_apply(cube_quat_w, torch.tensor([1.0, 0.0, 0.0], device=self.device))
-            cube_y_world = quat_apply(cube_quat_w, torch.tensor([0.0, 1.0, 0.0], device=self.device))
+            cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
+            # Get the cube's local X and Y axes in world frame (these are face normals)
+            local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+            local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+            cube_x_world = quat_apply(cube_quat_w, local_x)  # [num_envs, 3]
+            cube_y_world = quat_apply(cube_quat_w, local_y)  # [num_envs, 3]
+            # Determine which cube face axis the gripper's open/close direction aligns with
+            grip_x_world = quat_apply(gripper_quat, local_x)
             dot_x = torch.sum(grip_x_world * cube_x_world, dim=-1).abs()
             dot_y = torch.sum(grip_x_world * cube_y_world, dim=-1).abs()
             use_x = dot_x >= dot_y
+            # Select exactly one of the cube's local axes (not a blend)
             best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)
+            # Normalize to ensure exact unit length (prevents any drift toward corners)
+            best_axis = best_axis / best_axis.norm(dim=-1, keepdim=True)
             half = self.cfg.cube_scale[0] / 2.0
             self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
             self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
