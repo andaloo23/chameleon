@@ -20,7 +20,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform
+from isaaclab.utils.math import sample_uniform, quat_apply
 
 from .pick_place_env_cfg import PickPlaceEnvCfg
 from .grasp_detector import GraspDetectorTensor
@@ -369,19 +369,28 @@ class PickPlaceEnv(DirectRLEnv):
 
     def _get_rewards(self) -> Tensor:
         """Compute rewards for all environments."""
-        # Get positions
+        # Get gripper and jaw world positions and orientations
         gripper_pos = self.robot.data.body_pos_w[:, self._gripper_body_idx[0], :]
+        gripper_quat = self.robot.data.body_quat_w[:, self._gripper_body_idx[0], :]
+        jaw_pos = self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :]
+        jaw_quat = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
         cube_pos = self.cube.data.root_pos_w
+        
+        # Calculate fingertip positions (local offset approx 6.5cm along Y)
+        tip_offset = torch.tensor([0.0, -0.065, 0.0], device=self.device)
+        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset)
+        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset)
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
         target_gripper = self._joint_targets[:, self._gripper_joint_idx]
         
-        # Update grasp detector
+        # Update grasp detector with both jaws
         self.grasp_detector.update(
             gripper_value=gripper_value,
             target_gripper=target_gripper,
             gripper_pos=gripper_pos,
+            jaw_pos=jaw_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             cup_height=self.cfg.cup_height,
@@ -445,8 +454,10 @@ class PickPlaceEnv(DirectRLEnv):
             "is_grasped": self.grasp_detector.is_grasped,  # [num_envs] bool tensor
             "is_droppable": self.grasp_detector.is_droppable,  # [num_envs] bool tensor
             "is_in_cup": self.grasp_detector.is_in_cup,  # [num_envs] bool tensor
-            "gripper_pos": gripper_pos,  # Fixed jaw pos
-            "jaw_pos": self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :],  # Moving jaw pos
+            "gripper_pos": gripper_pos,  # Fixed jaw frame origin
+            "jaw_pos": jaw_pos,          # Moving jaw frame origin
+            "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip
+            "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip
             "cube_pos": cube_pos,
             "penalties": {
                 "action_cost": action_cost,

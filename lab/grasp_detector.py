@@ -68,9 +68,10 @@ class GraspDetectorTensor:
     
     def _init_state_tensors(self):
         """Initialize all state tracking tensors."""
-        # Distance history for following detection: [num_envs, history_len]
-        self.dist_history = torch.zeros(
-            self.num_envs, self.history_len, device=self.device, dtype=torch.float32
+        # Vector history for following detection: [num_envs, history_len, 6]
+        # Stores (gripper_pos - cube_pos) [0:3] and (jaw_pos - cube_pos) [3:6]
+        self.vector_history = torch.zeros(
+            self.num_envs, self.history_len, 6, device=self.device, dtype=torch.float32
         )
         self.dist_history_idx = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long
@@ -124,7 +125,7 @@ class GraspDetectorTensor:
         if env_ids is None:
             self._init_state_tensors()
         else:
-            self.dist_history[env_ids] = 0.0
+            self.vector_history[env_ids] = 0.0
             self.dist_history_idx[env_ids] = 0
             self.dist_history_filled[env_ids] = False
             self.gripper_history[env_ids] = 0.0
@@ -143,6 +144,7 @@ class GraspDetectorTensor:
         gripper_value: Tensor,
         target_gripper: Tensor,
         gripper_pos: Tensor,
+        jaw_pos: Tensor,
         cube_pos: Tensor,
         cup_pos: Tensor,
         cup_height: float,
@@ -194,17 +196,23 @@ class GraspDetectorTensor:
         cube_z = cube_pos[:, 2]
         lifted = cube_z > self.lift_threshold
         
-        # 4. Update distance history and check following
-        curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)
+        # 4. Update vector history and check following
+        # We track relative XYZ vectors for BOTH jaws to ensure no slip or rotation
+        vec_gripper = gripper_pos - cube_pos
+        vec_jaw = jaw_pos - cube_pos
+        curr_vec = torch.cat([vec_gripper, vec_jaw], dim=1) # [num_envs, 6]
+        
         idx = self.dist_history_idx % self.history_len
-        self.dist_history.scatter_(1, idx.unsqueeze(1), curr_dist.unsqueeze(1))
+        self.vector_history.scatter_(1, idx.view(-1, 1, 1).expand(-1, 1, 6), curr_vec.unsqueeze(1))
         self.dist_history_idx = (self.dist_history_idx + 1) % self.history_len
         self.dist_history_filled = self.dist_history_filled | (self.dist_history_idx == 0)
         
-        # Following = max - min distance < threshold (only if history is filled)
-        dist_max = self.dist_history.max(dim=1).values
-        dist_min = self.dist_history.min(dim=1).values
-        following = self.dist_history_filled & ((dist_max - dist_min) < self.following_threshold)
+        # Following = max - min of EACH component < threshold
+        # This is much stricter than Euclidean distance as it catches slipping/rotation
+        v_max = self.vector_history.max(dim=1).values
+        v_min = self.vector_history.min(dim=1).values
+        v_diff_max = (v_max - v_min).max(dim=1).values # Max variation among any of the 6 components
+        following = self.dist_history_filled & (v_diff_max < self.following_threshold)
         
         # 5. Droppable detection: cube is above cup and aligned XY
         cube_xy = cube_pos[:, :2]
