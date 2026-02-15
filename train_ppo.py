@@ -335,10 +335,12 @@ def collect_rollout(
             final_dists = d.clone()
             ever_reached |= (d < 0.15)
             
-        ever_grasped |= task_state.get("is_grasped", torch.zeros_like(ever_grasped))
-        ever_lifted |= info.get("milestone_flags", {}).get("lifted", torch.zeros_like(ever_lifted))
-        ever_droppable |= task_state.get("is_droppable", torch.zeros_like(ever_droppable))
-        ever_success |= task_state.get("is_in_cup", torch.zeros_like(ever_success))
+        # Update milestone flags using the latched state from the environment
+        milestones = info.get("milestone_flags", {})
+        ever_grasped |= milestones.get("grasped", torch.zeros_like(ever_grasped))
+        ever_lifted |= milestones.get("lifted", torch.zeros_like(ever_lifted))
+        ever_droppable |= milestones.get("droppable", torch.zeros_like(ever_droppable))
+        ever_success |= milestones.get("success", torch.zeros_like(ever_success))
         
         # Penalties breakdown
         if "penalties" in task_state:
@@ -854,17 +856,18 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train PPO on pick-and-place task (Isaac Lab)")
-    parser.add_argument("--episodes", type=int, default=100, help="Number of episodes to train")
+    parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes to train")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
     parser.add_argument("--headless", action="store_true", help="Run headless")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
-    parser.add_argument("--rollout-steps", type=int, default=2048, help="Steps per rollout")
-    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments")
+    parser.add_argument("--rollout-steps", type=int, default=32768, help="Steps per rollout")
+    parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
     
     args = parser.parse_args()
     
     print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
-    print(f"[INFO] Parallel environments: {args.n_envs} (can scale to 1000+)")
+    print(f"[INFO] Parallel environments: {args.n_envs}")
+    print(f"[INFO] Total steps per iteration: {args.rollout_steps} ({args.rollout_steps // args.n_envs} steps/env)")
     
     train_ppo(
         num_episodes=args.episodes,
