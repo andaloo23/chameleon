@@ -416,10 +416,13 @@ class PickPlaceEnv(DirectRLEnv):
             # Gripper open/close direction ≈ local X axis of gripper frame
             local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
             grip_x_world = quat_apply(gripper_quat[first_frame_mask], local_x)
-            for i, env_id in enumerate(first_frame_mask.nonzero(as_tuple=False).squeeze(-1)):
+            if grip_x_world.dim() == 1:
+                grip_x_world = grip_x_world.unsqueeze(0)
+            env_ids = first_frame_mask.nonzero(as_tuple=False).reshape(-1)
+            for i in range(len(env_ids)):
                 ax = grip_x_world[i]
                 axis = "X" if abs(ax[0]) > abs(ax[1]) else "Y"
-                print(f"[ENV {env_id.item()}] Gripper open/close most parallel to world {axis}  "
+                print(f"[ENV {env_ids[i].item()}] Gripper open/close most parallel to world {axis}  "
                       f"(local_x_in_world: {ax[0]:+.3f}, {ax[1]:+.3f}, {ax[2]:+.3f})")
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)

@@ -196,7 +196,7 @@ def main():
             obs_dict, reward, terminated, truncated, info = env.step(delta_action)
             
             # Reset local targets if environment resets to prevent drift
-            if terminated[0] or truncated[0]:
+            if terminated.item() or truncated.item():
                 joint_targets = env.robot.data.default_joint_pos[0].clone()
                 print("[INFO] Environment reset - targets synchronized to home.")
 
