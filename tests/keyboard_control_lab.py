@@ -179,20 +179,17 @@ def main():
                     print(f"[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
                 detector_state["reached"] = reached_now
 
-            # Per-jaw tip distance debug
-            gripper_tip = task_state.get("gripper_tip_pos")
-            jaw_tip = task_state.get("jaw_tip_pos")
-            cube_pos = task_state.get("cube_pos")
+            # Per-jaw tip distance debug (LOCAL FRAME)
+            gl_local = task_state.get("gripper_tip_local_dist")
+            gr_local = task_state.get("jaw_tip_local_dist")
             
-            if gripper_tip is not None and jaw_tip is not None and cube_pos is not None:
-                # Calculate XYZ deltas from TIPS to cube center
-                # Left (Fixed)
-                gl_xyz = (gripper_tip[0] - cube_pos[0]).cpu().numpy()
-                # Right (Moving)
-                gr_xyz = (jaw_tip[0] - cube_pos[0]).cpu().numpy()
+            if gl_local is not None and gr_local is not None:
+                # Local relative vectors from TIPS to cube center
+                gl_xyz = gl_local[0].cpu().numpy()
+                gr_xyz = gr_local[0].cpu().numpy()
                 
                 if frame_count % 10 == 0:
-                    print(f"Dist L-Tip | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
+                    print(f"Local L-Tip | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
                           f"R-Tip | X:{gr_xyz[0]:.3f} Y:{gr_xyz[1]:.3f} Z:{gr_xyz[2]:.3f}")
             
             # Check grasped

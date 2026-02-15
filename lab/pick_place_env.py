@@ -20,7 +20,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform, quat_apply
+from isaaclab.utils.math import sample_uniform, quat_apply, quat_rotate_inv
 
 from .pick_place_env_cfg import PickPlaceEnvCfg
 from .grasp_detector import GraspDetectorTensor
@@ -386,6 +386,11 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
         
+        # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
+        # Transform world-space delta into gripper's local frame
+        gripper_tip_local_dist = quat_rotate_inv(gripper_quat, cube_pos - gripper_tip_pos)
+        jaw_tip_local_dist = quat_rotate_inv(gripper_quat, cube_pos - jaw_tip_pos) # Use same gripper_quat for consistent local frame
+        
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
         target_gripper = self._joint_targets[:, self._gripper_joint_idx]
@@ -463,6 +468,8 @@ class PickPlaceEnv(DirectRLEnv):
             "jaw_pos": jaw_pos,          # Moving jaw frame origin
             "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip
             "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip
+            "gripper_tip_local_dist": gripper_tip_local_dist, # Relative XYZ in hand frame
+            "jaw_tip_local_dist": jaw_tip_local_dist,         # Relative XYZ in hand frame
             "cube_pos": cube_pos,
             "penalties": {
                 "action_cost": action_cost,
