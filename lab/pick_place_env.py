@@ -410,6 +410,18 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
+        # On episode start, print which world axis is most parallel to gripper open/close
+        first_frame_mask = self.episode_length_buf == 1
+        if first_frame_mask.any():
+            # Gripper open/close direction ≈ local X axis of gripper frame
+            local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+            grip_x_world = quat_apply(gripper_quat[first_frame_mask], local_x)
+            for i, env_id in enumerate(first_frame_mask.nonzero(as_tuple=False).squeeze(-1)):
+                ax = grip_x_world[i]
+                axis = "X" if abs(ax[0]) > abs(ax[1]) else "Y"
+                print(f"[ENV {env_id.item()}] Gripper open/close most parallel to world {axis}  "
+                      f"(local_x_in_world: {ax[0]:+.3f}, {ax[1]:+.3f}, {ax[2]:+.3f})")
+        
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
         # Inverse rotation = rotate by conjugate q* = (-x, -y, -z, w)
