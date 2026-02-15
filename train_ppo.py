@@ -65,6 +65,11 @@ class TinyMLP(nn.Module):
         features = self.shared(obs)
         action_mean = self.policy_mean(features)
         value = self.value(features)
+        
+        # Clamp log_std to a stable range [-2.0, 0.5]
+        with torch.no_grad():
+            self.policy_log_std.clamp_(-2.0, 0.5)
+            
         return action_mean, value
     
     def get_action(self, obs: torch.Tensor, deterministic: bool = False):
@@ -153,7 +158,7 @@ def ppo_update(
     last_value: float,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
-    entropy_coef: float = 0.01,
+    entropy_coef: float = 0.001,
     n_epochs: int = 5,
     batch_size: int = 1024,
 ):
