@@ -88,6 +88,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Persistent state tensors for rewards
         self._prev_gripper_cube_dist = torch.zeros(self.num_envs, device=self.device)
         self._prev_transport_dist = torch.zeros(self.num_envs, device=self.device)
+        self._prev_cube_z = torch.zeros(self.num_envs, device=self.device)
         self._was_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_droppable = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._was_in_cup = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -381,13 +382,14 @@ class PickPlaceEnv(DirectRLEnv):
         )
         
         # Compute rewards
-        total_reward, new_dist, new_transport_dist, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
+        total_reward, new_dist, new_transport_dist, new_cube_z, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             joint_vel=self.joint_vel,
             prev_gripper_cube_dist=self._prev_gripper_cube_dist,
             prev_transport_dist=self._prev_transport_dist,
+            prev_cube_z=self._prev_cube_z,
             is_grasped=self.grasp_detector.is_grasped,
             is_droppable=self.grasp_detector.is_droppable,
             is_in_cup=self.grasp_detector.is_in_cup,
@@ -404,6 +406,7 @@ class PickPlaceEnv(DirectRLEnv):
             lift_bonus=self.cfg.rew_lift_bonus,
             droppable_bonus=self.cfg.rew_droppable_bonus,
             success_bonus=self.cfg.rew_success_bonus,
+            lift_shaping_weight=self.cfg.rew_lift_shaping_weight,
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
         )
@@ -411,6 +414,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
+        self._prev_cube_z = new_cube_z
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -519,6 +523,7 @@ class PickPlaceEnv(DirectRLEnv):
             self.robot.data.body_pos_w[env_ids, self._gripper_body_idx[0], :] - cube_pos,
             dim=1
         )
+        self._prev_cube_z[env_ids] = cube_pos[:, 2]
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

@@ -177,27 +177,29 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
-    rew_approach_delta_weight = 100.0  # Increased for stronger signal
+    rew_approach_delta_weight = 2.0
     
     # Stage 2: Grasp cube (one-time bonus)
-    rew_grasp_bonus = 10.0
+    rew_grasp_bonus = 25.0
     
-    # Stage 4: Lift cube (one-time bonus)
-    rew_lift_bonus = 15.0
+    # Stage 3: Lift cube (one-time bonus)
+    rew_lift_bonus = 30.0
     
+    # Stage 3: Lift cube (dense shaping)
+    rew_lift_shaping_weight = 1.5
     
-    # Stage 3: Transport to cup (3D delta-based shaping)
-    rew_transport_weight = 100.0  # Increased for stronger signal
+    # Stage 4: Transport to cup (3D delta-based shaping)
+    rew_transport_weight = 5.0
     
     # Stage 4: Droppable range (one-time bonus)
-    rew_droppable_bonus = 20.0
+    rew_droppable_bonus = 40.0
     
     # Stage 5: Success (one-time bonus)
-    rew_success_bonus = 50.0
+    rew_success_bonus = 100.0
     
     # Penalties
-    rew_action_cost_weight = 0.00005  # Reduced to prevent "standing still" bias
-    rew_drop_penalty = -3.0
+    rew_action_cost_weight = 0.0001
+    rew_drop_penalty = -20.0
     rew_cup_collision_penalty = -0.5
 
     # ===== Grasp Detection Thresholds =====

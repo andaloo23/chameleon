@@ -154,8 +154,8 @@ def ppo_update(
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
     entropy_coef: float = 0.01,
-    n_epochs: int = 4,
-    batch_size: int = 64,
+    n_epochs: int = 5,
+    batch_size: int = 1024,
 ):
     """Perform PPO update. Returns dict of metrics."""
     # Get device from policy
@@ -299,6 +299,7 @@ def collect_rollout(
         ever_lifted = state["ever_lifted"]
         ever_droppable = state["ever_droppable"]
         ever_success = state["ever_success"]
+        prev_cube_z = state.get("prev_cube_z", torch.zeros_like(ever_grasped))
         penalties = state["penalties"]
         info = state["info"]
 
@@ -390,6 +391,7 @@ def collect_rollout(
         "obs_dict": obs_dict, "current_rewards": current_rewards, "min_dists": min_dists,
         "final_dists": final_dists, "ever_reached": ever_reached, "ever_grasped": ever_grasped,
         "ever_lifted": ever_lifted, "ever_droppable": ever_droppable, "ever_success": ever_success, 
+        "prev_cube_z": getattr(env, "_prev_cube_z", torch.zeros_like(ever_grasped)),
         "penalties": penalties, "info": info
     }
     
@@ -683,7 +685,10 @@ def train_ppo(
         )
         
         # Update policy
-        metrics = ppo_update(policy, optimizer, buffer, last_value)
+        metrics = ppo_update(
+            policy, optimizer, buffer, last_value,
+            n_epochs=5, batch_size=1024
+        )
         
         # Track statistics
         all_rewards.extend(episode_rewards)
@@ -859,8 +864,8 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes to train")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
     parser.add_argument("--headless", action="store_true", help="Run headless")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--rollout-steps", type=int, default=32768, help="Steps per rollout")
+    parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
+    parser.add_argument("--rollout-steps", type=int, default=65536, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
     
     args = parser.parse_args()

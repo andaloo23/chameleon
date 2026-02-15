@@ -47,6 +47,24 @@ def compute_approach_reward(
 
 
 @torch.jit.script
+def compute_lift_shaping_delta(
+    cube_height: Tensor,
+    prev_cube_height: Tensor,
+    is_grasped: Tensor,
+    lift_weight: float,
+) -> tuple[Tensor, Tensor]:
+    """
+    Compute delta-based lift shaping reward.
+    
+    Reward = weight * max(0, curr_height - prev_height)
+    Only active after grasping.
+    """
+    delta = cube_height - prev_cube_height
+    reward = lift_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
+    return reward, cube_height
+
+
+@torch.jit.script
 def compute_transport_shaping_3d(
     cube_pos: Tensor,
     cup_pos: Tensor,
@@ -71,14 +89,14 @@ def compute_transport_shaping_3d(
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
     
-    # 3D distance (balanced)
-    curr_dist = torch.sqrt(dx**2 + dy**2 + dz**2)
+    # 3D distance with Z-weighting (0.3)
+    curr_dist = torch.sqrt(dx**2 + dy**2 + 0.3 * dz**2)
     
     # Delta-based reward: positive if getting closer
-    delta = torch.clamp(prev_transport_dist - curr_dist, min=0.0)
+    delta = prev_transport_dist - curr_dist
     
     # Only award if CURRENTLY grasped
-    reward = transport_weight * delta * is_grasped.float()
+    reward = transport_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
     
     return reward, curr_dist
 
@@ -184,6 +202,7 @@ def compute_pick_place_rewards(
     joint_vel: Tensor,
     prev_gripper_cube_dist: Tensor,
     prev_transport_dist: Tensor,
+    prev_cube_z: Tensor,
     is_grasped: Tensor,
     is_droppable: Tensor,
     is_in_cup: Tensor,
@@ -201,9 +220,10 @@ def compute_pick_place_rewards(
     lift_bonus: float,
     droppable_bonus: float,
     success_bonus: float,
+    lift_shaping_weight: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
     
@@ -228,6 +248,12 @@ def compute_pick_place_rewards(
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
         cube_pos, cup_pos, cup_height, cube_half_size,
         prev_transport_dist, is_grasped, transport_weight
+    )
+    
+    # Stage 3: Lift shaping (delta-based)
+    cube_z = cube_pos[:, 2]
+    lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
+        cube_z, prev_cube_z, is_grasped, lift_shaping_weight
     )
     
     # Stages 2, 4, 5, 6: One-time bonuses
@@ -255,6 +281,7 @@ def compute_pick_place_rewards(
         approach_reward +
         grasp_reward +
         lift_reward +
+        lift_shaping_reward +
         transport_reward +
         droppable_reward +
         success_reward +
@@ -262,6 +289,6 @@ def compute_pick_place_rewards(
         drop_penalty_reward
     )
     
-    return (total_reward, curr_dist, curr_transport_dist,
+    return (total_reward, curr_dist, curr_transport_dist, curr_cube_z,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward)
