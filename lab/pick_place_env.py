@@ -121,6 +121,9 @@ class PickPlaceEnv(DirectRLEnv):
         # Moving (Red): offset in jaw's local frame (180° Y-rotated from gripper)
         self.tip_offset_jaw = torch.tensor([-0.0100, -0.0780, 0.0], device=self.device)
         
+        # Cached cube face marker positions (set once per episode)
+        self._face_marker_pos = torch.zeros(2, 3, device=self.device)
+        
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -422,23 +425,21 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
-        # Mark cube faces aligned with gripper open/close axis (env 0 only)
-        cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
-        # Gripper open/close ≈ gripper local X in world
-        grip_x_world = quat_apply(gripper_quat, torch.tensor([1.0, 0.0, 0.0], device=self.device))
-        # Cube local X and Y in world
-        cube_x_world = quat_apply(cube_quat_w, torch.tensor([1.0, 0.0, 0.0], device=self.device))
-        cube_y_world = quat_apply(cube_quat_w, torch.tensor([0.0, 1.0, 0.0], device=self.device))
-        # Dot products to find best alignment
-        dot_x = torch.sum(grip_x_world * cube_x_world, dim=-1).abs()  # [num_envs]
-        dot_y = torch.sum(grip_x_world * cube_y_world, dim=-1).abs()  # [num_envs]
-        # Pick the cube axis with higher alignment
-        use_x = dot_x >= dot_y  # [num_envs] bool
-        best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)  # [num_envs, 3]
-        half = self.cfg.cube_scale[0] / 2.0
-        face1 = cube_pos[0] + half * best_axis[0]
-        face2 = cube_pos[0] - half * best_axis[0]
-        self.face_markers.visualize(torch.stack([face1, face2], dim=0))
+        # Compute cube grasp-face markers once at episode start, then just visualize cached positions
+        first_frame_mask = self.episode_length_buf == 1
+        if first_frame_mask.any():
+            cube_quat_w = self.cube.data.root_quat_w
+            grip_x_world = quat_apply(gripper_quat, torch.tensor([1.0, 0.0, 0.0], device=self.device))
+            cube_x_world = quat_apply(cube_quat_w, torch.tensor([1.0, 0.0, 0.0], device=self.device))
+            cube_y_world = quat_apply(cube_quat_w, torch.tensor([0.0, 1.0, 0.0], device=self.device))
+            dot_x = torch.sum(grip_x_world * cube_x_world, dim=-1).abs()
+            dot_y = torch.sum(grip_x_world * cube_y_world, dim=-1).abs()
+            use_x = dot_x >= dot_y
+            best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)
+            half = self.cfg.cube_scale[0] / 2.0
+            self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
+            self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
+        self.face_markers.visualize(self._face_marker_pos)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
