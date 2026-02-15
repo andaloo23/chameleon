@@ -394,8 +394,8 @@ class PickPlaceEnv(DirectRLEnv):
         # This makes (0,0,0) represent a PERFECT mechanical center grasp.
         # Any non-zero value is your direct alignment error.
         # Debug offsets: Fixed (-x, -y), Moving (-y)
-        tip_offset_gripper = torch.tensor([-0.015 - 0.005, -0.082 - 0.005, 0.080], device=self.device)
-        tip_offset_jaw = torch.tensor([0.015, -0.082 - 0.005, 0.080], device=self.device)
+        tip_offset_gripper = torch.tensor([-0.015 - 0.02, -0.082 - 0.02, 0.080], device=self.device)
+        tip_offset_jaw = torch.tensor([0.015, -0.082 - 0.02, 0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
