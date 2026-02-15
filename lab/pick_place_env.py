@@ -408,7 +408,7 @@ class PickPlaceEnv(DirectRLEnv):
         # jaw frame is 180° Y-rotated, so (x,y,z)_gripper → (-x,y,-z)_jaw
         # Closed-position tip ≈ (+0.015, -0.082, 0.080) in gripper frame
         # → jaw-local offset from pivot: (-0.035, -0.058, -0.080)
-        tip_offset_jaw = torch.tensor([-0.035, -0.058, -0.080], device=self.device)
+        tip_offset_jaw = torch.tensor([-0.035, -0.088, -0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
