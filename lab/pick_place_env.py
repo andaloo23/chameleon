@@ -376,10 +376,15 @@ class PickPlaceEnv(DirectRLEnv):
         jaw_quat = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
         cube_pos = self.cube.data.root_pos_w
         
-        # Calculate fingertip positions (local offset approx 6.5cm along Y)
-        tip_offset = torch.tensor([0.0, -0.065, 0.0], device=self.device)
-        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset)
-        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset)
+        # Calculate fingertip positions (local offsets relative to link frames)
+        # Based on SO-100 geometry and observed touch data:
+        # Fixed jaw tip: approx 8.2cm out and 1.2cm inward
+        # Moving jaw tip: flipped X due to 180-deg joint rotation
+        tip_offset_gripper = torch.tensor([-0.012, -0.082, 0.0], device=self.device)
+        tip_offset_jaw = torch.tensor([0.012, -0.082, 0.0], device=self.device)
+        
+        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
+        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
