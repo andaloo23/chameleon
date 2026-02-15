@@ -403,9 +403,12 @@ class PickPlaceEnv(DirectRLEnv):
         # DEBUG MAPPING TEST (Focusing on Red sphere Y-axis):
         # Fixed (Green): Baseline offset in gripper's local frame
         tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
-        # Moving (Red): Offset in JAW's local frame (180° Y-rotated from gripper)
-        # jaw_local_x = -gripper_local_x, jaw_local_z = -gripper_local_z
-        tip_offset_jaw = torch.tensor([-0.015, -0.082 + 0.10, -0.080], device=self.device)
+        # Moving (Red): Offset from jaw origin to fingertip in JAW's local frame
+        # Derived from URDF: jaw pivot at (-0.0202, -0.0244, 0) in gripper frame,
+        # jaw frame is 180° Y-rotated, so (x,y,z)_gripper → (-x,y,-z)_jaw
+        # Closed-position tip ≈ (+0.015, -0.082, 0.080) in gripper frame
+        # → jaw-local offset from pivot: (-0.035, -0.058, -0.080)
+        tip_offset_jaw = torch.tensor([-0.035, -0.058, -0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
