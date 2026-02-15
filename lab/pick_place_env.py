@@ -400,14 +400,11 @@ class PickPlaceEnv(DirectRLEnv):
         jaw_quat = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
         cube_pos = self.cube.data.root_pos_w
         
-        # Calculate fingertip positions (TARGETING MODE)
-        # We use fixed mechanical offsets from the SO-100 design.
-        
-        # DEBUG MAPPING TEST (Starting from clean baseline):
-        # Fixed (Green): Baseline + 0.10 Y shift
-        tip_offset_gripper = torch.tensor([-0.015, -0.082 + 0.10, 0.080], device=self.device)
-        # Moving (Red): Baseline + 0.10 X shift
-        tip_offset_jaw = torch.tensor([0.015 + 0.10, -0.082, 0.080], device=self.device)
+        # DEBUG MAPPING TEST (Focusing on Red sphere Y-axis):
+        # Fixed (Green): Baseline
+        tip_offset_gripper = torch.tensor([-0.015, -0.082, 0.080], device=self.device)
+        # Moving (Red): Baseline + 0.10 Y shift
+        tip_offset_jaw = torch.tensor([0.015, -0.082 + 0.10, 0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
