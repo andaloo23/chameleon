@@ -60,12 +60,22 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Find gripper link index for position queries
         self._gripper_link_name = "gripper"
+        self._jaw_link_name = "jaw"
+        
         self._gripper_body_idx, _ = self.robot.find_bodies(self._gripper_link_name)
+        self._jaw_body_idx, _ = self.robot.find_bodies(self._jaw_link_name)
+        
+        # Fallback if names don't match exactly
         if len(self._gripper_body_idx) == 0:
-            # Fallback: try to find any link with "gripper" in name
-            for body_name in self.robot.body_names:
-                if "gripper" in body_name.lower():
-                    self._gripper_body_idx, _ = self.robot.find_bodies(body_name)
+            for i, body_name in enumerate(self.robot.body_names):
+                if "gripper" in body_name.lower() or "fixed_jaw" in body_name.lower():
+                    self._gripper_body_idx = [i]
+                    break
+        
+        if len(self._jaw_body_idx) == 0:
+            for i, body_name in enumerate(self.robot.body_names):
+                if "jaw" in body_name.lower() or "moving_jaw" in body_name.lower():
+                    self._jaw_body_idx = [i]
                     break
         
         # Cache joint data views
@@ -435,6 +445,9 @@ class PickPlaceEnv(DirectRLEnv):
             "is_grasped": self.grasp_detector.is_grasped,  # [num_envs] bool tensor
             "is_droppable": self.grasp_detector.is_droppable,  # [num_envs] bool tensor
             "is_in_cup": self.grasp_detector.is_in_cup,  # [num_envs] bool tensor
+            "gripper_pos": gripper_pos,  # Fixed jaw pos
+            "jaw_pos": self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :],  # Moving jaw pos
+            "cube_pos": cube_pos,
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,

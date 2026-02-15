@@ -178,6 +178,24 @@ def main():
                 elif not reached_now and detector_state["reached"]:
                     print(f"[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
                 detector_state["reached"] = reached_now
+
+            # Per-jaw distance debug
+            gripper_pos = task_state.get("gripper_pos")
+            jaw_pos = task_state.get("jaw_pos")
+            cube_pos = task_state.get("cube_pos")
+            
+            if gripper_pos is not None and jaw_pos is not None and cube_pos is not None:
+                # Calculate XYZ deltas
+                # Left (Fixed)
+                gl_xyz = (gripper_pos[0] - cube_pos[0]).cpu().numpy()
+                # Right (Moving)
+                gr_xyz = (jaw_pos[0] - cube_pos[0]).cpu().numpy()
+                
+                # Print every 10 frames to avoid spamming too hard, or just print continuously?
+                # User asked for "a debug", usually implies continuous in these scripts
+                if frame_count % 10 == 0:
+                    print(f"Dist L-Cube | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
+                          f"R-Cube | X:{gr_xyz[0]:.3f} Y:{gr_xyz[1]:.3f} Z:{gr_xyz[2]:.3f}")
             
             # Check grasped
             is_grasped = task_state.get("is_grasped")
