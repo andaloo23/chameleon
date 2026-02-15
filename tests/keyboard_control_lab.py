@@ -236,14 +236,6 @@ def main():
                 gr_xyz = gr_local[0].cpu().numpy()
                 
                 if frame_count % 10 == 0:
-                    # Sphere world positions
-                    g_tip = task_state.get("gripper_tip_pos")
-                    j_tip = task_state.get("jaw_tip_pos")
-                    if g_tip is not None and j_tip is not None:
-                        gw = g_tip[0].cpu().numpy()
-                        jw = j_tip[0].cpu().numpy()
-                        print(f"Green XYZ: ({gw[0]:+.4f},{gw[1]:+.4f},{gw[2]:+.4f}) | "
-                              f"Red XYZ: ({jw[0]:+.4f},{jw[1]:+.4f},{jw[2]:+.4f})")
                     print(f"Local L-Tip | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
                           f"R-Tip | X:{gr_xyz[0]:.3f} Y:{gr_xyz[1]:.3f} Z:{gr_xyz[2]:.3f}")
             
