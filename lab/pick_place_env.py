@@ -407,7 +407,7 @@ class PickPlaceEnv(DirectRLEnv):
         tip_offset_jaw = torch.tensor([0.015, -0.082 + 0.10, 0.080], device=self.device)
         
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, tip_offset_gripper)
-        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, tip_offset_jaw)
+        jaw_tip_pos = jaw_pos + quat_apply(gripper_quat, tip_offset_jaw)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
