@@ -228,6 +228,18 @@ class PickPlaceEnv(DirectRLEnv):
             },
         )
         self.moving_tip_markers = VisualizationMarkers(moving_tip_marker_cfg)
+
+        # Cube face markers (yellow) to show which faces align with gripper open/close
+        face_marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/CubeFaces",
+            markers={
+                "face": sim_utils.SphereCfg(
+                    radius=0.008,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
+                )
+            },
+        )
+        self.face_markers = VisualizationMarkers(face_marker_cfg)
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
@@ -410,20 +422,23 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
-        # On episode start, print which world axis is most parallel to gripper open/close
-        first_frame_mask = self.episode_length_buf == 1
-        if first_frame_mask.any():
-            # Gripper open/close direction ≈ local X axis of gripper frame
-            local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
-            grip_x_world = quat_apply(gripper_quat[first_frame_mask], local_x)
-            if grip_x_world.dim() == 1:
-                grip_x_world = grip_x_world.unsqueeze(0)
-            env_ids = first_frame_mask.nonzero(as_tuple=False).reshape(-1)
-            for i in range(len(env_ids)):
-                ax = grip_x_world[i]
-                axis = "X" if abs(ax[0]) > abs(ax[1]) else "Y"
-                print(f"[ENV {env_ids[i].item()}] Gripper open/close most parallel to world {axis}  "
-                      f"(local_x_in_world: {ax[0]:+.3f}, {ax[1]:+.3f}, {ax[2]:+.3f})")
+        # Mark cube faces aligned with gripper open/close axis (env 0 only)
+        cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
+        # Gripper open/close ≈ gripper local X in world
+        grip_x_world = quat_apply(gripper_quat, torch.tensor([1.0, 0.0, 0.0], device=self.device))
+        # Cube local X and Y in world
+        cube_x_world = quat_apply(cube_quat_w, torch.tensor([1.0, 0.0, 0.0], device=self.device))
+        cube_y_world = quat_apply(cube_quat_w, torch.tensor([0.0, 1.0, 0.0], device=self.device))
+        # Dot products to find best alignment
+        dot_x = torch.sum(grip_x_world * cube_x_world, dim=-1).abs()  # [num_envs]
+        dot_y = torch.sum(grip_x_world * cube_y_world, dim=-1).abs()  # [num_envs]
+        # Pick the cube axis with higher alignment
+        use_x = dot_x >= dot_y  # [num_envs] bool
+        best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)  # [num_envs, 3]
+        half = self.cfg.cube_scale[0] / 2.0
+        face1 = cube_pos[0] + half * best_axis[0]
+        face2 = cube_pos[0] - half * best_axis[0]
+        self.face_markers.visualize(torch.stack([face1, face2], dim=0))
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
@@ -578,7 +593,11 @@ class PickPlaceEnv(DirectRLEnv):
         cube_pos = torch.stack([cube_xy[:, 0], cube_xy[:, 1], cube_z], dim=1)
         cube_pos += self.scene.env_origins[env_ids]
         
-        cube_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
+        # Random yaw rotation for cube
+        random_yaw = sample_uniform(-math.pi, math.pi, (num_reset,), self.device)
+        cube_quat = torch.zeros(num_reset, 4, device=self.device)
+        cube_quat[:, 0] = torch.cos(random_yaw / 2.0)  # w
+        cube_quat[:, 3] = torch.sin(random_yaw / 2.0)  # z
         self.cube.write_root_pose_to_sim(torch.cat([cube_pos, cube_quat], dim=1), env_ids)
         self.cube.write_root_velocity_to_sim(torch.zeros(num_reset, 6, device=self.device), env_ids)
         
