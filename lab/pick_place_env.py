@@ -438,10 +438,11 @@ class PickPlaceEnv(DirectRLEnv):
             approach_dir = cube_pos.clone()
             approach_dir[:, 2] = 0.0  # flatten to XY plane
             approach_dir = approach_dir / (approach_dir.norm(dim=-1, keepdim=True) + 1e-8)
-            # Pick whichever cube axis is most parallel to the approach direction
+            # Pick whichever cube axis is most perpendicular to approach (= parallel
+            # to the robot's body when facing the cube, i.e. the gripper contact faces)
             dot_x = torch.sum(approach_dir * cube_x_world, dim=-1).abs()
             dot_y = torch.sum(approach_dir * cube_y_world, dim=-1).abs()
-            use_x = dot_x >= dot_y
+            use_x = dot_x <= dot_y  # smaller dot = more perpendicular to approach
             # Select exactly one of the cube's local axes (not a blend)
             best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)
             # Normalize to ensure exact unit length (prevents any drift toward corners)
