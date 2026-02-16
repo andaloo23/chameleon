@@ -485,7 +485,7 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Grasp zone positions and orientation (track cube every frame)
         margin = self._zone_margin
-        zone_offset = half + margin / 2.0
+        zone_offset = half + margin / 2.0 - 0.001  # 1mm overlap to eliminate visual gap
         self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
         self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
         yaw = torch.atan2(best_axis[0, 1], best_axis[0, 0])
@@ -510,7 +510,7 @@ class PickPlaceEnv(DirectRLEnv):
             z_coord = tip_local[:, 2]
             in_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
             in_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
-            in_face = (tangent_coord.abs() <= half_size) & (z_coord >= 0.0) & (z_coord <= self.cfg.cube_scale[2])
+            in_face = (tangent_coord.abs() <= half_size) & (z_coord.abs() <= half_size)
             return (in_pos | in_neg) & in_face
         
         self._fixed_tip_in_zone = _in_zone(fixed_local, is_local_x)
