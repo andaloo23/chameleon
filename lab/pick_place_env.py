@@ -129,6 +129,14 @@ class PickPlaceEnv(DirectRLEnv):
         self._zone_marker_quat = torch.zeros(2, 4, device=self.device)
         self._zone_marker_quat[:, 0] = 1.0  # identity quaternion default
         
+        # Cached best_axis and cube quat for per-frame zone checks
+        self._best_axis = torch.zeros(self.num_envs, 3, device=self.device)
+        self._cube_quat_cached = torch.zeros(self.num_envs, 4, device=self.device)
+        self._cube_quat_cached[:, 0] = 1.0
+        self._zone_margin = 0.01  # 1cm protrusion
+        self._fixed_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._moving_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -471,8 +479,8 @@ class PickPlaceEnv(DirectRLEnv):
             half = self.cfg.cube_scale[0] / 2.0
             self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
             self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
-            # Grasp zone: cuboid sitting on each face, protruding 0.5cm outward
-            margin = 0.01  # 1cm
+            # Grasp zone: cuboid sitting on each face, protruding 1cm outward
+            margin = self._zone_margin
             zone_offset = half + margin / 2.0  # center of the zone box
             self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
             self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
@@ -482,8 +490,47 @@ class PickPlaceEnv(DirectRLEnv):
             self._zone_marker_quat[:, 1] = 0.0
             self._zone_marker_quat[:, 2] = 0.0
             self._zone_marker_quat[:, 3] = torch.sin(yaw / 2.0)
+            # Cache for per-frame zone checks
+            self._best_axis = best_axis
+            self._cube_quat_cached = cube_quat_w.clone()
         self.face_markers.visualize(self._face_marker_pos)
         self.zone_markers.visualize(self._zone_marker_pos, self._zone_marker_quat)
+        
+        # --- Zone-entry check for each fingertip ---
+        # Transform tip positions into cube's local frame, then check OBB bounds
+        cube_quat_inv = self._cube_quat_cached.clone()
+        cube_quat_inv[:, :3] *= -1.0  # conjugate = inverse for unit quat
+        half_size = self.cfg.cube_scale[0] / 2.0
+        margin = self._zone_margin
+        # Which local axis was chosen?  best_axis = cube_X or cube_Y in world.
+        # In cube-local frame, best_axis is either [1,0,0] or [0,1,0].
+        # We detect which by checking use_x (cached via best_axis content).
+        # Simpler: transform best_axis back to local to get the selector.
+        best_local = quat_apply(cube_quat_inv, self._best_axis)  # should be ~[1,0,0] or ~[0,1,0]
+        is_local_x = best_local[:, 0].abs() > best_local[:, 1].abs()  # [num_envs]
+        # Zone bounds in cube-local frame:
+        #   Along best_axis:  from half_size to half_size + margin  (and symmetric negative)
+        #   Along other axes: -half_size to +half_size
+        # Fixed tip (green/gripper) delta in cube local frame
+        fixed_local = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
+        moving_local = quat_apply(cube_quat_inv, jaw_tip_pos - cube_pos)
+        # Check bounds for each tip against BOTH zones (+/- side), assign closest
+        def _in_zone(tip_local, is_x):
+            """Check if tip is inside either grasp zone. Returns (in_zone_bool, side_sign)."""
+            # Along the face-normal axis: must be in [half, half+margin] or [-half-margin, -half]
+            normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
+            tangent_coord = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])
+            z_coord = tip_local[:, 2]
+            # Check positive zone
+            in_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
+            # Check negative zone
+            in_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
+            # Tangent and Z must be within face bounds
+            in_face = (tangent_coord.abs() <= half_size) & (z_coord >= 0.0) & (z_coord <= self.cfg.cube_scale[2])
+            return (in_pos | in_neg) & in_face
+        
+        self._fixed_tip_in_zone = _in_zone(fixed_local, is_local_x)
+        self._moving_tip_in_zone = _in_zone(moving_local, is_local_x)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
@@ -577,8 +624,8 @@ class PickPlaceEnv(DirectRLEnv):
             "jaw_pos": jaw_pos,          # Moving jaw frame origin
             "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip
             "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip
-            "gripper_tip_local_dist": gripper_tip_local_dist, # Relative XYZ in hand frame
-            "jaw_tip_local_dist": jaw_tip_local_dist,         # Relative XYZ in hand frame
+            "fixed_tip_in_zone": self._fixed_tip_in_zone,   # bool [num_envs]
+            "moving_tip_in_zone": self._moving_tip_in_zone, # bool [num_envs]
             "cube_pos": cube_pos,
             "penalties": {
                 "action_cost": action_cost,

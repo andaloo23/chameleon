@@ -226,18 +226,25 @@ def main():
                     print(f"[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
                 detector_state["reached"] = reached_now
 
-            # Per-jaw tip distance debug (LOCAL FRAME)
-            gl_local = task_state.get("gripper_tip_local_dist")
-            gr_local = task_state.get("jaw_tip_local_dist")
+            # Zone-entry detection for fingertips
+            fixed_in = task_state.get("fixed_tip_in_zone")
+            moving_in = task_state.get("moving_tip_in_zone")
             
-            if gl_local is not None and gr_local is not None:
-                # Local relative vectors from TIPS to cube center
-                gl_xyz = gl_local[0].cpu().numpy()
-                gr_xyz = gr_local[0].cpu().numpy()
-                
-                if frame_count % 10 == 0:
-                    print(f"Local L-Tip | X:{gl_xyz[0]:.3f} Y:{gl_xyz[1]:.3f} Z:{gl_xyz[2]:.3f} | "
-                          f"R-Tip | X:{gr_xyz[0]:.3f} Y:{gr_xyz[1]:.3f} Z:{gr_xyz[2]:.3f}")
+            if fixed_in is not None:
+                val = fixed_in[0].item() if fixed_in.dim() > 0 else fixed_in.item()
+                if val and not detector_state.get("fixed_in_zone", False):
+                    print("[FIXED TIP] ✅ Green fingertip ENTERED grasp zone")
+                elif not val and detector_state.get("fixed_in_zone", False):
+                    print("[FIXED TIP] ❌ Green fingertip LEFT grasp zone")
+                detector_state["fixed_in_zone"] = val
+            
+            if moving_in is not None:
+                val = moving_in[0].item() if moving_in.dim() > 0 else moving_in.item()
+                if val and not detector_state.get("moving_in_zone", False):
+                    print("[MOVING TIP] ✅ Red fingertip ENTERED grasp zone")
+                elif not val and detector_state.get("moving_in_zone", False):
+                    print("[MOVING TIP] ❌ Red fingertip LEFT grasp zone")
+                detector_state["moving_in_zone"] = val
             
             # Check grasped
             is_grasped = task_state.get("is_grasped")
