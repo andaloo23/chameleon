@@ -129,10 +129,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._zone_marker_quat = torch.zeros(2, 4, device=self.device)
         self._zone_marker_quat[:, 0] = 1.0  # identity quaternion default
         
-        # Cached best_axis and cube quat for per-frame zone checks
-        self._best_axis = torch.zeros(self.num_envs, 3, device=self.device)
-        self._cube_quat_cached = torch.zeros(self.num_envs, 4, device=self.device)
-        self._cube_quat_cached[:, 0] = 1.0
+        # Cached axis selection per env (set once per episode, used every frame)
+        self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._zone_margin = 0.01  # 1cm protrusion
         self._fixed_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._moving_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -454,78 +452,64 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
-        # Compute cube grasp-face markers once at episode start, then just visualize cached positions
+        # Select which cube face axis to use (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
             cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
-            # Get the cube's local X and Y axes in world frame (these are face normals)
             local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
             local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
-            cube_x_world = quat_apply(cube_quat_w, local_x)  # [num_envs, 3]
-            cube_y_world = quat_apply(cube_quat_w, local_y)  # [num_envs, 3]
+            cube_x_world = quat_apply(cube_quat_w, local_x)
+            cube_y_world = quat_apply(cube_quat_w, local_y)
             # Approach direction: robot base (origin) toward cube, XY only
             approach_dir = cube_pos.clone()
-            approach_dir[:, 2] = 0.0  # flatten to XY plane
+            approach_dir[:, 2] = 0.0
             approach_dir = approach_dir / (approach_dir.norm(dim=-1, keepdim=True) + 1e-8)
-            # Pick whichever cube axis is most perpendicular to approach (= parallel
-            # to the robot's body when facing the cube, i.e. the gripper contact faces)
+            # Pick whichever cube axis is most perpendicular to approach
             dot_x = torch.sum(approach_dir * cube_x_world, dim=-1).abs()
             dot_y = torch.sum(approach_dir * cube_y_world, dim=-1).abs()
-            use_x = dot_x <= dot_y  # smaller dot = more perpendicular to approach
-            # Select exactly one of the cube's local axes (not a blend)
-            best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)
-            # Normalize to ensure exact unit length (prevents any drift toward corners)
-            best_axis = best_axis / best_axis.norm(dim=-1, keepdim=True)
-            half = self.cfg.cube_scale[0] / 2.0
-            self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
-            self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
-            # Grasp zone: cuboid sitting on each face, protruding 1cm outward
-            margin = self._zone_margin
-            zone_offset = half + margin / 2.0  # center of the zone box
-            self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
-            self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
-            # Orient cuboid so its local X (thin axis) aligns with the face normal
-            yaw = torch.atan2(best_axis[0, 1], best_axis[0, 0])
-            self._zone_marker_quat[:, 0] = torch.cos(yaw / 2.0)
-            self._zone_marker_quat[:, 1] = 0.0
-            self._zone_marker_quat[:, 2] = 0.0
-            self._zone_marker_quat[:, 3] = torch.sin(yaw / 2.0)
-            # Cache for per-frame zone checks
-            self._best_axis = best_axis
-            self._cube_quat_cached = cube_quat_w.clone()
+            self._use_x = dot_x <= dot_y  # cached per-env boolean
+        
+        # Every frame: recompute positions from live cube pose using cached axis choice
+        cube_quat_w = self.cube.data.root_quat_w
+        local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        cube_x_world = quat_apply(cube_quat_w, local_x)
+        cube_y_world = quat_apply(cube_quat_w, local_y)
+        best_axis = torch.where(self._use_x.unsqueeze(-1), cube_x_world, cube_y_world)
+        best_axis = best_axis / best_axis.norm(dim=-1, keepdim=True)
+        
+        half = self.cfg.cube_scale[0] / 2.0
+        self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
+        self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
         self.face_markers.visualize(self._face_marker_pos)
+        
+        # Grasp zone positions and orientation (track cube every frame)
+        margin = self._zone_margin
+        zone_offset = half + margin / 2.0
+        self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
+        self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
+        yaw = torch.atan2(best_axis[0, 1], best_axis[0, 0])
+        self._zone_marker_quat[:, 0] = torch.cos(yaw / 2.0)
+        self._zone_marker_quat[:, 1] = 0.0
+        self._zone_marker_quat[:, 2] = 0.0
+        self._zone_marker_quat[:, 3] = torch.sin(yaw / 2.0)
         self.zone_markers.visualize(self._zone_marker_pos, self._zone_marker_quat)
         
         # --- Zone-entry check for each fingertip ---
-        # Transform tip positions into cube's local frame, then check OBB bounds
-        cube_quat_inv = self._cube_quat_cached.clone()
+        cube_quat_inv = cube_quat_w.clone()
         cube_quat_inv[:, :3] *= -1.0  # conjugate = inverse for unit quat
-        half_size = self.cfg.cube_scale[0] / 2.0
-        margin = self._zone_margin
-        # Which local axis was chosen?  best_axis = cube_X or cube_Y in world.
-        # In cube-local frame, best_axis is either [1,0,0] or [0,1,0].
-        # We detect which by checking use_x (cached via best_axis content).
-        # Simpler: transform best_axis back to local to get the selector.
-        best_local = quat_apply(cube_quat_inv, self._best_axis)  # should be ~[1,0,0] or ~[0,1,0]
-        is_local_x = best_local[:, 0].abs() > best_local[:, 1].abs()  # [num_envs]
-        # Zone bounds in cube-local frame:
-        #   Along best_axis:  from half_size to half_size + margin  (and symmetric negative)
-        #   Along other axes: -half_size to +half_size
-        # Fixed tip (green/gripper) delta in cube local frame
+        half_size = half
+        is_local_x = self._use_x
         fixed_local = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
         moving_local = quat_apply(cube_quat_inv, jaw_tip_pos - cube_pos)
-        # Check bounds for each tip against BOTH zones (+/- side), assign closest
+        
         def _in_zone(tip_local, is_x):
-            """Check if tip is inside either grasp zone. Returns (in_zone_bool, side_sign)."""
-            # Along the face-normal axis: must be in [half, half+margin] or [-half-margin, -half]
+            """Check if tip is inside either grasp zone."""
             normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
             tangent_coord = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])
             z_coord = tip_local[:, 2]
-            # Check positive zone
             in_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
-            # Check negative zone
             in_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
-            # Tangent and Z must be within face bounds
             in_face = (tangent_coord.abs() <= half_size) & (z_coord >= 0.0) & (z_coord <= self.cfg.cube_scale[2])
             return (in_pos | in_neg) & in_face
         
