@@ -124,11 +124,6 @@ class PickPlaceEnv(DirectRLEnv):
         # Cached cube face marker positions (set once per episode)
         self._face_marker_pos = torch.zeros(2, 3, device=self.device)
         
-        # Cached grasp zone positions and orientations (set once per episode)
-        self._zone_marker_pos = torch.zeros(2, 3, device=self.device)
-        self._zone_marker_quat = torch.zeros(2, 4, device=self.device)
-        self._zone_marker_quat[:, 0] = 1.0  # identity quaternion default
-        
         # Cached axis selection per env (set once per episode, used every frame)
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._zone_margin = 0.01  # 1cm protrusion
@@ -173,6 +168,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Create cube rigid object
         self.cube = RigidObject(self.cfg.cube_cfg)
+        
+        # Create grasp zone cuboids as children of the Cube prim (move with cube)
+        self._create_zone_prims("/World/envs/env_0/Cube")
         
         # Don't apply convexDecomposition to cube - let it use default collision
         
@@ -254,22 +252,64 @@ class PickPlaceEnv(DirectRLEnv):
             },
         )
         self.face_markers = VisualizationMarkers(face_marker_cfg)
-
-        # Grasp zone markers: semi-transparent cuboid on each grasp face
-        # Size: face dimensions (4cm x 4cm) with 0.5cm protrusion along face normal
-        zone_marker_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/GraspZones",
-            markers={
-                "zone": sim_utils.CuboidCfg(
-                    size=(0.01, 0.04, 0.04),  # thin along local X (= face normal)
-                    visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=(1.0, 1.0, 0.0),
-                        opacity=0.3,
-                    ),
-                )
-            },
-        )
-        self.zone_markers = VisualizationMarkers(zone_marker_cfg)
+    
+    def _create_zone_prims(self, cube_path: str):
+        """Create semi-transparent zone cuboids as children of the Cube prim.
+        
+        These are purely visual (no physics) and move with the cube automatically
+        via USD scene graph parenting.
+        """
+        from pxr import UsdGeom, Gf
+        import isaaclab.sim.utils.stage as stage_utils
+        
+        stage = stage_utils.get_current_stage()
+        half = self.cfg.cube_scale[0] / 2.0
+        margin = self._zone_margin
+        zone_offset = half + margin / 2.0
+        
+        self._zone_prim_paths = []
+        
+        for name, sign in [("ZoneA", 1.0), ("ZoneB", -1.0)]:
+            zone_path = f"{cube_path}/{name}"
+            zone_geom = UsdGeom.Cube.Define(stage, zone_path)
+            zone_geom.CreateSizeAttr(1.0)  # Unit cube (-0.5 to 0.5)
+            zone_geom.CreateDisplayColorAttr().Set([Gf.Vec3f(1.0, 1.0, 0.0)])
+            zone_geom.CreateDisplayOpacityAttr().Set([0.3])
+            
+            # Default position along local X axis
+            xformable = UsdGeom.Xformable(zone_geom)
+            xformable.ClearXformOpOrder()
+            translate_op = xformable.AddTranslateOp()
+            scale_op = xformable.AddScaleOp()
+            translate_op.Set(Gf.Vec3d(sign * zone_offset, 0.0, 0.0))
+            scale_op.Set(Gf.Vec3f(margin, self.cfg.cube_scale[1], self.cfg.cube_scale[2]))
+            
+            self._zone_prim_paths.append(zone_path)
+    
+    def _update_zone_transforms(self):
+        """Update zone prim local transforms based on the selected grasp axis (env 0 only)."""
+        from pxr import UsdGeom, Gf
+        import isaaclab.sim.utils.stage as stage_utils
+        
+        stage = stage_utils.get_current_stage()
+        half = self.cfg.cube_scale[0] / 2.0
+        margin = self._zone_margin
+        zone_offset = half + margin / 2.0
+        use_x = self._use_x[0].item()
+        
+        for path, sign in zip(self._zone_prim_paths, [1.0, -1.0]):
+            prim = stage.GetPrimAtPath(path)
+            if not prim:
+                continue
+            xformable = UsdGeom.Xformable(prim)
+            ops = xformable.GetOrderedXformOps()
+            # ops[0] = translate, ops[1] = scale (set in _create_zone_prims)
+            if use_x:
+                ops[0].Set(Gf.Vec3d(sign * zone_offset, 0.0, 0.0))
+                ops[1].Set(Gf.Vec3f(margin, self.cfg.cube_scale[1], self.cfg.cube_scale[2]))
+            else:
+                ops[0].Set(Gf.Vec3d(0.0, sign * zone_offset, 0.0))
+                ops[1].Set(Gf.Vec3f(self.cfg.cube_scale[0], margin, self.cfg.cube_scale[2]))
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
@@ -468,8 +508,10 @@ class PickPlaceEnv(DirectRLEnv):
             dot_x = torch.sum(approach_dir * cube_x_world, dim=-1).abs()
             dot_y = torch.sum(approach_dir * cube_y_world, dim=-1).abs()
             self._use_x = dot_x <= dot_y  # cached per-env boolean
+            # Update zone prim local transforms for env 0
+            self._update_zone_transforms()
         
-        # Every frame: recompute positions from live cube pose using cached axis choice
+        # Every frame: recompute face marker positions from live cube pose
         cube_quat_w = self.cube.data.root_quat_w
         local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
         local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
@@ -483,19 +525,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
         self.face_markers.visualize(self._face_marker_pos)
         
-        # Grasp zone positions and orientation (track cube every frame)
-        margin = self._zone_margin
-        zone_offset = half + margin / 2.0 - 0.001  # 1mm overlap to eliminate visual gap
-        self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
-        self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
-        yaw = torch.atan2(best_axis[0, 1], best_axis[0, 0])
-        self._zone_marker_quat[:, 0] = torch.cos(yaw / 2.0)
-        self._zone_marker_quat[:, 1] = 0.0
-        self._zone_marker_quat[:, 2] = 0.0
-        self._zone_marker_quat[:, 3] = torch.sin(yaw / 2.0)
-        self.zone_markers.visualize(self._zone_marker_pos, self._zone_marker_quat)
-        
         # --- Zone-entry check for each fingertip ---
+        margin = self._zone_margin
         cube_quat_inv = cube_quat_w.clone()
         cube_quat_inv[:, :3] *= -1.0  # conjugate = inverse for unit quat
         half_size = half
