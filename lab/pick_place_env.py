@@ -124,6 +124,11 @@ class PickPlaceEnv(DirectRLEnv):
         # Cached cube face marker positions (set once per episode)
         self._face_marker_pos = torch.zeros(2, 3, device=self.device)
         
+        # Cached grasp zone positions and orientations (set once per episode)
+        self._zone_marker_pos = torch.zeros(2, 3, device=self.device)
+        self._zone_marker_quat = torch.zeros(2, 4, device=self.device)
+        self._zone_marker_quat[:, 0] = 1.0  # identity quaternion default
+        
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -243,6 +248,22 @@ class PickPlaceEnv(DirectRLEnv):
             },
         )
         self.face_markers = VisualizationMarkers(face_marker_cfg)
+
+        # Grasp zone markers: semi-transparent cuboid on each grasp face
+        # Size: face dimensions (4cm x 4cm) with 0.5cm protrusion along face normal
+        zone_marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/GraspZones",
+            markers={
+                "zone": sim_utils.CuboidCfg(
+                    size=(0.005, 0.04, 0.04),  # thin along local X (= face normal)
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=(1.0, 1.0, 0.0),
+                        opacity=0.3,
+                    ),
+                )
+            },
+        )
+        self.zone_markers = VisualizationMarkers(zone_marker_cfg)
     
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
@@ -450,7 +471,19 @@ class PickPlaceEnv(DirectRLEnv):
             half = self.cfg.cube_scale[0] / 2.0
             self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
             self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
+            # Grasp zone: cuboid sitting on each face, protruding 0.5cm outward
+            margin = 0.005  # 0.5cm
+            zone_offset = half + margin / 2.0  # center of the zone box
+            self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
+            self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
+            # Orient cuboid so its local X (thin axis) aligns with the face normal
+            yaw = torch.atan2(best_axis[0, 1], best_axis[0, 0])
+            self._zone_marker_quat[:, 0] = torch.cos(yaw / 2.0)
+            self._zone_marker_quat[:, 1] = 0.0
+            self._zone_marker_quat[:, 2] = 0.0
+            self._zone_marker_quat[:, 3] = torch.sin(yaw / 2.0)
         self.face_markers.visualize(self._face_marker_pos)
+        self.zone_markers.visualize(self._zone_marker_pos, self._zone_marker_quat)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
