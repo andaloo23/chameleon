@@ -137,7 +137,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Create robot articulation
         self.robot = Articulation(self.cfg.robot_cfg)
         
-        from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
+        from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema, Gf
         import isaaclab.sim.utils.stage as stage_utils
         stage = stage_utils.get_current_stage()
         
