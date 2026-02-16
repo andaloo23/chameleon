@@ -255,7 +255,7 @@ class PickPlaceEnv(DirectRLEnv):
             prim_path="/Visuals/GraspZones",
             markers={
                 "zone": sim_utils.CuboidCfg(
-                    size=(0.005, 0.04, 0.04),  # thin along local X (= face normal)
+                    size=(0.01, 0.04, 0.04),  # thin along local X (= face normal)
                     visual_material=sim_utils.PreviewSurfaceCfg(
                         diffuse_color=(1.0, 1.0, 0.0),
                         opacity=0.3,
@@ -472,7 +472,7 @@ class PickPlaceEnv(DirectRLEnv):
             self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
             self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
             # Grasp zone: cuboid sitting on each face, protruding 0.5cm outward
-            margin = 0.005  # 0.5cm
+            margin = 0.01  # 1cm
             zone_offset = half + margin / 2.0  # center of the zone box
             self._zone_marker_pos[0] = cube_pos[0] + zone_offset * best_axis[0]
             self._zone_marker_pos[1] = cube_pos[0] - zone_offset * best_axis[0]
