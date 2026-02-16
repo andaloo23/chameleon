@@ -434,10 +434,13 @@ class PickPlaceEnv(DirectRLEnv):
             local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
             cube_x_world = quat_apply(cube_quat_w, local_x)  # [num_envs, 3]
             cube_y_world = quat_apply(cube_quat_w, local_y)  # [num_envs, 3]
-            # Determine which cube face axis the gripper's open/close direction aligns with
-            grip_x_world = quat_apply(gripper_quat, local_x)
-            dot_x = torch.sum(grip_x_world * cube_x_world, dim=-1).abs()
-            dot_y = torch.sum(grip_x_world * cube_y_world, dim=-1).abs()
+            # Approach direction: robot base (origin) toward cube, XY only
+            approach_dir = cube_pos.clone()
+            approach_dir[:, 2] = 0.0  # flatten to XY plane
+            approach_dir = approach_dir / (approach_dir.norm(dim=-1, keepdim=True) + 1e-8)
+            # Pick whichever cube axis is most parallel to the approach direction
+            dot_x = torch.sum(approach_dir * cube_x_world, dim=-1).abs()
+            dot_y = torch.sum(approach_dir * cube_y_world, dim=-1).abs()
             use_x = dot_x >= dot_y
             # Select exactly one of the cube's local axes (not a blend)
             best_axis = torch.where(use_x.unsqueeze(-1), cube_x_world, cube_y_world)
