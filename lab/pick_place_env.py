@@ -125,7 +125,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Cached axis selection per env (set once per episode, used every frame)
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._left_is_positive = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self._zone_margin = 0.01  # 1cm protrusion
+        self._zone_margin = 0.015  # 1.5cm protrusion
         self._moving_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._fixed_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
@@ -214,20 +214,21 @@ class PickPlaceEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
-        # Cube face marker spheres (yellow, visual-only, parented to cube)
+
+        # Cube zone markers (boxes, visual-only, parented to cube)
         # Created as children of the cube prim so they move with it.
         # No CollisionAPI applied — the gripper passes right through.
         cube_prim_path = "/World/envs/env_0/Cube"
-        half = self.cfg.cube_scale[0] / 2.0
-        for i, sign in enumerate([1.0, -1.0]):
-            sphere_path = f"{cube_prim_path}/FaceMarker_{i}"
-            sphere = UsdGeom.Sphere.Define(stage, sphere_path)
-            sphere.CreateRadiusAttr(0.008)
-            sphere.CreateDisplayColorAttr().Set([Gf.Vec3f(1.0, 1.0, 0.0)])
-            # Default local position along Y (updated when axis is determined)
-            UsdGeom.XformCommonAPI(sphere).SetTranslate(
-                Gf.Vec3d(0.0, sign * float(half), 0.0)
-            )
+        for i in range(2):
+            zone_path = f"{cube_prim_path}/ZoneMarker_{i}"
+            zone = UsdGeom.Cube.Define(stage, zone_path)
+            # Default size is 2.0 (from -1 to 1). We'll scale it.
+            # Create display color (will be overridden per env based on left/right)
+            zone.CreateDisplayColorAttr().Set([Gf.Vec3f(1.0, 1.0, 1.0)])
+            # Make it semi-transparent
+            zone.CreateOpacityAttr().Set(0.3)
+            # Default transform (will be updated)
+            UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, 0.0))
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
@@ -432,26 +433,57 @@ class PickPlaceEnv(DirectRLEnv):
             cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
             self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
             
-            # Update face marker sphere local positions to match chosen axis
+            # Update zone marker box transforms and colors
             import isaaclab.sim.utils.stage as stage_utils
             from pxr import UsdGeom, Gf
             stage = stage_utils.get_current_stage()
             half_val = float(self.cfg.cube_scale[0] / 2.0)
+            margin_val = float(self._zone_margin)
+            cube_size = float(self.cfg.cube_scale[0])
+            
+            # Box prim is base size 2.0 (-1 to 1). Using scale to set dimensions.
+            # Dimensions: face_size x face_size x margin
+            
             for env_id in range(self.num_envs):
                 if not first_frame_mask[env_id]:
                     continue
+                
+                # Determine colors based on left/right assignment
+                # Left (Moving Jaw) = Red, Right (Fixed Jaw) = Green
+                is_left_pos = self._left_is_positive[env_id]
+                
                 for i, sign in enumerate([1.0, -1.0]):
-                    prim_path = f"/World/envs/env_{env_id}/Cube/FaceMarker_{i}"
+                    prim_path = f"/World/envs/env_{env_id}/Cube/ZoneMarker_{i}"
                     prim = stage.GetPrimAtPath(prim_path)
                     if prim:
+                        xform = UsdGeom.XformCommonAPI(prim)
+                        
+                        # Position: center of zone volume
+                        # Offset from face center by margin/2 outwards
+                        offset = half_val + margin_val / 2.0
+                        
+                        # Scale: (face/2, face/2, margin/2) because base size is 2.0
+                        s_face = cube_size / 2.0
+                        s_margin = margin_val / 2.0
+                        
                         if self._use_x[env_id]:
-                            UsdGeom.XformCommonAPI(prim).SetTranslate(
-                                Gf.Vec3d(sign * half_val, 0.0, 0.0)
-                            )
+                            # X-axis faces
+                            xform.SetTranslate(Gf.Vec3d(sign * offset, 0.0, 0.0))
+                            xform.SetScale(Gf.Vec3f(s_margin, s_face, s_face))
                         else:
-                            UsdGeom.XformCommonAPI(prim).SetTranslate(
-                                Gf.Vec3d(0.0, sign * half_val, 0.0)
-                            )
+                            # Y-axis faces
+                            xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
+                            xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
+                            
+                        # Set Color
+                        # Index 0 is +n face, Index 1 is -n face
+                        # If left_is_positive: +n is Left (Red), -n is Right (Green)
+                        is_this_left = (i == 0) if is_left_pos else (i == 1)
+                        color = Gf.Vec3f(1.0, 0.0, 0.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
+                        
+                        # Set color directly on the geom prim
+                        geom = UsdGeom.Cube(prim)
+                        geom.GetDisplayColorAttr().Set([color])
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
