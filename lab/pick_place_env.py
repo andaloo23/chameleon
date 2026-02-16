@@ -227,7 +227,8 @@ class PickPlaceEnv(DirectRLEnv):
                     opacity=0.3,
                     metallic=0.0,
                     roughness=0.5,
-                ).func(mat_path, None)
+                )
+                material.func(mat_path, material)
         
         # Blue (0, 0, 1) and Green (0, 1, 0)
         _create_marker_mat("ZoneBlue", (0.0, 0.0, 1.0))
