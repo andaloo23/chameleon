@@ -21,7 +21,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform, quat_apply
-from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+
 
 from .pick_place_env_cfg import PickPlaceEnvCfg
 from .grasp_detector import GraspDetectorTensor
@@ -120,9 +120,7 @@ class PickPlaceEnv(DirectRLEnv):
         self.tip_offset_gripper = torch.tensor([0.0100, -0.1020, 0.0], device=self.device)
         # Moving (Red): offset in jaw's local frame (180° Y-rotated from gripper)
         self.tip_offset_jaw = torch.tensor([-0.0100, -0.0780, 0.0], device=self.device)
-        
-        # Cached cube face marker positions (set once per episode)
-        self._face_marker_pos = torch.zeros(2, 3, device=self.device)
+
         
         # Cached axis selection per env (set once per episode, used every frame)
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -215,20 +213,21 @@ class PickPlaceEnv(DirectRLEnv):
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
-        
 
-
-        # Cube face markers (yellow) to show which faces align with gripper open/close
-        face_marker_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/CubeFaces",
-            markers={
-                "face": sim_utils.SphereCfg(
-                    radius=0.008,
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
-                )
-            },
-        )
-        self.face_markers = VisualizationMarkers(face_marker_cfg)
+        # Cube face marker spheres (yellow, visual-only, parented to cube)
+        # Created as children of the cube prim so they move with it.
+        # No CollisionAPI applied — the gripper passes right through.
+        cube_prim_path = "/World/envs/env_0/Cube"
+        half = self.cfg.cube_scale[0] / 2.0
+        for i, sign in enumerate([1.0, -1.0]):
+            sphere_path = f"{cube_prim_path}/FaceMarker_{i}"
+            sphere = UsdGeom.Sphere.Define(stage, sphere_path)
+            sphere.CreateRadiusAttr(0.008)
+            sphere.CreateDisplayColorAttr().Set([Gf.Vec3f(1.0, 1.0, 0.0)])
+            # Default local position along Y (updated when axis is determined)
+            UsdGeom.XformCommonAPI(sphere).SetTranslate(
+                Gf.Vec3d(0.0, sign * float(half), 0.0)
+            )
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
@@ -432,8 +431,29 @@ class PickPlaceEnv(DirectRLEnv):
             best_axis_init = torch.where(self._use_x.unsqueeze(-1), cube_x_world, cube_y_world)
             cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
             self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
+            
+            # Update face marker sphere local positions to match chosen axis
+            import isaaclab.sim.utils.stage as stage_utils
+            from pxr import UsdGeom, Gf
+            stage = stage_utils.get_current_stage()
+            half_val = float(self.cfg.cube_scale[0] / 2.0)
+            for env_id in range(self.num_envs):
+                if not first_frame_mask[env_id]:
+                    continue
+                for i, sign in enumerate([1.0, -1.0]):
+                    prim_path = f"/World/envs/env_{env_id}/Cube/FaceMarker_{i}"
+                    prim = stage.GetPrimAtPath(prim_path)
+                    if prim:
+                        if self._use_x[env_id]:
+                            UsdGeom.XformCommonAPI(prim).SetTranslate(
+                                Gf.Vec3d(sign * half_val, 0.0, 0.0)
+                            )
+                        else:
+                            UsdGeom.XformCommonAPI(prim).SetTranslate(
+                                Gf.Vec3d(0.0, sign * half_val, 0.0)
+                            )
         
-        # Every frame: recompute face marker positions from live cube pose
+        # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
         local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
         local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
@@ -443,9 +463,6 @@ class PickPlaceEnv(DirectRLEnv):
         best_axis = best_axis / best_axis.norm(dim=-1, keepdim=True)
         
         half = self.cfg.cube_scale[0] / 2.0
-        self._face_marker_pos[0] = cube_pos[0] + half * best_axis[0]
-        self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
-        self.face_markers.visualize(self._face_marker_pos)
         
         # --- Left/Right zone-entry check for each fingertip ---
         margin = self._zone_margin
