@@ -215,6 +215,24 @@ class PickPlaceEnv(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
 
+
+        # Create transparent zone materials (Blue for left, Green for right)
+        # Using UsdShade.Material with PreviewSurface for reliable transparency
+        def _create_marker_mat(name, color):
+            mat_path = f"/World/Materials/{name}"
+            if not stage.GetPrimAtPath(mat_path):
+                # Simple PreviewSurface
+                material = sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=color,
+                    opacity=0.3,
+                    metallic=0.0,
+                    roughness=0.5,
+                ).func(mat_path, None)
+        
+        # Blue (0, 0, 1) and Green (0, 1, 0)
+        _create_marker_mat("ZoneBlue", (0.0, 0.0, 1.0))
+        _create_marker_mat("ZoneGreen", (0.0, 1.0, 0.0))
+
         # Cube zone markers (boxes, visual-only, parented to cube)
         # Created as children of the cube prim so they move with it.
         # No CollisionAPI applied — the gripper passes right through.
@@ -222,11 +240,7 @@ class PickPlaceEnv(DirectRLEnv):
         for i in range(2):
             zone_path = f"{cube_prim_path}/ZoneMarker_{i}"
             zone = UsdGeom.Cube.Define(stage, zone_path)
-            # Default size is 2.0 (from -1 to 1). We'll scale it.
-            # Create display color (will be overridden per env based on left/right)
-            zone.CreateDisplayColorAttr().Set([Gf.Vec3f(1.0, 1.0, 1.0)])
-            # Make it semi-transparent
-            zone.CreateDisplayOpacityAttr().Set([0.3])
+            # Material binding will happen per-episode in _get_rewards
             # Default transform (will be updated)
             UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, 0.0))
     def _create_cup_prim(self, prim_path: str, position: tuple):
@@ -475,15 +489,15 @@ class PickPlaceEnv(DirectRLEnv):
                             xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
                             xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
                             
-                        # Set Color
+                        # Set Material
                         # Index 0 is +n face, Index 1 is -n face
-                        # If left_is_positive: +n is Left (Red), -n is Right (Green)
+                        # If left_is_positive: +n is Left (Blue), -n is Right (Green)
                         is_this_left = (i == 0) if is_left_pos else (i == 1)
-                        color = Gf.Vec3f(1.0, 0.0, 0.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
+                        mat_name = "ZoneBlue" if is_this_left else "ZoneGreen"
+                        mat_path = f"/World/Materials/{mat_name}"
                         
-                        # Set color directly on the geom prim
-                        geom = UsdGeom.Cube(prim)
-                        geom.GetDisplayColorAttr().Set([color])
+                        import isaaclab.sim as sim_utils
+                        sim_utils.bind_visual_material(prim_path, mat_path)
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
