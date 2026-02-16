@@ -226,25 +226,25 @@ def main():
                     print(f"[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
                 detector_state["reached"] = reached_now
 
-            # Zone-entry detection for fingertips
-            fixed_in = task_state.get("fixed_tip_in_zone")
-            moving_in = task_state.get("moving_tip_in_zone")
+            # Zone-entry detection for fingertips (left/right face zones)
+            left_ok = task_state.get("left_zone_ok")
+            right_ok = task_state.get("right_zone_ok")
             
-            if fixed_in is not None:
-                val = fixed_in[0].item() if fixed_in.dim() > 0 else fixed_in.item()
-                if val and not detector_state.get("fixed_in_zone", False):
-                    print("[FIXED TIP] ✅ Green fingertip ENTERED grasp zone")
-                elif not val and detector_state.get("fixed_in_zone", False):
-                    print("[FIXED TIP] ❌ Green fingertip LEFT grasp zone")
-                detector_state["fixed_in_zone"] = val
+            if left_ok is not None:
+                val = left_ok[0].item() if left_ok.dim() > 0 else left_ok.item()
+                if val and not detector_state.get("left_zone_ok", False):
+                    print("[LEFT ZONE] ✅ Moving jaw (left gripper) ENTERED left face zone")
+                elif not val and detector_state.get("left_zone_ok", False):
+                    print("[LEFT ZONE] ❌ Moving jaw (left gripper) LEFT left face zone")
+                detector_state["left_zone_ok"] = val
             
-            if moving_in is not None:
-                val = moving_in[0].item() if moving_in.dim() > 0 else moving_in.item()
-                if val and not detector_state.get("moving_in_zone", False):
-                    print("[MOVING TIP] ✅ Red fingertip ENTERED grasp zone")
-                elif not val and detector_state.get("moving_in_zone", False):
-                    print("[MOVING TIP] ❌ Red fingertip LEFT grasp zone")
-                detector_state["moving_in_zone"] = val
+            if right_ok is not None:
+                val = right_ok[0].item() if right_ok.dim() > 0 else right_ok.item()
+                if val and not detector_state.get("right_zone_ok", False):
+                    print("[RIGHT ZONE] ✅ Fixed jaw (right gripper) ENTERED right face zone")
+                elif not val and detector_state.get("right_zone_ok", False):
+                    print("[RIGHT ZONE] ❌ Fixed jaw (right gripper) LEFT right face zone")
+                detector_state["right_zone_ok"] = val
             
             # Check grasped
             is_grasped = task_state.get("is_grasped")

@@ -126,9 +126,10 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Cached axis selection per env (set once per episode, used every frame)
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._left_is_positive = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._zone_margin = 0.01  # 1cm protrusion
-        self._fixed_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self._moving_tip_in_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._moving_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._fixed_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
@@ -409,7 +410,7 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
         
-        # Select which cube face axis to use (once per episode at frame 1)
+        # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
             cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
@@ -425,6 +426,12 @@ class PickPlaceEnv(DirectRLEnv):
             dot_x = torch.sum(approach_dir * cube_x_world, dim=-1).abs()
             dot_y = torch.sum(approach_dir * cube_y_world, dim=-1).abs()
             self._use_x = dot_x <= dot_y  # cached per-env boolean
+            
+            # Determine left/right face assignment via cross product.
+            # cross(approach, face_normal).z > 0 means +normal face is on the LEFT.
+            best_axis_init = torch.where(self._use_x.unsqueeze(-1), cube_x_world, cube_y_world)
+            cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
+            self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
         
         # Every frame: recompute face marker positions from live cube pose
         cube_quat_w = self.cube.data.root_quat_w
@@ -440,7 +447,7 @@ class PickPlaceEnv(DirectRLEnv):
         self._face_marker_pos[1] = cube_pos[0] - half * best_axis[0]
         self.face_markers.visualize(self._face_marker_pos)
         
-        # --- Zone-entry check for each fingertip ---
+        # --- Left/Right zone-entry check for each fingertip ---
         margin = self._zone_margin
         cube_quat_inv = cube_quat_w.clone()
         cube_quat_inv[:, :3] *= -1.0  # conjugate = inverse for unit quat
@@ -449,18 +456,22 @@ class PickPlaceEnv(DirectRLEnv):
         fixed_local = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
         moving_local = quat_apply(cube_quat_inv, jaw_tip_pos - cube_pos)
         
-        def _in_zone(tip_local, is_x):
-            """Check if tip is inside either grasp zone."""
+        def _in_face_zone(tip_local, is_x, positive_side):
+            """Check if tip is inside a specific face zone (positive or negative side)."""
             normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
             tangent_coord = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])
             z_coord = tip_local[:, 2]
-            in_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
-            in_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
+            # Check the correct side only
+            in_zone_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
+            in_zone_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
+            in_normal = torch.where(positive_side, in_zone_pos, in_zone_neg)
             in_face = (tangent_coord.abs() <= half_size) & (z_coord.abs() <= half_size)
-            return (in_pos | in_neg) & in_face
+            return in_normal & in_face
         
-        self._fixed_tip_in_zone = _in_zone(fixed_local, is_local_x)
-        self._moving_tip_in_zone = _in_zone(moving_local, is_local_x)
+        # Moving jaw (left gripper) -> left face zone
+        self._moving_tip_in_left_zone = _in_face_zone(moving_local, is_local_x, self._left_is_positive)
+        # Fixed jaw (right gripper) -> right face zone (opposite side)
+        self._fixed_tip_in_right_zone = _in_face_zone(fixed_local, is_local_x, ~self._left_is_positive)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
@@ -550,8 +561,8 @@ class PickPlaceEnv(DirectRLEnv):
             "jaw_pos": jaw_pos,          # Moving jaw frame origin
             "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip
             "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip
-            "fixed_tip_in_zone": self._fixed_tip_in_zone,   # bool [num_envs]
-            "moving_tip_in_zone": self._moving_tip_in_zone, # bool [num_envs]
+            "left_zone_ok": self._moving_tip_in_left_zone,    # moving jaw in left face zone
+            "right_zone_ok": self._fixed_tip_in_right_zone,   # fixed jaw in right face zone
             "cube_pos": cube_pos,
             "penalties": {
                 "action_cost": action_cost,
