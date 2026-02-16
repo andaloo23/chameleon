@@ -218,28 +218,7 @@ class PickPlaceEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
         
-        # Separate markers for Fixed (Green) and Moving (Red) for debugging
-        fixed_tip_marker_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/FixedFingertip",
-            markers={
-                "fingertip": sim_utils.SphereCfg(
-                    radius=0.01,
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)), # Green
-                )
-            },
-        )
-        self.fixed_tip_markers = VisualizationMarkers(fixed_tip_marker_cfg)
 
-        moving_tip_marker_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/MovingFingertip",
-            markers={
-                "fingertip": sim_utils.SphereCfg(
-                    radius=0.01,
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)), # Red
-                )
-            },
-        )
-        self.moving_tip_markers = VisualizationMarkers(moving_tip_marker_cfg)
 
         # Cube face markers (yellow) to show which faces align with gripper open/close
         face_marker_cfg = VisualizationMarkersCfg(
@@ -556,11 +535,7 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
         
-        # Update fingertip markers (only for env 0 to avoid clutter)
-        # Fixed (Green)
-        self.fixed_tip_markers.visualize(gripper_tip_pos[0].unsqueeze(0))
-        # Moving (Red)
-        self.moving_tip_markers.visualize(jaw_tip_pos[0].unsqueeze(0))
+
         
         # Get gripper joint value and target
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
