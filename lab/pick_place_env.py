@@ -216,24 +216,6 @@ class PickPlaceEnv(DirectRLEnv):
 
 
 
-        # Create transparent zone materials (Blue for left, Green for right)
-        # Using UsdShade.Material with PreviewSurface for reliable transparency
-        def _create_marker_mat(name, color):
-            mat_path = f"/World/Materials/{name}"
-            if not stage.GetPrimAtPath(mat_path):
-                # Simple PreviewSurface
-                material = sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=color,
-                    opacity=0.3,
-                    metallic=0.0,
-                    roughness=0.5,
-                )
-                material.func(mat_path, material)
-        
-        # Blue (0, 0, 1) and Green (0, 1, 0)
-        _create_marker_mat("ZoneBlue", (0.0, 0.0, 1.0))
-        _create_marker_mat("ZoneGreen", (0.0, 1.0, 0.0))
-
         # Cube zone markers (boxes, visual-only, parented to cube)
         # Created as children of the cube prim so they move with it.
         # No CollisionAPI applied — the gripper passes right through.
@@ -490,15 +472,16 @@ class PickPlaceEnv(DirectRLEnv):
                             xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
                             xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
                             
-                        # Set Material
+                        # Set Color directly on prim (no material)
                         # Index 0 is +n face, Index 1 is -n face
                         # If left_is_positive: +n is Left (Blue), -n is Right (Green)
                         is_this_left = (i == 0) if is_left_pos else (i == 1)
-                        mat_name = "ZoneBlue" if is_this_left else "ZoneGreen"
-                        mat_path = f"/World/Materials/{mat_name}"
+                        color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
                         
-                        import isaaclab.sim as sim_utils
-                        sim_utils.bind_visual_material(prim_path, mat_path)
+                        # Set color and opacity directly
+                        geom = UsdGeom.Cube(prim)
+                        geom.GetDisplayColorAttr().Set([color])
+                        geom.CreateDisplayOpacityAttr().Set([0.3])
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
