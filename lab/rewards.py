@@ -275,6 +275,11 @@ def compute_fingertip_obb_reach_reward(
 
     obb_reward = fingertip_obb_weight * (delta_left + delta_right) * not_grasped
 
+    # Absolute distance reward
+    w_abs = 1.0
+    sigma_abs = 0.01
+    abs_reward = w_abs * torch.exp(-(d_left + d_right) / sigma_abs) * not_grasped
+
     # --- Straddle reward ---
     # Measure signed span of fingertips along the pinch axis
     # Positive when jaw is on left side (+normal) and gripper on right (-normal)
@@ -285,7 +290,7 @@ def compute_fingertip_obb_reach_reward(
         -0.5 * ((span - target_width) / sigma) ** 2
     ) * not_grasped
 
-    reach_reward = obb_reward + straddle
+    reach_reward = obb_reward + abs_reward + straddle
 
     return reach_reward, d_right, d_left
 
