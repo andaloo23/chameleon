@@ -232,6 +232,9 @@ def compute_fingertip_obb_reach_reward(
         reach_reward:       [num_envs]
         new_right_tip_dist: [num_envs] (cache for next step)
         new_left_tip_dist:  [num_envs] (cache for next step)
+        reach_gate:         [num_envs] (for metrics)
+        d_right:            [num_envs] (for metrics)
+        d_left:             [num_envs] (for metrics)
     """
     not_grasped = (~stage_grasped).float()
 
@@ -306,7 +309,7 @@ def compute_fingertip_obb_reach_reward(
 
     reach_reward = obb_reward + abs_reward + straddle
 
-    return reach_reward, d_right, d_left
+    return reach_reward, d_right, d_left, reach_gate
 
 
 @torch.jit.script
@@ -350,7 +353,7 @@ def compute_pick_place_rewards(
     drop_penalty: float,
     fingertip_obb_weight: float,
     straddle_weight: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
 
@@ -360,6 +363,9 @@ def compute_pick_place_rewards(
         new_stage_*:          updated latched flags
         action_cost, drop_penalty_reward: per-env penalty tensors
         new_right_tip_dist, new_left_tip_dist: cached fingertip OBB distances
+        reach_gate:           [num_envs] (for metrics)
+        d_right:              [num_envs] (for metrics)
+        d_left:               [num_envs] (for metrics)
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
@@ -367,7 +373,7 @@ def compute_pick_place_rewards(
     )
 
     # Pre-grasp: Fingertip OBB reaching + straddle
-    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist = compute_fingertip_obb_reach_reward(
+    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist, reach_gate = compute_fingertip_obb_reach_reward(
         gripper_tip_pos=gripper_tip_pos,
         jaw_tip_pos=jaw_tip_pos,
         cube_pos=cube_pos,
@@ -432,4 +438,5 @@ def compute_pick_place_rewards(
     return (total_reward, curr_dist, curr_transport_dist, curr_cube_z,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward,
-            new_right_tip_dist, new_left_tip_dist)
+            new_right_tip_dist, new_left_tip_dist,
+            reach_gate, new_right_tip_dist, new_left_tip_dist)
