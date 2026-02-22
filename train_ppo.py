@@ -778,9 +778,13 @@ def train_ppo(
                 avg_right_rgn = 100 * np.mean([f.get("right_in_region", 0.0) for f in all_flags])
                 
                 avg_mean_d_left = np.mean([f.get("mean_d_left", 0.0) for f in all_flags])
-                avg_min_d_left = np.mean([f.get("min_d_left", 0.0) for f in all_flags])
+                min_left_list = [f.get("min_d_left", 0.0) for f in all_flags if f.get("min_d_left", 0.0) != float('inf')]
+                avg_min_d_left = np.mean(min_left_list) if min_left_list else float('inf')
+                
                 avg_mean_d_right = np.mean([f.get("mean_d_right", 0.0) for f in all_flags])
-                avg_min_d_right = np.mean([f.get("min_d_right", 0.0) for f in all_flags])
+                min_right_list = [f.get("min_d_right", 0.0) for f in all_flags if f.get("min_d_right", 0.0) != float('inf')]
+                avg_min_d_right = np.mean(min_right_list) if min_right_list else float('inf')
+                
                 avg_mean_reach_gate = np.mean([f.get("mean_reach_gate", 0.0) for f in all_flags])
             else:
                 avg_left_rgn = avg_right_rgn = 0.0
