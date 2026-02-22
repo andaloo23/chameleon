@@ -752,10 +752,7 @@ def train_ppo(
         metrics_history["value_loss"].append(metrics["value_loss"])
         
         # Log progress
-        # More aggressive logging for the first 50 iterations to show progress immediately
-        effective_log_interval = 1 if iteration <= 50 else log_interval
-        
-        if iteration % effective_log_interval == 0 or total_episodes >= num_episodes:
+        if iteration % 8 == 1 or total_episodes >= num_episodes:
             # Count milestone percentages
             n_episodes = len(all_flags)
             if n_episodes > 0:
