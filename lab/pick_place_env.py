@@ -617,8 +617,8 @@ class PickPlaceEnv(DirectRLEnv):
         _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
         self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
         self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
-        self._steps_left_in_region  += (new_left_tip_dist  == 0.0).float() * not_grasped_mask
-        self._steps_right_in_region += (new_right_tip_dist == 0.0).float() * not_grasped_mask
+        self._steps_left_in_region  += self._moving_tip_in_left_zone.float()  * not_grasped_mask
+        self._steps_right_in_region += self._fixed_tip_in_right_zone.float() * not_grasped_mask
 
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
