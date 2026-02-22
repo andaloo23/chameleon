@@ -423,8 +423,9 @@ class PickPlaceEnv(DirectRLEnv):
         first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
             cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
-            local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
-            local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+            n_envs = cube_quat_w.shape[0]
+            local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
+            local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
             cube_x_world = quat_apply(cube_quat_w, local_x)
             cube_y_world = quat_apply(cube_quat_w, local_y)
             # Approach direction: robot base (origin) toward cube, XY only
@@ -497,8 +498,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
-        local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device)
-        local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        n_envs = cube_quat_w.shape[0]
+        local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
+        local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
         cube_x_world = quat_apply(cube_quat_w, local_x)
         cube_y_world = quat_apply(cube_quat_w, local_y)
         best_axis = torch.where(self._use_x.unsqueeze(-1), cube_x_world, cube_y_world)
