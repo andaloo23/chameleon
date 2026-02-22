@@ -136,6 +136,12 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_left_fingertip_dist  = torch.zeros(self.num_envs, device=self.device)
         self._prev_right_fingertip_dist = torch.zeros(self.num_envs, device=self.device)
 
+        # Per-episode accumulators for fingertip debug metrics
+        self._steps_left_in_region  = torch.zeros(self.num_envs, device=self.device)
+        self._steps_right_in_region = torch.zeros(self.num_envs, device=self.device)
+        self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
+        self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
+
     def _setup_scene(self):
         """Create the scene with robot, cube, cup, and ground."""
         # Create robot articulation
@@ -602,6 +608,16 @@ class PickPlaceEnv(DirectRLEnv):
             straddle_weight=self.cfg.rew_straddle_weight,
         )
         
+        # Accumulate per-fingertip OBB debug metrics BEFORE updating cached dists.
+        # delta_* matches the reward function's internal computation (uses old stage_grasped).
+        not_grasped_mask = (~self._stage_grasped).float()
+        _delta_left  = torch.clamp(self._prev_left_fingertip_dist  - new_left_tip_dist,  min=0.0)
+        _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
+        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
+        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
+        self._steps_left_in_region  += (new_left_tip_dist  == 0.0).float() * not_grasped_mask
+        self._steps_right_in_region += (new_right_tip_dist == 0.0).float() * not_grasped_mask
+
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
@@ -638,6 +654,11 @@ class PickPlaceEnv(DirectRLEnv):
             # Fingertip OBB face distances: 0 when tip is touching/past its assigned face
             "left_tip_face_dist": self._prev_left_fingertip_dist,   # jaw tip -> left face
             "right_tip_face_dist": self._prev_right_fingertip_dist,  # gripper tip -> right face
+            # Per-episode fingertip metrics (pre-grasp only)
+            "left_in_region_frac":  self._steps_left_in_region  / (self.episode_length_buf.float() + 1.0),
+            "right_in_region_frac": self._steps_right_in_region / (self.episode_length_buf.float() + 1.0),
+            "cum_left_obb_reward":  self._cum_left_obb_reward,
+            "cum_right_obb_reward": self._cum_right_obb_reward,
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,
@@ -735,6 +756,11 @@ class PickPlaceEnv(DirectRLEnv):
         # starts accruing immediately on first approach.
         self._prev_left_fingertip_dist[env_ids]  = 1.0
         self._prev_right_fingertip_dist[env_ids] = 1.0
+        # Reset per-episode fingertip accumulator metrics
+        self._steps_left_in_region[env_ids]  = 0.0
+        self._steps_right_in_region[env_ids] = 0.0
+        self._cum_left_obb_reward[env_ids]   = 0.0
+        self._cum_right_obb_reward[env_ids]  = 0.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False
