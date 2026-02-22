@@ -287,7 +287,7 @@ def compute_fingertip_obb_reach_reward(
     abs_reward_base = w_abs * torch.exp(-d / sigma_abs)
     
     # Reach gating
-    sigma_reach = 0.05
+    sigma_reach = 0.10
     reach_gate = torch.exp(-reach_dist / sigma_reach)
     
     # Gated rewards
