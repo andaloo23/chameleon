@@ -408,8 +408,10 @@ class PickPlaceEnv(DirectRLEnv):
         cube_pos = self.cube.data.root_pos_w
         
         # Compute fingertip world positions from mutable offsets
-        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper)
-        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw)
+        # Offsets must be [num_envs, 3] — quat_apply uses vec.shape for its final .view() call
+        n = gripper_pos.shape[0]
+        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
+        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
         # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1
