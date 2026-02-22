@@ -297,6 +297,10 @@ def collect_rollout(
         ever_lifted = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_droppable = torch.zeros(num_envs, dtype=torch.bool, device=device)
         ever_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        # Per-env fingertip in-region accumulators (sum of per-step fracs; divide by episode len)
+        sum_left_in_region  = torch.zeros(num_envs, device=device)
+        sum_right_in_region = torch.zeros(num_envs, device=device)
+        ep_steps = torch.zeros(num_envs, device=device)
         
         penalties = {
             "action": torch.zeros(num_envs, device=device),
@@ -317,6 +321,9 @@ def collect_rollout(
         prev_cube_z = state.get("prev_cube_z", torch.zeros_like(ever_grasped))
         penalties = state["penalties"]
         info = state["info"]
+        sum_left_in_region  = state.get("sum_left_in_region",  torch.zeros(num_envs, device=device))
+        sum_right_in_region = state.get("sum_right_in_region", torch.zeros(num_envs, device=device))
+        ep_steps = state.get("ep_steps", torch.zeros(num_envs, device=device))
 
     episode_rewards, episode_flags, episode_min_dists, episode_final_dists = [], [], [], []
     action_magnitudes = []
@@ -365,6 +372,13 @@ def collect_rollout(
             penalties["drop"] += p.get("drop_penalty", 0.0)
             penalties["cup"] += p.get("cup_collision", 0.0)
             penalties["self"] += p.get("self_collision", 0.0)
+
+        # Fingertip in-region fractions (per-step values from env)
+        if "left_in_region_frac" in task_state:
+            sum_left_in_region  += task_state["left_in_region_frac"]
+        if "right_in_region_frac" in task_state:
+            sum_right_in_region += task_state["right_in_region_frac"]
+        ep_steps += 1.0
             
         # Store in buffer
         po_np = policy_obs.cpu().numpy()
@@ -386,13 +400,18 @@ def collect_rollout(
                     "grasped": ever_grasped[i].item(),
                     "lifted": ever_lifted[i].item(),
                     "droppable": ever_droppable[i].item(),
-                    "success": ever_success[i].item()
+                    "success": ever_success[i].item(),
+                    "left_in_region":  (sum_left_in_region[i]  / (ep_steps[i] + 1e-8)).item(),
+                    "right_in_region": (sum_right_in_region[i] / (ep_steps[i] + 1e-8)).item(),
                 })
-                
+
                 # Reset per-env
                 current_rewards[i] = 0.0
                 min_dists[i] = float("inf")
                 ever_reached[i], ever_grasped[i], ever_lifted[i], ever_droppable[i], ever_success[i] = False, False, False, False, False
+                sum_left_in_region[i]  = 0.0
+                sum_right_in_region[i] = 0.0
+                ep_steps[i] = 0.0
                 for k in penalties: penalties[k][i] = 0.0
                 
         obs_dict = next_obs_dict
@@ -407,7 +426,10 @@ def collect_rollout(
         "final_dists": final_dists, "ever_reached": ever_reached, "ever_grasped": ever_grasped,
         "ever_lifted": ever_lifted, "ever_droppable": ever_droppable, "ever_success": ever_success, 
         "prev_cube_z": getattr(env, "_prev_cube_z", torch.zeros_like(ever_grasped)),
-        "penalties": penalties, "info": info
+        "penalties": penalties, "info": info,
+        "sum_left_in_region": sum_left_in_region,
+        "sum_right_in_region": sum_right_in_region,
+        "ep_steps": ep_steps,
     }
     
     return last_value, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
@@ -749,8 +771,14 @@ def train_ppo(
                   f"Reward: {avg_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
+            if n_episodes > 0:
+                avg_left_rgn  = 100 * np.mean([f.get("left_in_region",  0.0) for f in all_flags])
+                avg_right_rgn = 100 * np.mean([f.get("right_in_region", 0.0) for f in all_flags])
+            else:
+                avg_left_rgn = avg_right_rgn = 0.0
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
-                  f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}%")
+                  f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}% "
+                  f"| LRgn:{avg_left_rgn:4.1f}% RRgn:{avg_right_rgn:4.1f}%")
     
     # Final statistics
     print("\n" + "=" * 60)
