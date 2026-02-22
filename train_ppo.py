@@ -403,6 +403,11 @@ def collect_rollout(
                     "success": ever_success[i].item(),
                     "left_in_region":  (sum_left_in_region[i]  / (ep_steps[i] + 1e-8)).item(),
                     "right_in_region": (sum_right_in_region[i] / (ep_steps[i] + 1e-8)).item(),
+                    "mean_d_left": task_state.get("mean_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "min_d_left": task_state.get("min_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "mean_d_right": task_state.get("mean_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "min_d_right": task_state.get("min_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "mean_reach_gate": task_state.get("mean_reach_gate", torch.zeros_like(sum_left_in_region))[i].item(),
                 })
 
                 # Reset per-env
@@ -771,11 +776,22 @@ def train_ppo(
             if n_episodes > 0:
                 avg_left_rgn  = 100 * np.mean([f.get("left_in_region",  0.0) for f in all_flags])
                 avg_right_rgn = 100 * np.mean([f.get("right_in_region", 0.0) for f in all_flags])
+                
+                avg_mean_d_left = np.mean([f.get("mean_d_left", 0.0) for f in all_flags])
+                avg_min_d_left = np.mean([f.get("min_d_left", 0.0) for f in all_flags])
+                avg_mean_d_right = np.mean([f.get("mean_d_right", 0.0) for f in all_flags])
+                avg_min_d_right = np.mean([f.get("min_d_right", 0.0) for f in all_flags])
+                avg_mean_reach_gate = np.mean([f.get("mean_reach_gate", 0.0) for f in all_flags])
             else:
                 avg_left_rgn = avg_right_rgn = 0.0
+                avg_mean_d_left = avg_min_d_left = avg_mean_d_right = avg_min_d_right = avg_mean_reach_gate = 0.0
+                
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
                   f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}% "
                   f"| LRgn:{avg_left_rgn:4.1f}% RRgn:{avg_right_rgn:4.1f}%")
+            print(f"           [Pre-Grasp] dL(avg/min): {avg_mean_d_left:.4f}/{avg_min_d_left:.4f} | "
+                  f"dR(avg/min): {avg_mean_d_right:.4f}/{avg_min_d_right:.4f} | "
+                  f"ReachGate: {avg_mean_reach_gate:.3f}")
     
     # Final statistics
     print("\n" + "=" * 60)
