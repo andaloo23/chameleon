@@ -203,6 +203,7 @@ def compute_fingertip_obb_reach_reward(
     left_is_positive: Tensor,
     cube_half_size: float,
     zone_margin: float,
+    reach_dist: Tensor,
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
     stage_grasped: Tensor,
@@ -273,12 +274,22 @@ def compute_fingertip_obb_reach_reward(
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
     delta_right = torch.clamp(prev_right_tip_dist - d_right, min=0.0)
 
-    obb_reward = fingertip_obb_weight * (delta_left + delta_right) * not_grasped
+    # Base shaping components
+    obb_reward_base = fingertip_obb_weight * (delta_left + delta_right)
 
-    # Absolute distance reward
+    # Absolute distance reward base
     w_abs = 1.0
     sigma_abs = 0.01
-    abs_reward = w_abs * torch.exp(-(d_left + d_right) / sigma_abs) * not_grasped
+    d = d_left + d_right
+    abs_reward_base = w_abs * torch.exp(-d / sigma_abs)
+    
+    # Reach gating
+    sigma_reach = 0.05
+    reach_gate = torch.exp(-reach_dist / sigma_reach)
+    
+    # Gated rewards
+    obb_reward = obb_reward_base * reach_gate * not_grasped
+    abs_reward = abs_reward_base * reach_gate * not_grasped
 
     # --- Straddle reward ---
     # Measure signed span of fingertips along the pinch axis
@@ -286,9 +297,12 @@ def compute_fingertip_obb_reach_reward(
     span = sign_left * (proj_jaw - proj_gripper)  # [N]
     target_width = 2.0 * (cube_half_size + zone_margin)
     sigma = cube_half_size * 0.75
-    straddle = straddle_weight * torch.exp(
+    straddle_base = straddle_weight * torch.exp(
         -0.5 * ((span - target_width) / sigma) ** 2
-    ) * not_grasped
+    )
+    
+    near = torch.exp(-d / sigma_abs)
+    straddle = straddle_base * near * not_grasped
 
     reach_reward = obb_reward + abs_reward + straddle
 
@@ -315,6 +329,7 @@ def compute_pick_place_rewards(
     cup_height: float,
     cube_half_size: float,
     zone_margin: float,
+    reach_dist: Tensor,
     # New fingertip OBB inputs
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
@@ -360,6 +375,7 @@ def compute_pick_place_rewards(
         left_is_positive=left_is_positive,
         cube_half_size=cube_half_size,
         zone_margin=zone_margin,
+        reach_dist=reach_dist,
         prev_right_tip_dist=prev_right_tip_dist,
         prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,

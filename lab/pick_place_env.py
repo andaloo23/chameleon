@@ -565,6 +565,11 @@ class PickPlaceEnv(DirectRLEnv):
             in_cup_height_margin=self.cfg.in_cup_height_margin,
         )
         
+        # Compute 2D reach distance for gating region rewards
+        gripper_xy = gripper_pos[:, :2]
+        cube_xy = cube_pos[:, :2]
+        reach_dist = torch.norm(gripper_xy - cube_xy, dim=1)
+
         # Compute rewards
         (
             total_reward, new_dist, new_transport_dist, new_cube_z,
@@ -590,6 +595,7 @@ class PickPlaceEnv(DirectRLEnv):
             cup_height=self.cfg.cup_height,
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
             zone_margin=self._zone_margin,
+            reach_dist=reach_dist,
             # Fingertip OBB inputs
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
