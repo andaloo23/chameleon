@@ -202,6 +202,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_drop_penalty = -20.0
     rew_cup_collision_penalty = -0.5
 
+    # Pre-grasp fingertip reaching rewards
+    rew_fingertip_obb_weight = 10.0   # w * max(d_prev - d, 0) summed over both fingertips
+    rew_straddle_weight = 0.5         # Gaussian reward for straddling the cube (max = 0.5)
+
     # ===== Grasp Detection Thresholds =====
     grasp_close_command_threshold = 0.1
     grasp_stall_threshold = 0.01 # Relaxed to catch grasp consistently

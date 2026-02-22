@@ -132,6 +132,10 @@ class PickPlaceEnv(DirectRLEnv):
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
+        # Previous fingertip-to-face distances for OBB reach reward (pre-grasp)
+        self._prev_left_fingertip_dist  = torch.zeros(self.num_envs, device=self.device)
+        self._prev_right_fingertip_dist = torch.zeros(self.num_envs, device=self.device)
+
     def _setup_scene(self):
         """Create the scene with robot, cube, cup, and ground."""
         # Create robot articulation
@@ -551,7 +555,12 @@ class PickPlaceEnv(DirectRLEnv):
         )
         
         # Compute rewards
-        total_reward, new_dist, new_transport_dist, new_cube_z, new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped, action_cost, drop_penalty = compute_pick_place_rewards(
+        (
+            total_reward, new_dist, new_transport_dist, new_cube_z,
+            new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
+            action_cost, drop_penalty,
+            new_right_tip_dist, new_left_tip_dist,
+        ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
@@ -569,6 +578,15 @@ class PickPlaceEnv(DirectRLEnv):
             stage_dropped=self._stage_dropped,
             cup_height=self.cfg.cup_height,
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
+            # Fingertip OBB inputs
+            gripper_tip_pos=gripper_tip_pos,
+            jaw_tip_pos=jaw_tip_pos,
+            cube_quat_w=self.cube.data.root_quat_w,
+            best_axis=best_axis,
+            left_is_positive=self._left_is_positive,
+            prev_right_tip_dist=self._prev_right_fingertip_dist,
+            prev_left_tip_dist=self._prev_left_fingertip_dist,
+            # Reward weights
             approach_weight=self.cfg.rew_approach_delta_weight,
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
@@ -578,12 +596,16 @@ class PickPlaceEnv(DirectRLEnv):
             lift_shaping_weight=self.cfg.rew_lift_shaping_weight,
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
+            fingertip_obb_weight=self.cfg.rew_fingertip_obb_weight,
+            straddle_weight=self.cfg.rew_straddle_weight,
         )
         
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
         self._prev_cube_z = new_cube_z
+        self._prev_right_fingertip_dist = new_right_tip_dist
+        self._prev_left_fingertip_dist  = new_left_tip_dist
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -611,6 +633,9 @@ class PickPlaceEnv(DirectRLEnv):
             "left_zone_ok": self._moving_tip_in_left_zone,    # moving jaw in left face zone
             "right_zone_ok": self._fixed_tip_in_right_zone,   # fixed jaw in right face zone
             "cube_pos": cube_pos,
+            # Fingertip OBB face distances: 0 when tip is touching/past its assigned face
+            "left_tip_face_dist": self._prev_left_fingertip_dist,   # jaw tip -> left face
+            "right_tip_face_dist": self._prev_right_fingertip_dist,  # gripper tip -> right face
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,
@@ -704,6 +729,10 @@ class PickPlaceEnv(DirectRLEnv):
             dim=1
         )
         self._prev_cube_z[env_ids] = cube_pos[:, 2]
+        # Reset fingertip OBB distances to a large initial value so delta reward
+        # starts accruing immediately on first approach.
+        self._prev_left_fingertip_dist[env_ids]  = 1.0
+        self._prev_right_fingertip_dist[env_ids] = 1.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

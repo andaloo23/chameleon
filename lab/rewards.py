@@ -195,6 +195,101 @@ def compute_penalties(
 
 
 @torch.jit.script
+def compute_fingertip_obb_reach_reward(
+    gripper_tip_pos: Tensor,
+    jaw_tip_pos: Tensor,
+    cube_pos: Tensor,
+    best_axis: Tensor,
+    left_is_positive: Tensor,
+    cube_half_size: float,
+    prev_right_tip_dist: Tensor,
+    prev_left_tip_dist: Tensor,
+    stage_grasped: Tensor,
+    fingertip_obb_weight: float,
+    straddle_weight: float,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Compute the pre-grasp fingertip reaching reward.
+
+    Two components, both zero once stage_grasped latches:
+
+    1. OBB distance reward:
+       For each fingertip, measure how far outside its designated cube-face
+       slab it is (0 when inside/touching). Use delta shaping:
+         reward += w * max(d_prev - d_curr, 0)  per fingertip
+
+    2. Straddle reward:
+       Project fingertips onto the pinch axis. When the span between them
+       matches the cube diameter, reward = straddle_weight; tapers with
+       a Gaussian (sigma = cube_half_size * 0.75).
+
+    Left fingertip = jaw_tip  (moving jaw)
+    Right fingertip = gripper_tip  (fixed jaw)
+
+    Returns:
+        reach_reward:       [num_envs]
+        new_right_tip_dist: [num_envs] (cache for next step)
+        new_left_tip_dist:  [num_envs] (cache for next step)
+    """
+    not_grasped = (~stage_grasped).float()
+
+    # --- Per-fingertip face-slab distance ---
+    # best_axis points from cube center toward the +normal face.
+    # left_is_positive == True  => left face is +normal side
+    #                              right face is -normal side
+    # left (jaw) target: left face center
+    # right (gripper) target: right face center
+
+    # Signed projection of each tip onto the pinch axis, relative to cube center
+    tip_to_cube_jaw     = jaw_tip_pos     - cube_pos  # [N,3]
+    tip_to_cube_gripper = gripper_tip_pos - cube_pos  # [N,3]
+
+    proj_jaw     = (tip_to_cube_jaw     * best_axis).sum(dim=-1)  # [N]
+    proj_gripper = (tip_to_cube_gripper * best_axis).sum(dim=-1)  # [N]
+
+    # Target projection for each fingertip:
+    #   left (jaw) tip  -> left face  -> +half if left_is_positive, else -half
+    #   right (gripper) -> right face -> -half if left_is_positive, else +half
+    sign_left  = torch.where(left_is_positive,
+                             torch.ones_like(proj_jaw), -torch.ones_like(proj_jaw))
+    sign_right = -sign_left
+
+    target_proj_jaw     = sign_left  * cube_half_size  # [N]
+    target_proj_gripper = sign_right * cube_half_size  # [N]
+
+    # Signed excess beyond the face (positive = outside/past face, negative = inside)
+    # We want the fingertip to reach the face from outside, so:
+    # For left tip (approaches from the +sign side):
+    #   excess = target_proj - proj_jaw  (positive when still outside)
+    excess_jaw     = sign_left  * (target_proj_jaw     - proj_jaw)      # [N]
+    excess_gripper = sign_right * (target_proj_gripper - proj_gripper)  # [N]
+
+    # Distance to face: only positive when outside; 0 when at/past face
+    d_left  = torch.clamp(excess_jaw, min=0.0)      # [N]
+    d_right = torch.clamp(excess_gripper, min=0.0)  # [N]
+
+    # Delta reward: reward only for closing the gap
+    delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
+    delta_right = torch.clamp(prev_right_tip_dist - d_right, min=0.0)
+
+    obb_reward = fingertip_obb_weight * (delta_left + delta_right) * not_grasped
+
+    # --- Straddle reward ---
+    # Measure signed span of fingertips along the pinch axis
+    # Positive when jaw is on left side (+normal) and gripper on right (-normal)
+    span = sign_left * (proj_jaw - proj_gripper)  # [N]
+    target_width = 2.0 * cube_half_size
+    sigma = cube_half_size * 0.75
+    straddle = straddle_weight * torch.exp(
+        -0.5 * ((span - target_width) / sigma) ** 2
+    ) * not_grasped
+
+    reach_reward = obb_reward + straddle
+
+    return reach_reward, d_right, d_left
+
+
+@torch.jit.script
 def compute_pick_place_rewards(
     gripper_pos: Tensor,
     cube_pos: Tensor,
@@ -213,6 +308,14 @@ def compute_pick_place_rewards(
     stage_dropped: Tensor,
     cup_height: float,
     cube_half_size: float,
+    # New fingertip OBB inputs
+    gripper_tip_pos: Tensor,
+    jaw_tip_pos: Tensor,
+    cube_quat_w: Tensor,
+    best_axis: Tensor,
+    left_is_positive: Tensor,
+    prev_right_tip_dist: Tensor,
+    prev_left_tip_dist: Tensor,
     # Reward weights
     approach_weight: float,
     grasp_bonus: float,
@@ -223,43 +326,55 @@ def compute_pick_place_rewards(
     lift_shaping_weight: float,
     action_cost_weight: float,
     drop_penalty: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    fingertip_obb_weight: float,
+    straddle_weight: float,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
-    
+
     Returns:
-        total_reward: [num_envs] total reward
-        curr_gripper_cube_dist: [num_envs] to cache for next step
-        new_stage_grasped: [num_envs] updated latched grasp flag
-        action_cost: [num_envs] action cost penalty
-        drop_penalty: [num_envs] drop penalty
-        new_stage_grasped: [num_envs]
-        new_stage_lifted: [num_envs]
-        new_stage_droppable: [num_envs]
-        new_stage_success: [num_envs]
-        new_stage_dropped: [num_envs]
+        total_reward:         [num_envs]
+        curr_gripper_cube_dist, curr_transport_dist, curr_cube_z: cached distances
+        new_stage_*:          updated latched flags
+        action_cost, drop_penalty_reward: per-env penalty tensors
+        new_right_tip_dist, new_left_tip_dist: cached fingertip OBB distances
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
         gripper_pos, cube_pos, prev_gripper_cube_dist, stage_grasped, approach_weight
     )
-    
+
+    # Pre-grasp: Fingertip OBB reaching + straddle
+    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist = compute_fingertip_obb_reach_reward(
+        gripper_tip_pos=gripper_tip_pos,
+        jaw_tip_pos=jaw_tip_pos,
+        cube_pos=cube_pos,
+        best_axis=best_axis,
+        left_is_positive=left_is_positive,
+        cube_half_size=cube_half_size,
+        prev_right_tip_dist=prev_right_tip_dist,
+        prev_left_tip_dist=prev_left_tip_dist,
+        stage_grasped=stage_grasped,
+        fingertip_obb_weight=fingertip_obb_weight,
+        straddle_weight=straddle_weight,
+    )
+
     # Stage 3: Unified 3D Transport shaping
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
         cube_pos, cup_pos, cup_height, cube_half_size,
         prev_transport_dist, is_grasped, transport_weight
     )
-    
+
     # Stage 3: Lift shaping (delta-based)
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight
     )
-    
+
     # Stages 2, 4, 5, 6: One-time bonuses
     cube_z = cube_pos[:, 2]
     is_lifted = is_grasped & (cube_z > 0.03)  # Table height threshold
-    
+
     (grasp_reward, lift_reward, droppable_reward, success_reward,
      new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success) = compute_one_time_bonuses(
         is_grasped, stage_grasped,
@@ -268,17 +383,18 @@ def compute_pick_place_rewards(
         is_in_cup, stage_success,
         grasp_bonus, lift_bonus, droppable_bonus, success_bonus
     )
-    
+
     # Penalties
     action_cost, drop_penalty_reward, new_stage_dropped = compute_penalties(
         joint_vel, cube_pos, is_grasped, stage_grasped,
         is_in_cup, cube_half_size, action_cost_weight, drop_penalty,
         stage_dropped
     )
-    
+
     # Total reward
     total_reward = (
         approach_reward +
+        fingertip_reach_reward +
         grasp_reward +
         lift_reward +
         lift_shaping_reward +
@@ -288,7 +404,8 @@ def compute_pick_place_rewards(
         action_cost +
         drop_penalty_reward
     )
-    
+
     return (total_reward, curr_dist, curr_transport_dist, curr_cube_z,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
-            action_cost, drop_penalty_reward)
+            action_cost, drop_penalty_reward,
+            new_right_tip_dist, new_left_tip_dist)
