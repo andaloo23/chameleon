@@ -139,6 +139,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Per-episode accumulators for fingertip debug metrics
         self._steps_left_in_region  = torch.zeros(self.num_envs, device=self.device)
         self._steps_right_in_region = torch.zeros(self.num_envs, device=self.device)
+        self._pre_grasp_steps       = torch.zeros(self.num_envs, device=self.device)
         self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
         self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
 
@@ -588,6 +589,7 @@ class PickPlaceEnv(DirectRLEnv):
             stage_dropped=self._stage_dropped,
             cup_height=self.cfg.cup_height,
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
+            zone_margin=self._zone_margin,
             # Fingertip OBB inputs
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
@@ -619,6 +621,7 @@ class PickPlaceEnv(DirectRLEnv):
         self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
         self._steps_left_in_region  += self._moving_tip_in_left_zone.float()  * not_grasped_mask
         self._steps_right_in_region += self._fixed_tip_in_right_zone.float() * not_grasped_mask
+        self._pre_grasp_steps       += not_grasped_mask
 
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
@@ -657,8 +660,8 @@ class PickPlaceEnv(DirectRLEnv):
             "left_tip_face_dist": self._prev_left_fingertip_dist,   # jaw tip -> left face
             "right_tip_face_dist": self._prev_right_fingertip_dist,  # gripper tip -> right face
             # Per-episode fingertip metrics (pre-grasp only)
-            "left_in_region_frac":  self._steps_left_in_region  / (self.episode_length_buf.float() + 1.0),
-            "right_in_region_frac": self._steps_right_in_region / (self.episode_length_buf.float() + 1.0),
+            "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),
+            "right_in_region_frac": self._steps_right_in_region / torch.clamp(self._pre_grasp_steps, min=1.0),
             "cum_left_obb_reward":  self._cum_left_obb_reward,
             "cum_right_obb_reward": self._cum_right_obb_reward,
             "penalties": {
@@ -761,6 +764,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Reset per-episode fingertip accumulator metrics
         self._steps_left_in_region[env_ids]  = 0.0
         self._steps_right_in_region[env_ids] = 0.0
+        self._pre_grasp_steps[env_ids]       = 0.0
         self._cum_left_obb_reward[env_ids]   = 0.0
         self._cum_right_obb_reward[env_ids]  = 0.0
         self._was_grasped[env_ids] = False

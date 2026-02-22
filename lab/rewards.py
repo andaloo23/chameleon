@@ -202,6 +202,7 @@ def compute_fingertip_obb_reach_reward(
     best_axis: Tensor,
     left_is_positive: Tensor,
     cube_half_size: float,
+    zone_margin: float,
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
     stage_grasped: Tensor,
@@ -278,7 +279,7 @@ def compute_fingertip_obb_reach_reward(
     # Measure signed span of fingertips along the pinch axis
     # Positive when jaw is on left side (+normal) and gripper on right (-normal)
     span = sign_left * (proj_jaw - proj_gripper)  # [N]
-    target_width = 2.0 * cube_half_size
+    target_width = 2.0 * (cube_half_size + zone_margin)
     sigma = cube_half_size * 0.75
     straddle = straddle_weight * torch.exp(
         -0.5 * ((span - target_width) / sigma) ** 2
@@ -308,6 +309,7 @@ def compute_pick_place_rewards(
     stage_dropped: Tensor,
     cup_height: float,
     cube_half_size: float,
+    zone_margin: float,
     # New fingertip OBB inputs
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
@@ -352,6 +354,7 @@ def compute_pick_place_rewards(
         best_axis=best_axis,
         left_is_positive=left_is_positive,
         cube_half_size=cube_half_size,
+        zone_margin=zone_margin,
         prev_right_tip_dist=prev_right_tip_dist,
         prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,
