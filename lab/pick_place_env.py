@@ -581,7 +581,7 @@ class PickPlaceEnv(DirectRLEnv):
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
-            reach_gate, curr_d_right, curr_d_left,
+            reach_gate,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
@@ -636,14 +636,14 @@ class PickPlaceEnv(DirectRLEnv):
         self._pre_grasp_steps       += not_grasped_mask
         
         # Accumulate pre-grasp averages and minimums
-        self._sum_d_left += curr_d_left * not_grasped_mask
-        self._sum_d_right += curr_d_right * not_grasped_mask
+        self._sum_d_left += new_left_tip_dist * not_grasped_mask
+        self._sum_d_right += new_right_tip_dist * not_grasped_mask
         self._sum_reach_gate += reach_gate * not_grasped_mask
         
         # Update minimums (only where not grasped)
         update_min_mask = not_grasped_mask.bool()
-        self._min_d_left = torch.where(update_min_mask, torch.minimum(self._min_d_left, curr_d_left), self._min_d_left)
-        self._min_d_right = torch.where(update_min_mask, torch.minimum(self._min_d_right, curr_d_right), self._min_d_right)
+        self._min_d_left = torch.where(update_min_mask, torch.minimum(self._min_d_left, new_left_tip_dist), self._min_d_left)
+        self._min_d_right = torch.where(update_min_mask, torch.minimum(self._min_d_right, new_right_tip_dist), self._min_d_right)
 
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist

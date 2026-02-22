@@ -209,7 +209,7 @@ def compute_fingertip_obb_reach_reward(
     stage_grasped: Tensor,
     fingertip_obb_weight: float,
     straddle_weight: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """
     Compute the pre-grasp fingertip reaching reward.
 
@@ -353,7 +353,7 @@ def compute_pick_place_rewards(
     drop_penalty: float,
     fingertip_obb_weight: float,
     straddle_weight: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
 
@@ -439,4 +439,4 @@ def compute_pick_place_rewards(
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward,
             new_right_tip_dist, new_left_tip_dist,
-            reach_gate, new_right_tip_dist, new_left_tip_dist)
+            reach_gate)
