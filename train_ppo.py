@@ -6,6 +6,7 @@ Outputs statistics: avg reward, % reached, % grasped, % lifted, % success.
 """
 
 import argparse
+import math
 import numpy as np
 from collections import deque
 from typing import Dict, List, Tuple
@@ -404,9 +405,9 @@ def collect_rollout(
                     "left_in_region":  (sum_left_in_region[i]  / (ep_steps[i] + 1e-8)).item(),
                     "right_in_region": (sum_right_in_region[i] / (ep_steps[i] + 1e-8)).item(),
                     "mean_d_left": task_state.get("mean_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_left": task_state.get("min_d_left", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
+                    "min_d_left": task_state.get("min_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
                     "mean_d_right": task_state.get("mean_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_right": task_state.get("min_d_right", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
+                    "min_d_right": task_state.get("min_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
                     "mean_reach_gate": task_state.get("mean_reach_gate", torch.zeros_like(sum_left_in_region))[i].item(),
                 })
 
@@ -778,11 +779,11 @@ def train_ppo(
                 avg_right_rgn = 100 * np.mean([f.get("right_in_region", 0.0) for f in all_flags])
                 
                 avg_mean_d_left = np.mean([f.get("mean_d_left", 0.0) for f in all_flags])
-                min_left_list = [f.get("min_d_left", 0.0) for f in all_flags if f.get("min_d_left", 0.0) != float('inf')]
+                min_left_list = [v for f in all_flags if not math.isinf(v := f.get("min_d_left", 0.0))]
                 avg_min_d_left = np.mean(min_left_list) if min_left_list else float('inf')
                 
                 avg_mean_d_right = np.mean([f.get("mean_d_right", 0.0) for f in all_flags])
-                min_right_list = [f.get("min_d_right", 0.0) for f in all_flags if f.get("min_d_right", 0.0) != float('inf')]
+                min_right_list = [v for f in all_flags if not math.isinf(v := f.get("min_d_right", 0.0))]
                 avg_min_d_right = np.mean(min_right_list) if min_right_list else float('inf')
                 
                 avg_mean_reach_gate = np.mean([f.get("mean_reach_gate", 0.0) for f in all_flags])
