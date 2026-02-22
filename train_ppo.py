@@ -404,9 +404,9 @@ def collect_rollout(
                     "left_in_region":  (sum_left_in_region[i]  / (ep_steps[i] + 1e-8)).item(),
                     "right_in_region": (sum_right_in_region[i] / (ep_steps[i] + 1e-8)).item(),
                     "mean_d_left": task_state.get("mean_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_left": task_state.get("min_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "min_d_left": task_state.get("min_d_left", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
                     "mean_d_right": task_state.get("mean_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_right": task_state.get("min_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
+                    "min_d_right": task_state.get("min_d_right", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
                     "mean_reach_gate": task_state.get("mean_reach_gate", torch.zeros_like(sum_left_in_region))[i].item(),
                 })
 
