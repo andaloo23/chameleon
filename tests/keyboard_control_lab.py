@@ -181,26 +181,6 @@ def main():
     warmup_frames = 60  # Skip detector checks during scene stabilization
     frame_count = 0
     
-    # Track minimum distance during pre-grasp phase
-    min_dl = float('inf')
-    min_dr = float('inf')
-    
-    # --- Setup Debug Spheres ---
-    import isaaclab.sim.utils.stage as stage_utils
-    from pxr import UsdGeom, Gf
-    
-    stage = stage_utils.get_current_stage()
-    
-    green_sphere = UsdGeom.Sphere.Define(stage, "/World/envs/env_0/GreenTipMarker")
-    green_sphere.GetRadiusAttr().Set(0.015)
-    green_sphere.GetDisplayColorAttr().Set([(0.0, 1.0, 0.0)])
-    green_xform = UsdGeom.XformCommonAPI(green_sphere)
-    
-    red_sphere = UsdGeom.Sphere.Define(stage, "/World/envs/env_0/RedTipMarker")
-    red_sphere.GetRadiusAttr().Set(0.015)
-    red_sphere.GetDisplayColorAttr().Set([(1.0, 0.0, 0.0)])
-    red_xform = UsdGeom.XformCommonAPI(red_sphere)
-    
     try:
         while input_state["is_running"] and simulation_app.is_running():
             # Create action tensor (delta from current to target)
@@ -229,13 +209,6 @@ def main():
             
             # Get detector states from task_state
             task_state = info.get("task_state", {})
-            
-            # --- Update Debug Spheres ---
-            if "gripper_tip_pos" in task_state and "jaw_tip_pos" in task_state:
-                green_pos = task_state["gripper_tip_pos"][0]
-                red_pos = task_state["jaw_tip_pos"][0]
-                green_xform.SetTranslate(Gf.Vec3d(green_pos[0].item(), green_pos[1].item(), green_pos[2].item()))
-                red_xform.SetTranslate(Gf.Vec3d(red_pos[0].item(), red_pos[1].item(), red_pos[2].item()))
             
             # Get distance for reach detection
             gripper_cube_dist = task_state.get("gripper_cube_distance")

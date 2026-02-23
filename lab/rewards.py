@@ -266,6 +266,14 @@ def compute_fingertip_obb_reach_reward(
     # This correctly measures distance whether the tip is outside or inside the face!
     d_left  = torch.abs(proj_gripper - target_proj_gripper)  # [N]
     d_right = torch.abs(proj_jaw     - target_proj_jaw)      # [N]
+    
+    # --- TEMPORARY DEBUG PRINT ---
+    # Only print roughly once every 500 calls to avoid spam, or just print if jaw_tip_pos[0][2] is changing
+    if torch.rand(1).item() < 0.002:
+        print(f"[REWARDS DEBUG] cube_pos: {cube_pos[0].cpu().numpy()}")
+        print(f"   gripper(L) pos: {gripper_tip_pos[0].cpu().numpy()} | proj: {proj_gripper[0].item():.4f} | target: {target_proj_gripper[0].item():.4f} | dL: {d_left[0].item():.4f}")
+        print(f"   jaw(R) pos: {jaw_tip_pos[0].cpu().numpy()} | proj: {proj_jaw[0].item():.4f} | target: {target_proj_jaw[0].item():.4f} | dR: {d_right[0].item():.4f}")
+        print(f"   best_axis: {best_axis[0].cpu().numpy()} | left_is_pos: {left_is_positive[0].item()}")
 
     # Delta reward: reward only for closing the gap
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
