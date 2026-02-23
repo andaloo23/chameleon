@@ -221,9 +221,9 @@ def main():
                 
                 reached_now = dist < REACH_THRESHOLD
                 if reached_now and not detector_state["reached"]:
-                    print(f"[REACHED] Gripper close to cube (dist={dist:.3f}m < {REACH_THRESHOLD}m)")
+                    print(f"\n[REACHED] Gripper close to cube (dist={dist:.3f}m < {REACH_THRESHOLD}m)")
                 elif not reached_now and detector_state["reached"]:
-                    print(f"[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
+                    print(f"\n[REACHED OFF] Gripper moved away (dist={dist:.3f}m)")
                 detector_state["reached"] = reached_now
 
             # Zone-entry detection for fingertips (left/right face zones)
@@ -233,17 +233,17 @@ def main():
             if left_ok is not None:
                 val = left_ok[0].item() if left_ok.dim() > 0 else left_ok.item()
                 if val and not detector_state.get("left_zone_ok", False):
-                    print("[LEFT ZONE] ✅ Moving jaw (Blue zone) ENTERED left face zone")
+                    print("\n[LEFT ZONE] ✅ Moving jaw (Blue zone) ENTERED left face zone")
                 elif not val and detector_state.get("left_zone_ok", False):
-                    print("[LEFT ZONE] ❌ Moving jaw (Blue zone) LEFT left face zone")
+                    print("\n[LEFT ZONE] ❌ Moving jaw (Blue zone) LEFT left face zone")
                 detector_state["left_zone_ok"] = val
             
             if right_ok is not None:
                 val = right_ok[0].item() if right_ok.dim() > 0 else right_ok.item()
                 if val and not detector_state.get("right_zone_ok", False):
-                    print("[RIGHT ZONE] ✅ Fixed jaw (Green zone) ENTERED right face zone")
+                    print("\n[RIGHT ZONE] ✅ Fixed jaw (Green zone) ENTERED right face zone")
                 elif not val and detector_state.get("right_zone_ok", False):
-                    print("[RIGHT ZONE] ❌ Fixed jaw (Green zone) LEFT right face zone")
+                    print("\n[RIGHT ZONE] ❌ Fixed jaw (Green zone) LEFT right face zone")
                 detector_state["right_zone_ok"] = val
             
             # Check grasped
@@ -255,10 +255,10 @@ def main():
                     grasped = bool(is_grasped)
                 
                 if grasped and not detector_state["grasped"]:
-                    print("[GRASPED] Cube is being held!")
+                    print("\n[GRASPED] Cube is being held!")
                 elif not grasped and detector_state["grasped"]:
                     cube_z = env.cube.data.root_pos_w[0, 2].item()
-                    print(f"[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
+                    print(f"\n[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
                 detector_state["grasped"] = grasped
             
             # Check droppable (cube over cup)
@@ -270,9 +270,9 @@ def main():
                     droppable = bool(is_droppable)
                 
                 if droppable and not detector_state["droppable"]:
-                    print("[DROPPABLE] Cube is over the cup!")
+                    print("\n[DROPPABLE] Cube is over the cup!")
                 elif not droppable and detector_state["droppable"]:
-                    print("[DROPPABLE OFF] Cube moved away from cup")
+                    print("\n[DROPPABLE OFF] Cube moved away from cup")
                 detector_state["droppable"] = droppable
             
             # Check in_cup
@@ -284,11 +284,24 @@ def main():
                     in_cup = bool(is_in_cup)
                 
                 if in_cup and not detector_state["in_cup"]:
-                    print("[IN CUP] *** SUCCESS! Cube is in the cup! ***")
+                    print("\n[IN CUP] *** SUCCESS! Cube is in the cup! ***")
                 elif not in_cup and detector_state["in_cup"]:
-                    print("[IN CUP OFF] Cube fell out of cup")
+                    print("\n[IN CUP OFF] Cube fell out of cup")
                 detector_state["in_cup"] = in_cup
             
+            # Print pre-grasp metrics continuously
+            dl = task_state.get("d_left")
+            dr = task_state.get("d_right")
+            rg = task_state.get("reach_gate")
+            
+            if dl is not None and dr is not None and rg is not None:
+                dl_val = dl[0].item() if dl.dim() > 0 else dl.item()
+                dr_val = dr[0].item() if dr.dim() > 0 else dr.item()
+                rg_val = rg[0].item() if rg.dim() > 0 else rg.item()
+                
+                sys.stdout.write(f"\r[Metrics] dL: {dl_val:.4f} | dR: {dr_val:.4f} | ReachGate: {rg_val:.3f}          ")
+                sys.stdout.flush()
+                
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")
     except Exception as e:

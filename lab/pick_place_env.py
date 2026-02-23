@@ -679,8 +679,9 @@ class PickPlaceEnv(DirectRLEnv):
             "right_zone_ok": self._fixed_tip_in_right_zone,   # fixed jaw in right face zone
             "cube_pos": cube_pos,
             # Fingertip OBB face distances: 0 when tip is touching/past its assigned face
-            "left_tip_face_dist": self._prev_left_fingertip_dist,   # jaw tip -> left face
-            "right_tip_face_dist": self._prev_right_fingertip_dist,  # gripper tip -> right face
+            "d_left": new_left_tip_dist,   # jaw tip -> left face
+            "d_right": new_right_tip_dist,  # gripper tip -> right face
+            "reach_gate": reach_gate,       # current reach gate multiplier
             # Per-episode fingertip metrics (pre-grasp only)
             "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),
             "right_in_region_frac": self._steps_right_in_region / torch.clamp(self._pre_grasp_steps, min=1.0),
