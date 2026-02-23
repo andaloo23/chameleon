@@ -181,6 +181,10 @@ def main():
     warmup_frames = 60  # Skip detector checks during scene stabilization
     frame_count = 0
     
+    # Track minimum distance during pre-grasp phase
+    min_dl = float('inf')
+    min_dr = float('inf')
+    
     try:
         while input_state["is_running"] and simulation_app.is_running():
             # Create action tensor (delta from current to target)
