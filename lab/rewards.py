@@ -208,6 +208,7 @@ def compute_fingertip_obb_reach_reward(
     prev_left_tip_dist: Tensor,
     stage_grasped: Tensor,
     cube_quat_w: Tensor,
+    use_x: Tensor,
     fingertip_obb_weight: float,
     straddle_weight: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -268,45 +269,37 @@ def compute_fingertip_obb_reach_reward(
     x = cube_quat_w[:, 1]
     y = cube_quat_w[:, 2]
     z = cube_quat_w[:, 3]
-    # Rotation matrix columns (cube local -> world)
     R = torch.stack([
         torch.stack([1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)    ], dim=-1),
         torch.stack([2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)    ], dim=-1),
         torch.stack([2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)], dim=-1),
     ], dim=1)  # [N, 3, 3]
-
-    # R^T transforms world -> cube local
     R_inv = R.transpose(1, 2)  # [N, 3, 3]
 
-    # --- Determine face patch center and half-extents in cube local frame ---
-    # best_axis in world frame tells us which local axis is the pinch axis.
-    # We recover the local pinch direction by rotating best_axis back to local.
-    local_pinch = torch.bmm(R_inv, best_axis.unsqueeze(-1)).squeeze(-1)  # [N, 3]
-    # The dominant component of local_pinch tells us which axis (X or Y)
-    # Use sign_left to determine the direction
+    # --- Clean local axis from use_x (numerically stable) ---
+    axis_local = torch.zeros_like(cube_pos)           # [N, 3]
+    axis_local[:, 0] = use_x.float()                  # x=1 if use_x
+    axis_local[:, 1] = (~use_x).float()               # y=1 if not use_x
 
-    # Left face center in local: sign_left * cube_half_size along the pinch axis
-    r_local_left  = sign_left.unsqueeze(-1) * cube_half_size * local_pinch   # [N, 3]
-    r_local_right = sign_right.unsqueeze(-1) * cube_half_size * local_pinch  # [N, 3]
+    # --- Patch center at face + half thickness ---
+    t = zone_margin                                    # zone protrusion thickness
+    face_offset = cube_half_size + 0.5 * t             # center of zone slab
 
-    # Face half-extents: full cube_half_size on the two tangent axes, 0 on the normal axis
-    # h = cube_half_size * (1 - |local_pinch|)  (0 on the pinch axis, half_size on others)
-    abs_pinch = local_pinch.abs()
-    # Clamp to create a clean mask: 1 on pinch axis, 0 on tangent axes
-    pinch_mask = (abs_pinch > 0.5).float()
-    h = cube_half_size * (1.0 - pinch_mask)  # [N, 3]
+    r_local_left  = sign_left.unsqueeze(-1)  * face_offset * axis_local   # [N, 3]
+    r_local_right = sign_right.unsqueeze(-1) * face_offset * axis_local  # [N, 3]
 
-    # --- Box-distance formula for each fingertip ---
-    # Transform fingertip to cube local frame
+    # --- Half-extents: tangents = cube_half_size, normal = t/2 ---
+    h = torch.full_like(axis_local, cube_half_size)    # [N, 3] start all cube_half_size
+    half_t = t / 2.0
+    h[:, 0] = torch.where(use_x,  torch.tensor(half_t, device=h.device), h[:, 0])
+    h[:, 1] = torch.where(~use_x, torch.tensor(half_t, device=h.device), h[:, 1])
+
+    # --- Box-distance formula ---
     q_left  = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
     q_right = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
 
-    # Signed distance to patch, clamped to 0 inside
-    d_left_3d  = torch.clamp((q_left  - r_local_left).abs()  - h, min=0.0)  # [N, 3]
-    d_right_3d = torch.clamp((q_right - r_local_right).abs() - h, min=0.0)  # [N, 3]
-
-    d_left  = torch.linalg.norm(d_left_3d,  dim=1)  # [N]
-    d_right = torch.linalg.norm(d_right_3d, dim=1)  # [N]
+    d_left  = torch.linalg.norm(torch.clamp((q_left  - r_local_left ).abs() - h, min=0.0), dim=1)  # [N]
+    d_right = torch.linalg.norm(torch.clamp((q_right - r_local_right).abs() - h, min=0.0), dim=1)  # [N]
 
     # Delta reward: reward only for closing the gap
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
@@ -374,6 +367,7 @@ def compute_pick_place_rewards(
     cube_quat_w: Tensor,
     best_axis: Tensor,
     left_is_positive: Tensor,
+    use_x: Tensor,
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
     # Reward weights
@@ -421,6 +415,7 @@ def compute_pick_place_rewards(
         prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,
         cube_quat_w=cube_quat_w,
+        use_x=use_x,
         fingertip_obb_weight=fingertip_obb_weight,
         straddle_weight=straddle_weight,
     )

@@ -608,6 +608,7 @@ class PickPlaceEnv(DirectRLEnv):
             cube_quat_w=self.cube.data.root_quat_w,
             best_axis=best_axis,
             left_is_positive=self._left_is_positive,
+            use_x=self._use_x,
             prev_right_tip_dist=self._prev_right_fingertip_dist,
             prev_left_tip_dist=self._prev_left_fingertip_dist,
             # Reward weights
