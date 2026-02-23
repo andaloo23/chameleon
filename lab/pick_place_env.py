@@ -126,8 +126,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._left_is_positive = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._zone_margin = 0.015  # 1.5cm protrusion
-        self._moving_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self._fixed_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._fixed_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._moving_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
@@ -535,10 +535,10 @@ class PickPlaceEnv(DirectRLEnv):
             in_face = (tangent_coord.abs() <= half_size) & (z_coord.abs() <= half_size)
             return in_normal & in_face
         
-        # Moving jaw (left gripper) -> left face zone
-        self._moving_tip_in_left_zone = _in_face_zone(moving_local, is_local_x, self._left_is_positive)
-        # Fixed jaw (right gripper) -> right face zone (opposite side)
-        self._fixed_tip_in_right_zone = _in_face_zone(fixed_local, is_local_x, ~self._left_is_positive)
+        # Fixed jaw (Left gripper tip) -> left face zone
+        self._fixed_tip_in_left_zone = _in_face_zone(fixed_local, is_local_x, self._left_is_positive)
+        # Moving jaw (Right gripper tip) -> right face zone (opposite side)
+        self._moving_tip_in_right_zone = _in_face_zone(moving_local, is_local_x, ~self._left_is_positive)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
@@ -631,8 +631,8 @@ class PickPlaceEnv(DirectRLEnv):
         _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
         self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
         self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
-        self._steps_left_in_region  += self._moving_tip_in_left_zone.float()  * not_grasped_mask
-        self._steps_right_in_region += self._fixed_tip_in_right_zone.float() * not_grasped_mask
+        self._steps_left_in_region  += self._fixed_tip_in_left_zone.float()  * not_grasped_mask
+        self._steps_right_in_region += self._moving_tip_in_right_zone.float() * not_grasped_mask
         self._pre_grasp_steps       += not_grasped_mask
         
         # Accumulate pre-grasp averages and minimums
@@ -673,10 +673,10 @@ class PickPlaceEnv(DirectRLEnv):
             "is_in_cup": self.grasp_detector.is_in_cup,  # [num_envs] bool tensor
             "gripper_pos": gripper_pos,  # Fixed jaw frame origin
             "jaw_pos": jaw_pos,          # Moving jaw frame origin
-            "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip
-            "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip
-            "left_zone_ok": self._moving_tip_in_left_zone,    # moving jaw in left face zone
-            "right_zone_ok": self._fixed_tip_in_right_zone,   # fixed jaw in right face zone
+            "gripper_tip_pos": gripper_tip_pos, # Fixed jaw physical tip (Left)
+            "jaw_tip_pos": jaw_tip_pos,         # Moving jaw physical tip (Right)
+            "left_zone_ok": self._fixed_tip_in_left_zone,    # fixed jaw in left face zone
+            "right_zone_ok": self._moving_tip_in_right_zone,   # moving jaw in right face zone
             "cube_pos": cube_pos,
             # Fingertip OBB face distances: 0 when tip is touching/past its assigned face
             "d_left": new_left_tip_dist,   # jaw tip -> left face

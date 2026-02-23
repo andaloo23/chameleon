@@ -237,17 +237,17 @@ def main():
             if left_ok is not None:
                 val = left_ok[0].item() if left_ok.dim() > 0 else left_ok.item()
                 if val and not detector_state.get("left_zone_ok", False):
-                    print("\n[LEFT ZONE] ✅ Moving jaw (Blue zone) ENTERED left face zone")
+                    print("\n[LEFT ZONE] ✅ Fixed jaw (Green zone) ENTERED left face zone")
                 elif not val and detector_state.get("left_zone_ok", False):
-                    print("\n[LEFT ZONE] ❌ Moving jaw (Blue zone) LEFT left face zone")
+                    print("\n[LEFT ZONE] ❌ Fixed jaw (Green zone) LEFT left face zone")
                 detector_state["left_zone_ok"] = val
             
             if right_ok is not None:
                 val = right_ok[0].item() if right_ok.dim() > 0 else right_ok.item()
                 if val and not detector_state.get("right_zone_ok", False):
-                    print("\n[RIGHT ZONE] ✅ Fixed jaw (Green zone) ENTERED right face zone")
+                    print("\n[RIGHT ZONE] ✅ Moving jaw (Red zone) ENTERED right face zone")
                 elif not val and detector_state.get("right_zone_ok", False):
-                    print("\n[RIGHT ZONE] ❌ Fixed jaw (Green zone) LEFT right face zone")
+                    print("\n[RIGHT ZONE] ❌ Moving jaw (Red zone) LEFT right face zone")
                 detector_state["right_zone_ok"] = val
             
             # Check grasped

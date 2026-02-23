@@ -242,37 +242,37 @@ def compute_fingertip_obb_reach_reward(
     # best_axis points from cube center toward the +normal face.
     # left_is_positive == True  => left face is +normal side
     #                              right face is -normal side
-    # left (jaw) target: left face center
-    # right (gripper) target: right face center
+    #   left (gripper) target: left face center
+    #   right (jaw) target: right face center
 
     # Signed projection of each tip onto the pinch axis, relative to cube center
-    tip_to_cube_jaw     = jaw_tip_pos     - cube_pos  # [N,3]
-    tip_to_cube_gripper = gripper_tip_pos - cube_pos  # [N,3]
+    tip_to_cube_gripper = gripper_tip_pos - cube_pos  # [N,3] -> Left tip
+    tip_to_cube_jaw     = jaw_tip_pos     - cube_pos  # [N,3] -> Right tip
 
-    proj_jaw     = (tip_to_cube_jaw     * best_axis).sum(dim=-1)  # [N]
     proj_gripper = (tip_to_cube_gripper * best_axis).sum(dim=-1)  # [N]
+    proj_jaw     = (tip_to_cube_jaw     * best_axis).sum(dim=-1)  # [N]
 
     # Target projection for each fingertip:
-    #   left (jaw) tip  -> left face  -> +half if left_is_positive, else -half
-    #   right (gripper) -> right face -> -half if left_is_positive, else +half
+    #   left (gripper) tip  -> left face  -> +half if left_is_positive, else -half
+    #   right (jaw) -> right face -> -half if left_is_positive, else +half
     sign_left  = torch.where(left_is_positive,
-                             torch.ones_like(proj_jaw), -torch.ones_like(proj_jaw))
+                             torch.ones_like(proj_gripper), -torch.ones_like(proj_gripper))
     sign_right = -sign_left
 
-    target_proj_jaw     = sign_left  * cube_half_size  # [N]
-    target_proj_gripper = sign_right * cube_half_size  # [N]
+    target_proj_gripper = sign_left  * cube_half_size  # [N]
+    target_proj_jaw     = sign_right * cube_half_size  # [N]
 
     # Signed excess beyond the face (positive = outside/past face, negative = inside)
     # For a tip on the +sign side (e.g. +0.10 with target +0.05):
     #   excess = sign * (proj - target_proj) = 1 * (0.10 - 0.05) = +0.05 (outside)
     # For a tip on the -sign side (e.g. -0.10 with target -0.05):
     #   excess = sign * (proj - target_proj) = -1 * (-0.10 - (-0.05)) = +0.05 (outside)
-    excess_jaw     = sign_left  * (proj_jaw     - target_proj_jaw)      # [N]
-    excess_gripper = sign_right * (proj_gripper - target_proj_gripper)  # [N]
+    excess_gripper = sign_left  * (proj_gripper - target_proj_gripper)  # [N]
+    excess_jaw     = sign_right * (proj_jaw     - target_proj_jaw)      # [N]
 
     # Distance to face: only positive when outside; 0 when at/past face
-    d_left  = torch.clamp(excess_jaw, min=0.0)      # [N]
-    d_right = torch.clamp(excess_gripper, min=0.0)  # [N]
+    d_left  = torch.clamp(excess_gripper, min=0.0)  # [N]
+    d_right = torch.clamp(excess_jaw, min=0.0)      # [N]
 
     # Delta reward: reward only for closing the gap
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
