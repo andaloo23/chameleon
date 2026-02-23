@@ -295,9 +295,14 @@ def main():
             rg = task_state.get("reach_gate")
             
             if dl is not None and dr is not None and rg is not None:
-                dl_val = dl[0].item() if dl.dim() > 0 else dl.item()
-                dr_val = dr[0].item() if dr.dim() > 0 else dr.item()
-                rg_val = rg[0].item() if rg.dim() > 0 else rg.item()
+                def _extract_val(x):
+                    if hasattr(x, "item"):
+                        return x[0].item() if getattr(x, "dim", lambda: 0)() > 0 else x.item()
+                    return float(x)
+                
+                dl_val = _extract_val(dl)
+                dr_val = _extract_val(dr)
+                rg_val = _extract_val(rg)
                 
                 sys.stdout.write(f"\r[Metrics] dL: {dl_val:.4f} | dR: {dr_val:.4f} | ReachGate: {rg_val:.3f}          ")
                 sys.stdout.flush()
