@@ -668,6 +668,25 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_cube_dist = torch.norm(gripper_pos - cube_pos, dim=-1)
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
         
+        # --- Debug: compute cube-local tip positions for keyboard script ---
+        w_q = cube_quat_w[:, 0]
+        x_q = cube_quat_w[:, 1]
+        y_q = cube_quat_w[:, 2]
+        z_q = cube_quat_w[:, 3]
+        R_dbg = torch.stack([
+            torch.stack([1 - 2*(y_q*y_q + z_q*z_q), 2*(x_q*y_q - w_q*z_q), 2*(x_q*z_q + w_q*y_q)], dim=-1),
+            torch.stack([2*(x_q*y_q + w_q*z_q), 1 - 2*(x_q*x_q + z_q*z_q), 2*(y_q*z_q - w_q*x_q)], dim=-1),
+            torch.stack([2*(x_q*z_q - w_q*y_q), 2*(y_q*z_q + w_q*x_q), 1 - 2*(x_q*x_q + y_q*y_q)], dim=-1),
+        ], dim=1)
+        R_inv_dbg = R_dbg.transpose(1, 2)
+        dbg_q_left  = torch.bmm(R_inv_dbg, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)
+        dbg_q_right = torch.bmm(R_inv_dbg, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)
+        dbg_axis_local = torch.zeros_like(cube_pos)
+        dbg_axis_local[:, 0] = self._use_x.float()
+        dbg_axis_local[:, 1] = (~self._use_x).float()
+        dbg_sign_left = torch.where(self._left_is_positive,
+                                    torch.ones(n, device=self.device), -torch.ones(n, device=self.device))
+        
         self.extras["task_state"] = {
             "gripper_cube_distance": gripper_cube_dist,  # [num_envs] tensor
             "gripper_width": gripper_value,  # [num_envs] tensor
@@ -695,6 +714,11 @@ class PickPlaceEnv(DirectRLEnv):
             "mean_reach_gate": self._sum_reach_gate / torch.clamp(self._pre_grasp_steps, min=1.0),
             "cum_left_obb_reward":  self._cum_left_obb_reward,
             "cum_right_obb_reward": self._cum_right_obb_reward,
+            # Debug: cube-local tip positions for keyboard script
+            "dbg_q_left": dbg_q_left,
+            "dbg_q_right": dbg_q_right,
+            "dbg_axis_local": dbg_axis_local,
+            "dbg_sign_left": dbg_sign_left,
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,

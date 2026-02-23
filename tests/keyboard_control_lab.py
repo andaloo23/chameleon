@@ -259,7 +259,25 @@ def main():
                     grasped = bool(is_grasped)
                 
                 if grasped and not detector_state["grasped"]:
-                    print("\n[GRASPED] Cube is being held!")
+                    # Print cube-local debug info right before grasp
+                    dbg_ql = task_state.get("dbg_q_left")
+                    dbg_qr = task_state.get("dbg_q_right")
+                    dbg_ax = task_state.get("dbg_axis_local")
+                    dbg_sl = task_state.get("dbg_sign_left")
+                    if dbg_ql is not None:
+                        ql = dbg_ql[0].cpu().numpy()
+                        qr = dbg_qr[0].cpu().numpy()
+                        ax = dbg_ax[0].cpu().numpy()
+                        sl = dbg_sl[0].item()
+                        sr = -sl
+                        print(f"\n--- PRE-GRASP DEBUG (cube local) ---")
+                        print(f"  q_left  (fixed jaw): [{ql[0]:+.4f}, {ql[1]:+.4f}, {ql[2]:+.4f}]")
+                        print(f"  q_right (moving jaw): [{qr[0]:+.4f}, {qr[1]:+.4f}, {qr[2]:+.4f}]")
+                        print(f"  |q_left|:  [{abs(ql[0]):.4f}, {abs(ql[1]):.4f}, {abs(ql[2]):.4f}]")
+                        print(f"  |q_right|: [{abs(qr[0]):.4f}, {abs(qr[1]):.4f}, {abs(qr[2]):.4f}]")
+                        print(f"  axis_local: [{ax[0]:.0f}, {ax[1]:.0f}, {ax[2]:.0f}]  sign_left: {sl:+.0f}  sign_right: {sr:+.0f}")
+                        print(f"---")
+                    print("[GRASPED] Cube is being held!")
                 elif not grasped and detector_state["grasped"]:
                     cube_z = env.cube.data.root_pos_w[0, 2].item()
                     print(f"\n[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
