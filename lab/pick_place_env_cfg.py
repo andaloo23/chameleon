@@ -150,7 +150,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     )
     
     # Cube properties
-    cube_scale = (0.04, 0.04, 0.04)
+    cube_scale = (0.03, 0.03, 0.03)
     cube_mass = 0.05
 
     # ===== Cup (Target Container) =====
