@@ -425,8 +425,8 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
-        # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
-        first_frame_mask = self.episode_length_buf == 1
+        # Select which cube face axis to use + left/right assignment (once per episode at frame 0)
+        first_frame_mask = self.episode_length_buf == 0
         if first_frame_mask.any():
             cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
             n_envs = cube_quat_w.shape[0]
