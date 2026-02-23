@@ -207,6 +207,7 @@ def compute_fingertip_obb_reach_reward(
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
     stage_grasped: Tensor,
+    cube_quat_w: Tensor,
     fingertip_obb_weight: float,
     straddle_weight: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -262,10 +263,50 @@ def compute_fingertip_obb_reach_reward(
     target_proj_gripper = sign_left  * cube_half_size  # [N]
     target_proj_jaw     = sign_right * cube_half_size  # [N]
 
-    # Absolute distance along the pinch axis to each target face plane
-    # This correctly measures distance whether the tip is outside or inside the face!
-    d_left  = torch.abs(proj_gripper - target_proj_gripper)  # [N]
-    d_right = torch.abs(proj_jaw     - target_proj_jaw)      # [N]
+    # --- Build rotation matrix R from cube quaternion (w, x, y, z) ---
+    w = cube_quat_w[:, 0]  # [N]
+    x = cube_quat_w[:, 1]
+    y = cube_quat_w[:, 2]
+    z = cube_quat_w[:, 3]
+    # Rotation matrix columns (cube local -> world)
+    R = torch.stack([
+        torch.stack([1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)    ], dim=-1),
+        torch.stack([2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)    ], dim=-1),
+        torch.stack([2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)], dim=-1),
+    ], dim=1)  # [N, 3, 3]
+
+    # R^T transforms world -> cube local
+    R_inv = R.transpose(1, 2)  # [N, 3, 3]
+
+    # --- Determine face patch center and half-extents in cube local frame ---
+    # best_axis in world frame tells us which local axis is the pinch axis.
+    # We recover the local pinch direction by rotating best_axis back to local.
+    local_pinch = torch.bmm(R_inv, best_axis.unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    # The dominant component of local_pinch tells us which axis (X or Y)
+    # Use sign_left to determine the direction
+
+    # Left face center in local: sign_left * cube_half_size along the pinch axis
+    r_local_left  = sign_left.unsqueeze(-1) * cube_half_size * local_pinch   # [N, 3]
+    r_local_right = sign_right.unsqueeze(-1) * cube_half_size * local_pinch  # [N, 3]
+
+    # Face half-extents: full cube_half_size on the two tangent axes, 0 on the normal axis
+    # h = cube_half_size * (1 - |local_pinch|)  (0 on the pinch axis, half_size on others)
+    abs_pinch = local_pinch.abs()
+    # Clamp to create a clean mask: 1 on pinch axis, 0 on tangent axes
+    pinch_mask = (abs_pinch > 0.5).float()
+    h = cube_half_size * (1.0 - pinch_mask)  # [N, 3]
+
+    # --- Box-distance formula for each fingertip ---
+    # Transform fingertip to cube local frame
+    q_left  = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    q_right = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+
+    # Signed distance to patch, clamped to 0 inside
+    d_left_3d  = torch.clamp((q_left  - r_local_left).abs()  - h, min=0.0)  # [N, 3]
+    d_right_3d = torch.clamp((q_right - r_local_right).abs() - h, min=0.0)  # [N, 3]
+
+    d_left  = torch.linalg.norm(d_left_3d,  dim=1)  # [N]
+    d_right = torch.linalg.norm(d_right_3d, dim=1)  # [N]
 
     # Delta reward: reward only for closing the gap
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
@@ -379,6 +420,7 @@ def compute_pick_place_rewards(
         prev_right_tip_dist=prev_right_tip_dist,
         prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,
+        cube_quat_w=cube_quat_w,
         fingertip_obb_weight=fingertip_obb_weight,
         straddle_weight=straddle_weight,
     )
