@@ -181,6 +181,10 @@ def main():
     warmup_frames = 60  # Skip detector checks during scene stabilization
     frame_count = 0
     
+    # Track minimum distance during pre-grasp phase
+    min_dl = float('inf')
+    min_dr = float('inf')
+    
     try:
         while input_state["is_running"] and simulation_app.is_running():
             # Create action tensor (delta from current to target)
@@ -259,6 +263,9 @@ def main():
                 elif not grasped and detector_state["grasped"]:
                     cube_z = env.cube.data.root_pos_w[0, 2].item()
                     print(f"\n[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
+                    # Reset minimums for next grasp attempt
+                    min_dl = float('inf')
+                    min_dr = float('inf')
                 detector_state["grasped"] = grasped
             
             # Check droppable (cube over cup)
@@ -304,7 +311,16 @@ def main():
                 dr_val = _extract_val(dr)
                 rg_val = _extract_val(rg)
                 
-                sys.stdout.write(f"\r[Metrics] dL: {dl_val:.4f} | dR: {dr_val:.4f} | ReachGate: {rg_val:.3f}          ")
+                # Update minimums ONLY if not grasped (matches RL accumulation)
+                if not detector_state.get("grasped", False):
+                    min_dl = min(min_dl, dl_val)
+                    min_dr = min(min_dr, dr_val)
+                
+                # Format infinity nicely if perfectly aligned before first step
+                dl_print = f"{min_dl:.4f}" if min_dl != float('inf') else "inf   "
+                dr_print = f"{min_dr:.4f}" if min_dr != float('inf') else "inf   "
+                
+                sys.stdout.write(f"\r[Metrics] min_dL: {dl_print} | min_dR: {dr_print} | ReachGate: {rg_val:.3f} (curr_dL={dl_val:.4f}, curr_dR={dr_val:.4f})     ")
                 sys.stdout.flush()
                 
     except KeyboardInterrupt:
