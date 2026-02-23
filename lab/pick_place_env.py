@@ -425,8 +425,8 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
         jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
-        # Select which cube face axis to use + left/right assignment (once per episode at frame 0)
-        first_frame_mask = self.episode_length_buf == 0
+        # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
+        first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
             cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
             n_envs = cube_quat_w.shape[0]
@@ -626,7 +626,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Accumulate per-fingertip OBB debug metrics BEFORE updating cached dists.
         # delta_* matches the reward function's internal computation (uses old stage_grasped).
-        not_grasped_mask = (~self._stage_grasped).float()
+        # Skip frame 0 where best_axis is uninitialized (first_frame_mask fires on frame 1)
+        valid_frame = (self.episode_length_buf > 0).float()
+        not_grasped_mask = (~self._stage_grasped).float() * valid_frame
         _delta_left  = torch.clamp(self._prev_left_fingertip_dist  - new_left_tip_dist,  min=0.0)
         _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
         self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
@@ -640,7 +642,7 @@ class PickPlaceEnv(DirectRLEnv):
         self._sum_d_right += new_right_tip_dist * not_grasped_mask
         self._sum_reach_gate += reach_gate * not_grasped_mask
         
-        # Update minimums (only where not grasped)
+        # Update minimums (only where not grasped AND past frame 0)
         update_min_mask = not_grasped_mask.bool()
         self._min_d_left = torch.where(update_min_mask, torch.minimum(self._min_d_left, new_left_tip_dist), self._min_d_left)
         self._min_d_right = torch.where(update_min_mask, torch.minimum(self._min_d_right, new_right_tip_dist), self._min_d_right)
@@ -678,9 +680,9 @@ class PickPlaceEnv(DirectRLEnv):
             "left_zone_ok": self._fixed_tip_in_left_zone,    # fixed jaw in left face zone
             "right_zone_ok": self._moving_tip_in_right_zone,   # moving jaw in right face zone
             "cube_pos": cube_pos,
-            # Fingertip OBB face distances: 0 when tip is touching/past its assigned face
-            "d_left": new_left_tip_dist,   # jaw tip -> left face
-            "d_right": new_right_tip_dist,  # gripper tip -> right face
+            # Fingertip OBB face distances (masked to inf on frame 0 where best_axis is uninitialized)
+            "d_left": torch.where(self.episode_length_buf > 0, new_left_tip_dist, torch.full_like(new_left_tip_dist, float('inf'))),
+            "d_right": torch.where(self.episode_length_buf > 0, new_right_tip_dist, torch.full_like(new_right_tip_dist, float('inf'))),
             "reach_gate": reach_gate,       # current reach gate multiplier
             # Per-episode fingertip metrics (pre-grasp only)
             "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),
