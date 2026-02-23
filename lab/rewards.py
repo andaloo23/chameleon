@@ -262,17 +262,10 @@ def compute_fingertip_obb_reach_reward(
     target_proj_gripper = sign_left  * cube_half_size  # [N]
     target_proj_jaw     = sign_right * cube_half_size  # [N]
 
-    # Signed excess beyond the face (positive = outside/past face, negative = inside)
-    # For a tip on the +sign side (e.g. +0.10 with target +0.05):
-    #   excess = sign * (proj - target_proj) = 1 * (0.10 - 0.05) = +0.05 (outside)
-    # For a tip on the -sign side (e.g. -0.10 with target -0.05):
-    #   excess = sign * (proj - target_proj) = -1 * (-0.10 - (-0.05)) = +0.05 (outside)
-    excess_gripper = sign_left  * (proj_gripper - target_proj_gripper)  # [N]
-    excess_jaw     = sign_right * (proj_jaw     - target_proj_jaw)      # [N]
-
-    # Distance to face: only positive when outside; 0 when at/past face
-    d_left  = torch.clamp(excess_gripper, min=0.0)  # [N]
-    d_right = torch.clamp(excess_jaw, min=0.0)      # [N]
+    # Absolute distance along the pinch axis to each target face plane
+    # This correctly measures distance whether the tip is outside or inside the face!
+    d_left  = torch.abs(proj_gripper - target_proj_gripper)  # [N]
+    d_right = torch.abs(proj_jaw     - target_proj_jaw)      # [N]
 
     # Delta reward: reward only for closing the gap
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
