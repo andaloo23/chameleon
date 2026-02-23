@@ -570,7 +570,7 @@ class PickPlaceEnv(DirectRLEnv):
             in_cup_height_margin=self.cfg.in_cup_height_margin,
         )
         
-        # Compute 2D reach distance for gating region rewards
+        # Compute 2D reach distance (diagnostic only)
         gripper_xy = gripper_pos[:, :2]
         cube_xy = cube_pos[:, :2]
         reach_dist = torch.norm(gripper_xy - cube_xy, dim=1)
@@ -581,7 +581,6 @@ class PickPlaceEnv(DirectRLEnv):
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
-            reach_gate,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
@@ -601,12 +600,10 @@ class PickPlaceEnv(DirectRLEnv):
             cup_height=self.cfg.cup_height,
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
             zone_margin=self._zone_margin,
-            reach_dist=reach_dist,
             # Fingertip OBB inputs
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
             cube_quat_w=self.cube.data.root_quat_w,
-            best_axis=best_axis,
             left_is_positive=self._left_is_positive,
             use_x=self._use_x,
             prev_right_tip_dist=self._prev_right_fingertip_dist,
@@ -622,14 +619,10 @@ class PickPlaceEnv(DirectRLEnv):
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
             fingertip_obb_weight=self.cfg.rew_fingertip_obb_weight,
-            straddle_weight=self.cfg.rew_straddle_weight,
         )
         
         # Accumulate per-fingertip OBB debug metrics BEFORE updating cached dists.
-        # delta_* matches the reward function's internal computation (uses old stage_grasped).
-        # Skip frame 0 where best_axis is uninitialized (first_frame_mask fires on frame 1)
-        valid_frame = (self.episode_length_buf > 0).float()
-        not_grasped_mask = (~self._stage_grasped).float() * valid_frame
+        not_grasped_mask = (~self._stage_grasped).float()
         _delta_left  = torch.clamp(self._prev_left_fingertip_dist  - new_left_tip_dist,  min=0.0)
         _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
         self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
@@ -641,9 +634,13 @@ class PickPlaceEnv(DirectRLEnv):
         # Accumulate pre-grasp averages and minimums
         self._sum_d_left += new_left_tip_dist * not_grasped_mask
         self._sum_d_right += new_right_tip_dist * not_grasped_mask
+        
+        # Compute reach_gate as diagnostic only (not used in reward)
+        sigma_reach = 0.10
+        reach_gate = torch.exp(-reach_dist / sigma_reach)
         self._sum_reach_gate += reach_gate * not_grasped_mask
         
-        # Update minimums (only where not grasped AND past frame 0)
+        # Update minimums
         update_min_mask = not_grasped_mask.bool()
         self._min_d_left = torch.where(update_min_mask, torch.minimum(self._min_d_left, new_left_tip_dist), self._min_d_left)
         self._min_d_right = torch.where(update_min_mask, torch.minimum(self._min_d_right, new_right_tip_dist), self._min_d_right)
@@ -700,10 +697,10 @@ class PickPlaceEnv(DirectRLEnv):
             "left_zone_ok": self._fixed_tip_in_left_zone,    # fixed jaw in left face zone
             "right_zone_ok": self._moving_tip_in_right_zone,   # moving jaw in right face zone
             "cube_pos": cube_pos,
-            # Fingertip OBB face distances (masked to inf on frame 0 where best_axis is uninitialized)
-            "d_left": torch.where(self.episode_length_buf > 0, new_left_tip_dist, torch.full_like(new_left_tip_dist, float('inf'))),
-            "d_right": torch.where(self.episode_length_buf > 0, new_right_tip_dist, torch.full_like(new_right_tip_dist, float('inf'))),
-            "reach_gate": reach_gate,       # current reach gate multiplier
+            # Fingertip OBB face distances
+            "d_left": new_left_tip_dist,
+            "d_right": new_right_tip_dist,
+            "reach_gate": reach_gate,       # diagnostic only (not used in reward)
             # Per-episode fingertip metrics (pre-grasp only)
             "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),
             "right_in_region_frac": self._steps_right_in_region / torch.clamp(self._pre_grasp_steps, min=1.0),
@@ -784,6 +781,25 @@ class PickPlaceEnv(DirectRLEnv):
         cube_quat[:, 3] = torch.sin(random_yaw / 2.0)  # z
         self.cube.write_root_pose_to_sim(torch.cat([cube_pos, cube_quat], dim=1), env_ids)
         self.cube.write_root_velocity_to_sim(torch.zeros(num_reset, 6, device=self.device), env_ids)
+        
+        # Initialize axis selection immediately so frame 0 has correct OBB distances.
+        # This must happen AFTER writing cube pose so quat_apply uses the new orientation.
+        local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device).unsqueeze(0).expand(num_reset, -1)
+        local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device).unsqueeze(0).expand(num_reset, -1)
+        cube_x_world = quat_apply(cube_quat, local_x)
+        cube_y_world = quat_apply(cube_quat, local_y)
+        # Approach direction: robot base (origin) toward cube, XY only
+        cube_xy_dir = cube_xy.clone()
+        cube_xy_3d = torch.cat([cube_xy_dir, torch.zeros(num_reset, 1, device=self.device)], dim=1)
+        cube_xy_3d = cube_xy_3d / (cube_xy_3d.norm(dim=-1, keepdim=True) + 1e-8)
+        # Pick whichever cube axis is most perpendicular to approach
+        dot_x = torch.sum(cube_xy_3d * cube_x_world, dim=-1).abs()
+        dot_y = torch.sum(cube_xy_3d * cube_y_world, dim=-1).abs()
+        self._use_x[env_ids] = dot_x <= dot_y
+        # Determine left/right face assignment
+        best_axis_init = torch.where(self._use_x[env_ids].unsqueeze(-1), cube_x_world, cube_y_world)
+        cross_z = cube_xy_3d[:, 0] * best_axis_init[:, 1] - cube_xy_3d[:, 1] * best_axis_init[:, 0]
+        self._left_is_positive[env_ids] = cross_z > 0
         
         # Randomize cup positions (ensuring distance from cube)
         cup_xy = self._sample_workspace_xy(num_reset, existing_xy=cube_xy)

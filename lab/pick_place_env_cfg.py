@@ -204,7 +204,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight = 10.0   # w * max(d_prev - d, 0) summed over both fingertips
-    rew_straddle_weight = 0.5         # Gaussian reward for straddling the cube (max = 0.5)
 
     # ===== Grasp Detection Thresholds =====
     grasp_close_command_threshold = 0.1

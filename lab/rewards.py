@@ -199,73 +199,44 @@ def compute_fingertip_obb_reach_reward(
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
     cube_pos: Tensor,
-    best_axis: Tensor,
     left_is_positive: Tensor,
     cube_half_size: float,
     zone_margin: float,
-    reach_dist: Tensor,
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
     stage_grasped: Tensor,
     cube_quat_w: Tensor,
     use_x: Tensor,
     fingertip_obb_weight: float,
-    straddle_weight: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     """
-    Compute the pre-grasp fingertip reaching reward.
+    Compute the pre-grasp fingertip reaching reward (delta-based).
 
-    Two components, both zero once stage_grasped latches:
+    For each fingertip, measure how far outside its designated cube-face
+    zone slab it is (0 when inside/touching). Use delta shaping:
+      reward += w * max(d_prev - d_curr, 0)  per fingertip
 
-    1. OBB distance reward:
-       For each fingertip, measure how far outside its designated cube-face
-       slab it is (0 when inside/touching). Use delta shaping:
-         reward += w * max(d_prev - d_curr, 0)  per fingertip
+    Zero once stage_grasped latches.
 
-    2. Straddle reward:
-       Project fingertips onto the pinch axis. When the span between them
-       matches the cube diameter, reward = straddle_weight; tapers with
-       a Gaussian (sigma = cube_half_size * 0.75).
-
-    Left fingertip = jaw_tip  (moving jaw)
-    Right fingertip = gripper_tip  (fixed jaw)
+    Left fingertip  = gripper_tip  (fixed jaw)  -> left face zone
+    Right fingertip = jaw_tip      (moving jaw)  -> right face zone
 
     Returns:
         reach_reward:       [num_envs]
         new_right_tip_dist: [num_envs] (cache for next step)
         new_left_tip_dist:  [num_envs] (cache for next step)
-        reach_gate:         [num_envs] (for metrics)
-        d_right:            [num_envs] (for metrics)
-        d_left:             [num_envs] (for metrics)
     """
     not_grasped = (~stage_grasped).float()
 
-    # --- Per-fingertip face-slab distance ---
-    # best_axis points from cube center toward the +normal face.
-    # left_is_positive == True  => left face is +normal side
-    #                              right face is -normal side
-    #   left (gripper) target: left face center
-    #   right (jaw) target: right face center
-
-    # Signed projection of each tip onto the pinch axis, relative to cube center
-    tip_to_cube_gripper = gripper_tip_pos - cube_pos  # [N,3] -> Left tip
-    tip_to_cube_jaw     = jaw_tip_pos     - cube_pos  # [N,3] -> Right tip
-
-    proj_gripper = (tip_to_cube_gripper * best_axis).sum(dim=-1)  # [N]
-    proj_jaw     = (tip_to_cube_jaw     * best_axis).sum(dim=-1)  # [N]
-
-    # Target projection for each fingertip:
-    #   left (gripper) tip  -> left face  -> +half if left_is_positive, else -half
-    #   right (jaw) -> right face -> -half if left_is_positive, else +half
+    # --- Sign assignment for face zones ---
+    # left_is_positive == True  => left face is +normal side, right face is -normal side
     sign_left  = torch.where(left_is_positive,
-                             torch.ones_like(proj_gripper), -torch.ones_like(proj_gripper))
+                             torch.ones_like(prev_left_tip_dist),
+                             -torch.ones_like(prev_left_tip_dist))
     sign_right = -sign_left
 
-    target_proj_gripper = sign_left  * cube_half_size  # [N]
-    target_proj_jaw     = sign_right * cube_half_size  # [N]
-
     # --- Build rotation matrix R from cube quaternion (w, x, y, z) ---
-    w = cube_quat_w[:, 0]  # [N]
+    w = cube_quat_w[:, 0]
     x = cube_quat_w[:, 1]
     y = cube_quat_w[:, 2]
     z = cube_quat_w[:, 3]
@@ -276,68 +247,38 @@ def compute_fingertip_obb_reach_reward(
     ], dim=1)  # [N, 3, 3]
     R_inv = R.transpose(1, 2)  # [N, 3, 3]
 
-    # --- Clean local axis from use_x (numerically stable) ---
+    # --- Local axis from use_x ---
     axis_local = torch.zeros_like(cube_pos)           # [N, 3]
     axis_local[:, 0] = use_x.float()                  # x=1 if use_x
     axis_local[:, 1] = (~use_x).float()               # y=1 if not use_x
 
-    # --- Patch center at face + half thickness ---
+    # --- Zone slab center (face center + half margin outward) ---
     t = zone_margin                                    # zone protrusion thickness
     face_offset = cube_half_size + 0.5 * t             # center of zone slab
 
     r_local_left  = sign_left.unsqueeze(-1)  * face_offset * axis_local   # [N, 3]
-    r_local_right = sign_right.unsqueeze(-1) * face_offset * axis_local  # [N, 3]
+    r_local_right = sign_right.unsqueeze(-1) * face_offset * axis_local   # [N, 3]
 
-    # --- Half-extents: tangents = cube_half_size, normal = t/2 ---
-    h = torch.full_like(axis_local, cube_half_size)    # [N, 3] start all cube_half_size
+    # --- Half-extents: tangent dirs = cube_half_size, normal dir = t/2 ---
+    h = torch.full_like(axis_local, cube_half_size)    # [N, 3]
     half_t = t / 2.0
     h[:, 0] = torch.where(use_x,  torch.tensor(half_t, device=h.device), h[:, 0])
     h[:, 1] = torch.where(~use_x, torch.tensor(half_t, device=h.device), h[:, 1])
 
-    # --- Box-distance formula ---
+    # --- Box-distance: d = ||max(|q - center| - halfext, 0)|| ---
     q_left  = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
     q_right = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
 
-    d_left  = torch.linalg.norm(torch.clamp((q_left  - r_local_left ).abs() - h, min=0.0), dim=1)  # [N]
-    d_right = torch.linalg.norm(torch.clamp((q_right - r_local_right).abs() - h, min=0.0), dim=1)  # [N]
+    d_left  = torch.linalg.norm(torch.clamp((q_left  - r_local_left ).abs() - h, min=0.0), dim=1)
+    d_right = torch.linalg.norm(torch.clamp((q_right - r_local_right).abs() - h, min=0.0), dim=1)
 
-    # Delta reward: reward only for closing the gap
+    # Delta reward: reward for closing the gap, zero penalty for moving away
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
     delta_right = torch.clamp(prev_right_tip_dist - d_right, min=0.0)
 
-    # Base shaping components
-    obb_reward_base = fingertip_obb_weight * (delta_left + delta_right)
+    reach_reward = fingertip_obb_weight * (delta_left + delta_right) * not_grasped
 
-    # Absolute distance reward base
-    w_abs = 1.0
-    sigma_abs = 0.01
-    d = d_left + d_right
-    abs_reward_base = w_abs * torch.exp(-d / sigma_abs)
-    
-    # Reach gating
-    sigma_reach = 0.10
-    reach_gate = torch.exp(-reach_dist / sigma_reach)
-    
-    # Gated rewards
-    obb_reward = obb_reward_base * reach_gate * not_grasped
-    abs_reward = abs_reward_base * reach_gate * not_grasped
-
-    # --- Straddle reward ---
-    # Measure signed span of fingertips along the pinch axis
-    # Positive when jaw is on left side (+normal) and gripper on right (-normal)
-    span = sign_left * (proj_jaw - proj_gripper)  # [N]
-    target_width = 2.0 * (cube_half_size + zone_margin)
-    sigma = cube_half_size * 0.75
-    straddle_base = straddle_weight * torch.exp(
-        -0.5 * ((span - target_width) / sigma) ** 2
-    )
-    
-    near = torch.exp(-d / sigma_abs)
-    straddle = straddle_base * near * not_grasped
-
-    reach_reward = obb_reward + abs_reward + straddle
-
-    return reach_reward, d_right, d_left, reach_gate
+    return reach_reward, d_right, d_left
 
 
 @torch.jit.script
@@ -360,12 +301,10 @@ def compute_pick_place_rewards(
     cup_height: float,
     cube_half_size: float,
     zone_margin: float,
-    reach_dist: Tensor,
-    # New fingertip OBB inputs
+    # Fingertip OBB inputs
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
     cube_quat_w: Tensor,
-    best_axis: Tensor,
     left_is_positive: Tensor,
     use_x: Tensor,
     prev_right_tip_dist: Tensor,
@@ -381,8 +320,7 @@ def compute_pick_place_rewards(
     action_cost_weight: float,
     drop_penalty: float,
     fingertip_obb_weight: float,
-    straddle_weight: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
 
@@ -392,32 +330,26 @@ def compute_pick_place_rewards(
         new_stage_*:          updated latched flags
         action_cost, drop_penalty_reward: per-env penalty tensors
         new_right_tip_dist, new_left_tip_dist: cached fingertip OBB distances
-        reach_gate:           [num_envs] (for metrics)
-        d_right:              [num_envs] (for metrics)
-        d_left:               [num_envs] (for metrics)
     """
     # Stage 1: Approach shaping
     approach_reward, curr_dist = compute_approach_reward(
         gripper_pos, cube_pos, prev_gripper_cube_dist, stage_grasped, approach_weight
     )
 
-    # Pre-grasp: Fingertip OBB reaching + straddle
-    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist, reach_gate = compute_fingertip_obb_reach_reward(
+    # Pre-grasp: Fingertip OBB reaching (delta-based)
+    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist = compute_fingertip_obb_reach_reward(
         gripper_tip_pos=gripper_tip_pos,
         jaw_tip_pos=jaw_tip_pos,
         cube_pos=cube_pos,
-        best_axis=best_axis,
         left_is_positive=left_is_positive,
         cube_half_size=cube_half_size,
         zone_margin=zone_margin,
-        reach_dist=reach_dist,
         prev_right_tip_dist=prev_right_tip_dist,
         prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,
         cube_quat_w=cube_quat_w,
         use_x=use_x,
         fingertip_obb_weight=fingertip_obb_weight,
-        straddle_weight=straddle_weight,
     )
 
     # Stage 3: Unified 3D Transport shaping
@@ -469,5 +401,5 @@ def compute_pick_place_rewards(
     return (total_reward, curr_dist, curr_transport_dist, curr_cube_z,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward,
-            new_right_tip_dist, new_left_tip_dist,
-            reach_gate)
+            new_right_tip_dist, new_left_tip_dist)
+
