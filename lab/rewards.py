@@ -263,11 +263,12 @@ def compute_fingertip_obb_reach_reward(
     target_proj_gripper = sign_right * cube_half_size  # [N]
 
     # Signed excess beyond the face (positive = outside/past face, negative = inside)
-    # We want the fingertip to reach the face from outside, so:
-    # For left tip (approaches from the +sign side):
-    #   excess = target_proj - proj_jaw  (positive when still outside)
-    excess_jaw     = sign_left  * (target_proj_jaw     - proj_jaw)      # [N]
-    excess_gripper = sign_right * (target_proj_gripper - proj_gripper)  # [N]
+    # For a tip on the +sign side (e.g. +0.10 with target +0.05):
+    #   excess = sign * (proj - target_proj) = 1 * (0.10 - 0.05) = +0.05 (outside)
+    # For a tip on the -sign side (e.g. -0.10 with target -0.05):
+    #   excess = sign * (proj - target_proj) = -1 * (-0.10 - (-0.05)) = +0.05 (outside)
+    excess_jaw     = sign_left  * (proj_jaw     - target_proj_jaw)      # [N]
+    excess_gripper = sign_right * (proj_gripper - target_proj_gripper)  # [N]
 
     # Distance to face: only positive when outside; 0 when at/past face
     d_left  = torch.clamp(excess_jaw, min=0.0)      # [N]
