@@ -127,7 +127,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cube_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Cube",
         spawn=sim_utils.CuboidCfg(
-            size=(0.04, 0.04, 0.04),
+            size=(0.03, 0.03, 0.03),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 max_depenetration_velocity=0.5, # Reduced for "softer" resolve to prevent kicking
                 linear_damping=0.5,
