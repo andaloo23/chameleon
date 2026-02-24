@@ -604,7 +604,6 @@ class PickPlaceEnv(DirectRLEnv):
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
             cube_quat_w=self.cube.data.root_quat_w,
-            left_is_positive=self._left_is_positive,
             use_x=self._use_x,
             prev_right_tip_dist=self._prev_right_fingertip_dist,
             prev_left_tip_dist=self._prev_left_fingertip_dist,

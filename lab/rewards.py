@@ -199,7 +199,6 @@ def compute_fingertip_obb_reach_reward(
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
     cube_pos: Tensor,
-    left_is_positive: Tensor,
     cube_half_size: float,
     zone_margin: float,
     prev_right_tip_dist: Tensor,
@@ -212,14 +211,14 @@ def compute_fingertip_obb_reach_reward(
     """
     Compute the pre-grasp fingertip reaching reward (delta-based).
 
-    For each fingertip, measure how far outside its designated cube-face
+    For each fingertip, measure how far outside its NEAREST cube-face
     zone slab it is (0 when inside/touching). Use delta shaping:
       reward += w * max(d_prev - d_curr, 0)  per fingertip
 
-    Zero once stage_grasped latches.
+    Each tip independently targets whichever face zone is closer,
+    so the reward works regardless of wrist orientation.
 
-    Left fingertip  = gripper_tip  (fixed jaw)  -> left face zone
-    Right fingertip = jaw_tip      (moving jaw)  -> right face zone
+    Zero once stage_grasped latches.
 
     Returns:
         reach_reward:       [num_envs]
@@ -227,13 +226,6 @@ def compute_fingertip_obb_reach_reward(
         new_left_tip_dist:  [num_envs] (cache for next step)
     """
     not_grasped = (~stage_grasped).float()
-
-    # --- Sign assignment for face zones ---
-    # left_is_positive == True  => left face is +normal side, right face is -normal side
-    sign_left  = torch.where(left_is_positive,
-                             torch.ones_like(prev_left_tip_dist),
-                             -torch.ones_like(prev_left_tip_dist))
-    sign_right = -sign_left
 
     # --- Build rotation matrix R from cube quaternion (w, x, y, z) ---
     w = cube_quat_w[:, 0]
@@ -252,12 +244,12 @@ def compute_fingertip_obb_reach_reward(
     axis_local[:, 0] = use_x.float()                  # x=1 if use_x
     axis_local[:, 1] = (~use_x).float()               # y=1 if not use_x
 
-    # --- Zone slab center (face center + half margin outward) ---
+    # --- Zone slab centers for +side and -side faces ---
     t = zone_margin                                    # zone protrusion thickness
     face_offset = cube_half_size + 0.5 * t             # center of zone slab
 
-    r_local_left  = sign_left.unsqueeze(-1)  * face_offset * axis_local   # [N, 3]
-    r_local_right = sign_right.unsqueeze(-1) * face_offset * axis_local   # [N, 3]
+    r_local_pos = face_offset * axis_local             # [N, 3] center of +face zone
+    r_local_neg = -face_offset * axis_local            # [N, 3] center of -face zone
 
     # --- Half-extents: tangent dirs = cube_half_size, normal dir = t/2 ---
     h = torch.full_like(axis_local, cube_half_size)    # [N, 3]
@@ -265,12 +257,18 @@ def compute_fingertip_obb_reach_reward(
     h[:, 0] = torch.where(use_x,  torch.tensor(half_t, device=h.device), h[:, 0])
     h[:, 1] = torch.where(~use_x, torch.tensor(half_t, device=h.device), h[:, 1])
 
-    # --- Box-distance: d = ||max(|q - center| - halfext, 0)|| ---
-    q_left  = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
-    q_right = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    # --- Transform tips to cube-local space ---
+    q_gripper = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    q_jaw     = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
 
-    d_left  = torch.linalg.norm(torch.clamp((q_left  - r_local_left ).abs() - h, min=0.0), dim=1)
-    d_right = torch.linalg.norm(torch.clamp((q_right - r_local_right).abs() - h, min=0.0), dim=1)
+    # --- Distance from each tip to BOTH face zones, take the min ---
+    d_gripper_pos = torch.linalg.norm(torch.clamp((q_gripper - r_local_pos).abs() - h, min=0.0), dim=1)
+    d_gripper_neg = torch.linalg.norm(torch.clamp((q_gripper - r_local_neg).abs() - h, min=0.0), dim=1)
+    d_left = torch.minimum(d_gripper_pos, d_gripper_neg)  # gripper tip → nearest face
+
+    d_jaw_pos = torch.linalg.norm(torch.clamp((q_jaw - r_local_pos).abs() - h, min=0.0), dim=1)
+    d_jaw_neg = torch.linalg.norm(torch.clamp((q_jaw - r_local_neg).abs() - h, min=0.0), dim=1)
+    d_right = torch.minimum(d_jaw_pos, d_jaw_neg)  # jaw tip → nearest face
 
     # Delta reward: reward for closing the gap, zero penalty for moving away
     delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
@@ -305,7 +303,6 @@ def compute_pick_place_rewards(
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
     cube_quat_w: Tensor,
-    left_is_positive: Tensor,
     use_x: Tensor,
     prev_right_tip_dist: Tensor,
     prev_left_tip_dist: Tensor,
@@ -341,7 +338,6 @@ def compute_pick_place_rewards(
         gripper_tip_pos=gripper_tip_pos,
         jaw_tip_pos=jaw_tip_pos,
         cube_pos=cube_pos,
-        left_is_positive=left_is_positive,
         cube_half_size=cube_half_size,
         zone_margin=zone_margin,
         prev_right_tip_dist=prev_right_tip_dist,
