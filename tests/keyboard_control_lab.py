@@ -337,6 +337,9 @@ def main():
                 dr_val = _extract_val(dr)
                 rg_val = _extract_val(rg)
                 
+                # Overall gripper-to-cube distance (decreases smoothly during approach)
+                gc_dist = _extract_val(gripper_cube_dist) if gripper_cube_dist is not None else -1.0
+                
                 # Update minimums ONLY if not grasped (matches RL accumulation)
                 if not detector_state.get("grasped", False):
                     min_dl = min(min_dl, dl_val)
@@ -346,7 +349,7 @@ def main():
                 dl_print = f"{min_dl:.4f}" if min_dl != float('inf') else "inf   "
                 dr_print = f"{min_dr:.4f}" if min_dr != float('inf') else "inf   "
                 
-                sys.stdout.write(f"\r[Metrics] min_dL: {dl_print} | min_dR: {dr_print} | ReachGate: {rg_val:.3f} (curr_dL={dl_val:.4f}, curr_dR={dr_val:.4f})     ")
+                sys.stdout.write(f"\r[Metrics] dist={gc_dist:.3f} | min_dL: {dl_print} | min_dR: {dr_print} | RG: {rg_val:.3f} (dL={dl_val:.4f}, dR={dr_val:.4f})     ")
                 sys.stdout.flush()
                 
     except KeyboardInterrupt:
