@@ -581,6 +581,7 @@ class PickPlaceEnv(DirectRLEnv):
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
+            d_L_pos, d_L_neg, d_R_pos, d_R_neg,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
@@ -699,6 +700,10 @@ class PickPlaceEnv(DirectRLEnv):
             # Fingertip OBB face distances
             "d_left": new_left_tip_dist,
             "d_right": new_right_tip_dist,
+            "d_L_pos": d_L_pos,
+            "d_L_neg": d_L_neg,
+            "d_R_pos": d_R_pos,
+            "d_R_neg": d_R_neg,
             "reach_gate": reach_gate,       # diagnostic only (not used in reward)
             # Per-episode fingertip metrics (pre-grasp only)
             "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),

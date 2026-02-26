@@ -207,23 +207,22 @@ def compute_fingertip_obb_reach_reward(
     cube_quat_w: Tensor,
     use_x: Tensor,
     fingertip_obb_weight: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute the pre-grasp fingertip reaching reward (delta-based).
 
-    For each fingertip, measure how far outside its NEAREST cube-face
-    zone slab it is (0 when inside/touching). Use delta shaping:
-      reward += w * max(d_prev - d_curr, 0)  per fingertip
-
-    Each tip independently targets whichever face zone is closer,
-    so the reward works regardless of wrist orientation.
-
-    Zero once stage_grasped latches.
+    Symmetric Straddle Assignment:
+    Evaluating two pairings for each environment:
+      1. Fixed Tip -> +Normal Face, Moving Tip -> -Normal Face
+      2. Fixed Tip -> -Normal Face, Moving Tip -> +Normal Face
+    We choose the pairing that minimizes the sum of distances. This forces
+    the fingertips to target opposite faces.
 
     Returns:
         reach_reward:       [num_envs]
-        new_right_tip_dist: [num_envs] (cache for next step)
-        new_left_tip_dist:  [num_envs] (cache for next step)
+        new_right_tip_dist: [num_envs] (Moving Jaw)
+        new_left_tip_dist:  [num_envs] (Fixed Jaw)
+        d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] (Debug raw distances)
     """
     not_grasped = (~stage_grasped).float()
 
@@ -258,25 +257,33 @@ def compute_fingertip_obb_reach_reward(
     h[:, 1] = torch.where(~use_x, torch.tensor(half_t, device=h.device), h[:, 1])
 
     # --- Transform tips to cube-local space ---
-    q_gripper = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
-    q_jaw     = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    # Fixed Jaw = L, Moving Jaw = R
+    q_L = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
+    q_R = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
 
-    # --- Distance from each tip to BOTH face zones, take the min ---
-    d_gripper_pos = torch.linalg.norm(torch.clamp((q_gripper - r_local_pos).abs() - h, min=0.0), dim=1)
-    d_gripper_neg = torch.linalg.norm(torch.clamp((q_gripper - r_local_neg).abs() - h, min=0.0), dim=1)
-    d_left = torch.minimum(d_gripper_pos, d_gripper_neg)  # gripper tip → nearest face
+    # --- Distance from each tip to BOTH face zones ---
+    d_L_pos = torch.linalg.norm(torch.clamp((q_L - r_local_pos).abs() - h, min=0.0), dim=1)
+    d_L_neg = torch.linalg.norm(torch.clamp((q_L - r_local_neg).abs() - h, min=0.0), dim=1)
+    d_R_pos = torch.linalg.norm(torch.clamp((q_R - r_local_pos).abs() - h, min=0.0), dim=1)
+    d_R_neg = torch.linalg.norm(torch.clamp((q_R - r_local_neg).abs() - h, min=0.0), dim=1)
 
-    d_jaw_pos = torch.linalg.norm(torch.clamp((q_jaw - r_local_pos).abs() - h, min=0.0), dim=1)
-    d_jaw_neg = torch.linalg.norm(torch.clamp((q_jaw - r_local_neg).abs() - h, min=0.0), dim=1)
-    d_right = torch.minimum(d_jaw_pos, d_jaw_neg)  # jaw tip → nearest face
+    # --- Optimal Assignment (Minimizing Total Distance) ---
+    # Case A: L targets +face, R targets -face
+    sumA = d_L_pos + d_R_neg
+    # Case B: L targets -face, R targets +face
+    sumB = d_L_neg + d_R_pos
+
+    use_A = (sumA <= sumB)
+    d_L = torch.where(use_A, d_L_pos, d_L_neg)
+    d_R = torch.where(use_A, d_R_neg, d_R_pos)
 
     # Delta reward: reward for closing the gap, zero penalty for moving away
-    delta_left  = torch.clamp(prev_left_tip_dist  - d_left,  min=0.0)
-    delta_right = torch.clamp(prev_right_tip_dist - d_right, min=0.0)
+    delta_L = torch.clamp(prev_left_tip_dist  - d_L, min=0.0)
+    delta_R = torch.clamp(prev_right_tip_dist - d_R, min=0.0)
 
-    reach_reward = fingertip_obb_weight * (delta_left + delta_right) * not_grasped
+    reach_reward = fingertip_obb_weight * (delta_L + delta_R) * not_grasped
 
-    return reach_reward, d_right, d_left
+    return reach_reward, d_R, d_L, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
@@ -317,7 +324,7 @@ def compute_pick_place_rewards(
     action_cost_weight: float,
     drop_penalty: float,
     fingertip_obb_weight: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Compute total reward for pick-and-place task.
 
@@ -334,7 +341,7 @@ def compute_pick_place_rewards(
     )
 
     # Pre-grasp: Fingertip OBB reaching (delta-based)
-    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist = compute_fingertip_obb_reach_reward(
+    fingertip_reach_reward, new_right_tip_dist, new_left_tip_dist, d_L_pos, d_L_neg, d_R_pos, d_R_neg = compute_fingertip_obb_reach_reward(
         gripper_tip_pos=gripper_tip_pos,
         jaw_tip_pos=jaw_tip_pos,
         cube_pos=cube_pos,
@@ -397,5 +404,6 @@ def compute_pick_place_rewards(
     return (total_reward, curr_dist, curr_transport_dist, curr_cube_z,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward,
-            new_right_tip_dist, new_left_tip_dist)
+            new_right_tip_dist, new_left_tip_dist,
+            d_L_pos, d_L_neg, d_R_pos, d_R_neg)
 

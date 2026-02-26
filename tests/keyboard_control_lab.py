@@ -275,7 +275,15 @@ def main():
                         print(f"  q_right (moving jaw): [{qr[0]:+.4f}, {qr[1]:+.4f}, {qr[2]:+.4f}]")
                         print(f"  |q_left|:  [{abs(ql[0]):.4f}, {abs(ql[1]):.4f}, {abs(ql[2]):.4f}]")
                         print(f"  |q_right|: [{abs(qr[0]):.4f}, {abs(qr[1]):.4f}, {abs(qr[2]):.4f}]")
-                        print(f"  axis_local: [{ax[0]:.0f}, {ax[1]:.0f}, {ax[2]:.0f}]  sign_left: {sl:+.0f}  sign_right: {sr:+.0f}")
+                        print(f"  axis_local: [{ax[0]:.0f}, {ax[1]:.0f}, {ax[2]:.0f}]")
+                        
+                        # Show raw distances to both faces for each tip
+                        dl_p = _extract_val(task_state.get("d_L_pos"))
+                        dl_n = _extract_val(task_state.get("d_L_neg"))
+                        dr_p = _extract_val(task_state.get("d_R_pos"))
+                        dr_n = _extract_val(task_state.get("d_R_neg"))
+                        print(f"  Distances Fixed Jaw:  [+Face={dl_p:.4f}, -Face={dl_n:.4f}]")
+                        print(f"  Distances Moving Jaw: [+Face={dr_p:.4f}, -Face={dr_n:.4f}]")
                         print(f"---")
                     print("[GRASPED] Cube is being held!")
                 elif not grasped and detector_state["grasped"]:
