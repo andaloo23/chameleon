@@ -627,6 +627,7 @@ class PickPlaceEnv(DirectRLEnv):
         _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
         self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
         self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
+        _step_fingertip_rew = self.cfg.rew_fingertip_obb_weight * (_delta_left + _delta_right) * not_grasped_mask
         self._steps_left_in_region  += self._fixed_tip_in_left_zone.float()  * not_grasped_mask
         self._steps_right_in_region += self._moving_tip_in_right_zone.float() * not_grasped_mask
         self._pre_grasp_steps       += not_grasped_mask
@@ -697,9 +698,10 @@ class PickPlaceEnv(DirectRLEnv):
             "left_zone_ok": self._fixed_tip_in_left_zone,    # fixed jaw in left face zone
             "right_zone_ok": self._moving_tip_in_right_zone,   # moving jaw in right face zone
             "cube_pos": cube_pos,
-            # Fingertip OBB face distances
+            # Fingertip OBB face distances (Euclidean to face zone center)
             "d_left": new_left_tip_dist,
             "d_right": new_right_tip_dist,
+            "fingertip_step_reward": _step_fingertip_rew,
             "d_L_pos": d_L_pos,
             "d_L_neg": d_L_neg,
             "d_R_pos": d_R_pos,

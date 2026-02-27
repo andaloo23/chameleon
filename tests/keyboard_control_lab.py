@@ -23,6 +23,7 @@ Sphere Offset Controls:
 import argparse
 import sys
 import os
+import time
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -180,6 +181,7 @@ def main():
     REACH_THRESHOLD = 0.10  # meters
     warmup_frames = 60  # Skip detector checks during scene stabilization
     frame_count = 0
+    last_print_time = 0.0  # For 1-second rate-limiting of metrics output
     
     # Track minimum distance during pre-grasp phase
     min_dl = float('inf')
@@ -213,6 +215,11 @@ def main():
             
             # Get detector states from task_state
             task_state = info.get("task_state", {})
+            
+            def _extract_val(x):
+                if hasattr(x, "item"):
+                    return x[0].item() if getattr(x, "dim", lambda: 0)() > 0 else x.item()
+                return float(x)
             
             # Get distance for reach detection
             gripper_cube_dist = task_state.get("gripper_cube_distance")
@@ -322,35 +329,35 @@ def main():
                     print("\n[IN CUP OFF] Cube fell out of cup")
                 detector_state["in_cup"] = in_cup
             
-            # Print pre-grasp metrics continuously
+            # Print distance + fingertip reward metrics once per second
             dl = task_state.get("d_left")
             dr = task_state.get("d_right")
             rg = task_state.get("reach_gate")
+            ft_rew = task_state.get("fingertip_step_reward")
             
-            if dl is not None and dr is not None and rg is not None:
-                def _extract_val(x):
-                    if hasattr(x, "item"):
-                        return x[0].item() if getattr(x, "dim", lambda: 0)() > 0 else x.item()
-                    return float(x)
+            if dl is not None and dr is not None:
+                dl_val  = _extract_val(dl)
+                dr_val  = _extract_val(dr)
+                rg_val  = _extract_val(rg) if rg is not None else 0.0
+                gc_val  = _extract_val(gripper_cube_dist) if gripper_cube_dist is not None else -1.0
+                rew_val = _extract_val(ft_rew) if ft_rew is not None else 0.0
                 
-                dl_val = _extract_val(dl)
-                dr_val = _extract_val(dr)
-                rg_val = _extract_val(rg)
-                
-                # Overall gripper-to-cube distance (decreases smoothly during approach)
-                gc_dist = _extract_val(gripper_cube_dist) if gripper_cube_dist is not None else -1.0
-                
-                # Update minimums ONLY if not grasped (matches RL accumulation)
+                # Update minimums only when not grasped
                 if not detector_state.get("grasped", False):
                     min_dl = min(min_dl, dl_val)
                     min_dr = min(min_dr, dr_val)
                 
-                # Format infinity nicely if perfectly aligned before first step
-                dl_print = f"{min_dl:.4f}" if min_dl != float('inf') else "inf   "
-                dr_print = f"{min_dr:.4f}" if min_dr != float('inf') else "inf   "
-                
-                sys.stdout.write(f"\r[Metrics] dist={gc_dist:.3f} | min_fcL: {dl_print} | min_fcR: {dr_print} | RG: {rg_val:.3f} (fcL={dl_val:.4f}, fcR={dr_val:.4f})     ")
-                sys.stdout.flush()
+                now = time.time()
+                if now - last_print_time >= 1.0:
+                    last_print_time = now
+                    dl_print  = f"{min_dl:.4f}" if min_dl != float('inf') else "inf"
+                    dr_print  = f"{min_dr:.4f}" if min_dr != float('inf') else "inf"
+                    grasped_str = "GRASPED" if detector_state.get("grasped") else "pre-grasp"
+                    print(f"[{grasped_str}]  dist={gc_val:.4f}  "
+                          f"fcL={dl_val:.4f} (min={dl_print})  "
+                          f"fcR={dr_val:.4f} (min={dr_print})  "
+                          f"RG={rg_val:.3f}  "
+                          f"ft_rew={rew_val:.5f}")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")
