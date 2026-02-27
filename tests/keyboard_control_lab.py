@@ -183,9 +183,10 @@ def main():
     frame_count = 0
     last_print_time = 0.0  # For 1-second rate-limiting of metrics output
     
-    # Track minimum distance during pre-grasp phase
+    # Track minimum distance and ft_rew sum during pre-grasp phase
     min_dl = float('inf')
     min_dr = float('inf')
+    ft_rew_sum = 0.0
     
     try:
         while input_state["is_running"] and simulation_app.is_running():
@@ -293,12 +294,14 @@ def main():
                         print(f"  EucDist Moving Jaw to +/-face centers: [+Face={dr_p:.4f}, -Face={dr_n:.4f}]")
                         print(f"---")
                     print("[GRASPED] Cube is being held!")
+                    print(f"[GRASPED] Total ft_rew accumulated this approach: {ft_rew_sum:.4f}")
                 elif not grasped and detector_state["grasped"]:
                     cube_z = env.cube.data.root_pos_w[0, 2].item()
                     print(f"\n[GRASPED OFF] Cube released (cube_z={cube_z:.3f}m)")
-                    # Reset minimums for next grasp attempt
+                    # Reset minimums and ft_rew sum for next grasp attempt
                     min_dl = float('inf')
                     min_dr = float('inf')
+                    ft_rew_sum = 0.0
                 detector_state["grasped"] = grasped
             
             # Check droppable (cube over cup)
@@ -341,6 +344,10 @@ def main():
                 rg_val  = _extract_val(rg) if rg is not None else 0.0
                 gc_val  = _extract_val(gripper_cube_dist) if gripper_cube_dist is not None else -1.0
                 rew_val = _extract_val(ft_rew) if ft_rew is not None else 0.0
+                
+                # Accumulate ft_rew every frame (pre-grasp only)
+                if not detector_state.get("grasped", False):
+                    ft_rew_sum += rew_val
                 
                 # Update minimums only when not grasped
                 if not detector_state.get("grasped", False):
