@@ -581,6 +581,7 @@ class PickPlaceEnv(DirectRLEnv):
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
+            new_right_hw, new_left_hw,
             d_L_pos, d_L_neg, d_R_pos, d_R_neg,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
@@ -601,15 +602,14 @@ class PickPlaceEnv(DirectRLEnv):
             cup_height=self.cfg.cup_height,
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
             zone_margin=self._zone_margin,
-            # Fingertip OBB inputs
+            # Fingertip inputs
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
             cube_quat_w=self.cube.data.root_quat_w,
             use_x=self._use_x,
-            prev_right_tip_dist=self._prev_right_fingertip_dist,
-            prev_left_tip_dist=self._prev_left_fingertip_dist,
+            prev_right_tip_dist=self._prev_right_fingertip_dist,  # HWM Phi score
+            prev_left_tip_dist=self._prev_left_fingertip_dist,    # HWM Phi score
             # Reward weights
-            approach_weight=self.cfg.rew_approach_delta_weight,
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
             lift_bonus=self.cfg.rew_lift_bonus,
@@ -619,15 +619,19 @@ class PickPlaceEnv(DirectRLEnv):
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
             fingertip_obb_weight=self.cfg.rew_fingertip_obb_weight,
+            fingertip_sigma=self.cfg.fingertip_sigma,
         )
         
-        # Accumulate per-fingertip OBB debug metrics BEFORE updating cached dists.
+        # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
-        _delta_left  = torch.clamp(self._prev_left_fingertip_dist  - new_left_tip_dist,  min=0.0)
-        _delta_right = torch.clamp(self._prev_right_fingertip_dist - new_right_tip_dist, min=0.0)
-        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _delta_left  * not_grasped_mask
-        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _delta_right * not_grasped_mask
-        _step_fingertip_rew = self.cfg.rew_fingertip_obb_weight * (_delta_left + _delta_right) * not_grasped_mask
+        # Proximity scores for accumulator (using raw distances just computed)
+        _prox_L = torch.exp(-new_left_tip_dist  / self.cfg.fingertip_sigma)
+        _prox_R = torch.exp(-new_right_tip_dist / self.cfg.fingertip_sigma)
+        _hwm_delta_L = torch.clamp(new_left_hw  - self._prev_left_fingertip_dist,  min=0.0)
+        _hwm_delta_R = torch.clamp(new_right_hw - self._prev_right_fingertip_dist, min=0.0)
+        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * (_prox_L + _hwm_delta_L) * not_grasped_mask
+        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * (_prox_R + _hwm_delta_R) * not_grasped_mask
+        _step_fingertip_rew = self.cfg.rew_fingertip_obb_weight * (_prox_L + _prox_R + _hwm_delta_L + _hwm_delta_R) * not_grasped_mask
         self._steps_left_in_region  += self._fixed_tip_in_left_zone.float()  * not_grasped_mask
         self._steps_right_in_region += self._moving_tip_in_right_zone.float() * not_grasped_mask
         self._pre_grasp_steps       += not_grasped_mask
@@ -650,8 +654,9 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
         self._prev_cube_z = new_cube_z
-        self._prev_right_fingertip_dist = new_right_tip_dist
-        self._prev_left_fingertip_dist  = new_left_tip_dist
+        # Store HWM Phi scores (not raw distances) as the next step's prev values
+        self._prev_right_fingertip_dist = new_right_hw
+        self._prev_left_fingertip_dist  = new_left_hw
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -834,10 +839,9 @@ class PickPlaceEnv(DirectRLEnv):
             dim=1
         )
         self._prev_cube_z[env_ids] = cube_pos[:, 2]
-        # Reset fingertip OBB distances to a large initial value so delta reward
-        # starts accruing immediately on first approach.
-        self._prev_left_fingertip_dist[env_ids]  = 1.0
-        self._prev_right_fingertip_dist[env_ids] = 1.0
+        # Reset fingertip HWM Phi scores to 0.0 (no best yet = d=inf equivalent)
+        self._prev_left_fingertip_dist[env_ids]  = 0.0
+        self._prev_right_fingertip_dist[env_ids] = 0.0
         # Reset per-episode fingertip accumulator metrics
         self._steps_left_in_region[env_ids]  = 0.0
         self._steps_right_in_region[env_ids] = 0.0

@@ -203,7 +203,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_cup_collision_penalty = -0.5
 
     # Pre-grasp fingertip reaching rewards
-    rew_fingertip_obb_weight = 10.0   # w * max(d_prev - d, 0) summed over both fingertips
+    rew_fingertip_obb_weight = 10.0   # weight for both proximity and HWM-progress components
+    fingertip_sigma          = 0.10   # exponential scale (meters); 0.10 -> full reward at ~0m, ~0.37 at 10cm
 
     # ===== Grasp Detection Thresholds =====
     grasp_close_command_threshold = 0.1
