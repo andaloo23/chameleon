@@ -220,8 +220,12 @@ def compute_fingertip_obb_reach_reward(
 
     reach_reward = (r_delta + r_close) * not_grasped
 
-    # Return Phi as both hw slots (pick_place_env stores both prev_left and prev_right = Phi)
-    return reach_reward, d_R, d_L, Phi, Phi, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    # High-water-mark: prev only moves forward (toward higher Phi = closer distance)
+    # Retreating does NOT reset the baseline → oscillation gives zero net reward
+    new_hw = torch.max(prev_left_tip_dist, Phi)
+
+    # Return HWM as both hw slots (pick_place_env stores both prev_left and prev_right = new_hw)
+    return reach_reward, d_R, d_L, new_hw, new_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
