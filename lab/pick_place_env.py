@@ -620,18 +620,23 @@ class PickPlaceEnv(DirectRLEnv):
             drop_penalty=self.cfg.rew_drop_penalty,
             fingertip_obb_weight=self.cfg.rew_fingertip_obb_weight,
             fingertip_sigma=self.cfg.fingertip_sigma,
+            fingertip_close_threshold=self.cfg.fingertip_close_threshold,
+            fingertip_close_bonus=self.cfg.fingertip_close_bonus,
         )
         
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
-        # Proximity scores for accumulator (using raw distances just computed)
-        _prox_L = torch.exp(-new_left_tip_dist  / self.cfg.fingertip_sigma)
-        _prox_R = torch.exp(-new_right_tip_dist / self.cfg.fingertip_sigma)
-        _hwm_delta_L = torch.clamp(new_left_hw  - self._prev_left_fingertip_dist,  min=0.0)
-        _hwm_delta_R = torch.clamp(new_right_hw - self._prev_right_fingertip_dist, min=0.0)
-        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * (_prox_L + _hwm_delta_L) * not_grasped_mask
-        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * (_prox_R + _hwm_delta_R) * not_grasped_mask
-        _step_fingertip_rew = self.cfg.rew_fingertip_obb_weight * (_prox_L + _prox_R + _hwm_delta_L + _hwm_delta_R) * not_grasped_mask
+        # Delta in Phi space (matches what the reward function computed)
+        _phi_delta_L = new_left_hw  - self._prev_left_fingertip_dist
+        _phi_delta_R = new_right_hw - self._prev_right_fingertip_dist
+        d_avg = 0.5 * (new_left_tip_dist + new_right_tip_dist)
+        _close_mask = (d_avg < self.cfg.fingertip_close_threshold).float()
+        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _phi_delta_L * not_grasped_mask
+        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _phi_delta_R * not_grasped_mask
+        _step_fingertip_rew = (
+            self.cfg.rew_fingertip_obb_weight * (_phi_delta_L + _phi_delta_R)
+            + self.cfg.fingertip_close_bonus * _close_mask
+        ) * not_grasped_mask
         self._steps_left_in_region  += self._fixed_tip_in_left_zone.float()  * not_grasped_mask
         self._steps_right_in_region += self._moving_tip_in_right_zone.float() * not_grasped_mask
         self._pre_grasp_steps       += not_grasped_mask

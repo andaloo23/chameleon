@@ -19,12 +19,7 @@ def compute_approach_reward(
     stage_grasped: Tensor,
     approach_weight: float,
 ) -> tuple[Tensor, Tensor]:
-    """
-    Compute delta-based approach shaping reward (kept for reference, not used in main reward).
-
-    Reward = weight * max(0, prev_dist - curr_dist)
-    Only rewards getting closer, no penalty for moving away.
-    """
+    """Delta-based approach shaping (kept for reference, not used in main reward)."""
     curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)
     delta = prev_gripper_cube_dist - curr_dist
     reward = approach_weight * torch.clamp(delta, min=0.0) * (~stage_grasped).float()
@@ -38,12 +33,7 @@ def compute_lift_shaping_delta(
     is_grasped: Tensor,
     lift_weight: float,
 ) -> tuple[Tensor, Tensor]:
-    """
-    Compute delta-based lift shaping reward.
-
-    Reward = weight * max(0, curr_height - prev_height)
-    Only active after grasping.
-    """
+    """Delta-based lift shaping. Only active after grasping."""
     delta = cube_height - prev_cube_height
     reward = lift_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
     return reward, cube_height
@@ -59,20 +49,12 @@ def compute_transport_shaping_3d(
     is_grasped: Tensor,
     transport_weight: float,
 ) -> tuple[Tensor, Tensor]:
-    """
-    Compute 3D transport shaping reward (delta-based).
-
-    Target Z is cup_top + 2cm. Cube Z is based on bottom face.
-    Distance d = sqrt(dx^2 + dy^2 + 0.3 * dz^2)
-    Reward = w * (d_prev - d_curr)
-    """
+    """3D transport shaping (delta-based, post-grasp)."""
     z_target = cup_pos[:, 2] + cup_height + 0.02
     z_bottom = cube_pos[:, 2] - cube_half_size
-
     dx = cube_pos[:, 0] - cup_pos[:, 0]
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
-
     curr_dist = torch.sqrt(dx**2 + dy**2 + 0.3 * dz**2)
     delta = prev_transport_dist - curr_dist
     reward = transport_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
@@ -94,13 +76,11 @@ def compute_one_time_bonuses(
     droppable_bonus: float,
     success_bonus: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-    """
-    Compute one-time bonuses for stage transitions with latching logic.
-    """
-    new_grasp    = is_grasped    & ~stage_grasped
-    new_lift     = is_lifted     & ~stage_lifted
-    new_droppable = is_droppable & ~stage_droppable
-    new_success  = is_in_cup     & ~stage_success
+    """One-time bonuses for stage transitions with latching logic."""
+    new_grasp     = is_grasped    & ~stage_grasped
+    new_lift      = is_lifted     & ~stage_lifted
+    new_droppable = is_droppable  & ~stage_droppable
+    new_success   = is_in_cup     & ~stage_success
 
     grasp_reward     = grasp_bonus     * new_grasp.float()
     lift_reward      = lift_bonus      * new_lift.float()
@@ -128,18 +108,14 @@ def compute_penalties(
     drop_penalty: float,
     stage_dropped: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    """
-    Compute penalty terms.
-    """
+    """Penalty terms."""
     action_cost = -action_cost_weight * torch.norm(joint_vel, dim=1)
-
     cube_z = cube_pos[:, 2]
     low_height = cube_z <= cube_half_size * 1.5
     dropped = stage_grasped & ~is_grasped & low_height & ~is_in_cup
     apply_drop_penalty = dropped & ~stage_dropped
     drop_penalty_reward = drop_penalty * apply_drop_penalty.float()
     new_stage_dropped = stage_dropped | dropped
-
     return action_cost, drop_penalty_reward, new_stage_dropped
 
 
@@ -150,41 +126,49 @@ def compute_fingertip_obb_reach_reward(
     cube_pos: Tensor,
     cube_half_size: float,
     zone_margin: float,
-    prev_right_tip_dist: Tensor,  # best Phi achieved so far this episode (HWM), init 0.0
-    prev_left_tip_dist: Tensor,   # best Phi achieved so far this episode (HWM), init 0.0
+    prev_right_tip_dist: Tensor,  # Phi(d_avg) from last step — stored but unused (same as prev_left)
+    prev_left_tip_dist: Tensor,   # Phi(d_avg) from last step
     stage_grasped: Tensor,
     cube_quat_w: Tensor,
     use_x: Tensor,
     fingertip_obb_weight: float,
-    sigma: float,                  # exponential distance scale (meters)
+    sigma: float,                  # exponential scale (meters)
+    close_threshold: float,        # d_avg below which close_bonus fires
+    close_bonus: float,            # small per-step bonus when very close
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Compute the pre-grasp fingertip reaching reward.
+    Pre-grasp fingertip reaching reward: progress-based + bounded + close bonus.
 
-    Reward = weight * (Phi_L + Phi_R + dPhi_L + dPhi_R) * not_grasped
+    Formula:
+      d_avg  = (d_L + d_R) / 2           -- avg Euclidean dist to assigned face zone centers
+      Phi(t) = exp(-d_avg / sigma)        -- bounded potential in (0, 1]
 
-    Where:
-      Phi(d) = exp(-d / sigma)       -- dense exponential proximity (absolute, non-farmable)
-      dPhi   = max(0, Phi - best_Phi) -- HWM progress bonus (only on new records, anti-farming)
-      best_Phi = max(best_Phi, Phi) each step
+      r_ft = w * (Phi(t) - Phi(t-1))     -- signed delta (potential-based shaping)
+             + close_bonus * (d_avg < close_threshold)   -- small per-step close bonus
 
-    The 'prev' tensors store the best Phi (HIGH-water-mark) seen this episode,
-    initialized to 0.0 at episode reset (equivalent to d = +infinity best distance).
+    Properties:
+      - Positive when approaching, ~0 when stalled, negative when backing off
+      - Anti-farming by construction: sum of deltas over any cycle = Phi(final) - Phi(start)
+      - Bounded: Phi in (0, 1] → reward per step bounded by [-w, w+close_bonus]
+      - Gradient from far away: exp is always non-zero
+
+    The 'prev_left_tip_dist' stores Phi(t-1), initialized to 0.0 at reset.
+    On the very first step: delta = Phi(initial) - 0 = small positive spike (harmless).
 
     Symmetric Straddle Assignment:
-    We evaluate two pairings and pick the one minimising total distance:
       Case A: Fixed Tip -> +Normal Face, Moving Tip -> -Normal Face
       Case B: Fixed Tip -> -Normal Face, Moving Tip -> +Normal Face
+    Pick whichever minimises (d_L + d_R).
 
     Returns:
-        reach_reward:              [num_envs]
-        d_R, d_L:                  [num_envs] raw Euclidean distances to face zone centers
-        new_right_hw, new_left_hw: [num_envs] updated HWM Phi scores (stored as next prev_*)
-        d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] debug raw distances to each face
+        reach_reward:   [num_envs]
+        d_R, d_L:       [num_envs] raw Euclidean distances (for display)
+        Phi, Phi:       [num_envs] current potential (stored as next step's prev_left/right)
+        d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] debug per-face distances
     """
     not_grasped = (~stage_grasped).float()
 
-    # --- Build rotation matrix R from cube quaternion (w, x, y, z) ---
+    # --- Rotation matrix from cube quaternion (w, x, y, z) ---
     w = cube_quat_w[:, 0]
     x = cube_quat_w[:, 1]
     y = cube_quat_w[:, 2]
@@ -193,62 +177,51 @@ def compute_fingertip_obb_reach_reward(
         torch.stack([1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)    ], dim=-1),
         torch.stack([2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)    ], dim=-1),
         torch.stack([2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)], dim=-1),
-    ], dim=1)  # [N, 3, 3]
-    R_inv = R.transpose(1, 2)  # [N, 3, 3]
+    ], dim=1)
+    R_inv = R.transpose(1, 2)
 
-    # --- Local axis from use_x ---
-    axis_local = torch.zeros_like(cube_pos)    # [N, 3]
-    axis_local[:, 0] = use_x.float()           # x=1 if use_x
-    axis_local[:, 1] = (~use_x).float()        # y=1 if not use_x
+    # --- Local face axis ---
+    axis_local = torch.zeros_like(cube_pos)
+    axis_local[:, 0] = use_x.float()
+    axis_local[:, 1] = (~use_x).float()
 
     # --- Zone slab centers in cube-local space ---
     t = zone_margin
-    face_offset = cube_half_size + 0.5 * t    # center of zone slab
+    face_offset = cube_half_size + 0.5 * t
+    r_local_pos = face_offset * axis_local
+    r_local_neg = -face_offset * axis_local
 
-    r_local_pos = face_offset * axis_local     # [N, 3] center of +face zone
-    r_local_neg = -face_offset * axis_local    # [N, 3] center of -face zone
+    # --- Tips in cube-local space ---
+    q_L = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)
+    q_R = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)
 
-    # --- Transform tips to cube-local space ---
-    # Fixed Jaw = L, Moving Jaw = R
-    q_L = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
-    q_R = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
-
-    # --- Euclidean distance from each tip to BOTH face zone centers ---
-    # Computed in cube-local space (isometric to world): local norm == world norm.
+    # --- Euclidean distances to each face zone center ---
     d_L_pos = torch.norm(q_L - r_local_pos, dim=1)
     d_L_neg = torch.norm(q_L - r_local_neg, dim=1)
     d_R_pos = torch.norm(q_R - r_local_pos, dim=1)
     d_R_neg = torch.norm(q_R - r_local_neg, dim=1)
 
-    # --- Optimal Assignment (minimise total distance) ---
-    # Case A: L -> +face, R -> -face
-    sumA = d_L_pos + d_R_neg
-    # Case B: L -> -face, R -> +face
-    sumB = d_L_neg + d_R_pos
-
+    # --- Optimal assignment (min total distance) ---
+    sumA = d_L_pos + d_R_neg   # Case A: L->+face, R->-face
+    sumB = d_L_neg + d_R_pos   # Case B: L->-face, R->+face
     use_A = (sumA <= sumB)
-    d_L = torch.where(use_A, d_L_pos, d_L_neg)   # raw distance for L tip
-    d_R = torch.where(use_A, d_R_neg, d_R_pos)   # raw distance for R tip
+    d_L = torch.where(use_A, d_L_pos, d_L_neg)
+    d_R = torch.where(use_A, d_R_neg, d_R_pos)
 
-    # --- Exponential proximity scores: Phi in (0, 1], -> 1 as d -> 0 ---
-    Phi_L = torch.exp(-d_L / sigma)
-    Phi_R = torch.exp(-d_R / sigma)
+    # --- Progress-based bounded potential ---
+    d_avg = 0.5 * (d_L + d_R)             # average fingertip distance
+    Phi   = torch.exp(-d_avg / sigma)      # bounded in (0, 1]
 
-    # --- High-water-mark progress: only reward NEW proximity records ---
-    # prev_* = best Phi achieved this episode (init 0.0 at reset)
-    delta_L = torch.clamp(Phi_L - prev_left_tip_dist,  min=0.0)
-    delta_R = torch.clamp(Phi_R - prev_right_tip_dist, min=0.0)
+    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, - on retreat
+    r_delta   = fingertip_obb_weight * delta_phi
 
-    # Update HWM: best Phi = max Phi = closest distance achieved
-    new_left_hw  = torch.max(prev_left_tip_dist,  Phi_L)
-    new_right_hw = torch.max(prev_right_tip_dist, Phi_R)
+    # Small per-step bonus when fingertips are very close
+    r_close = close_bonus * (d_avg < close_threshold).float()
 
-    # --- Combined reward ---
-    # Dense proximity (Phi): always-on, absolute position -> non-farmable by oscillation
-    # Progress (delta):       HWM-gated -> non-farmable (only fires on new records)
-    reach_reward = fingertip_obb_weight * (Phi_L + Phi_R + delta_L + delta_R) * not_grasped
+    reach_reward = (r_delta + r_close) * not_grasped
 
-    return reach_reward, d_R, d_L, new_right_hw, new_left_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    # Return Phi as both hw slots (pick_place_env stores both prev_left and prev_right = Phi)
+    return reach_reward, d_R, d_L, Phi, Phi, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
@@ -289,26 +262,27 @@ def compute_pick_place_rewards(
     drop_penalty: float,
     fingertip_obb_weight: float,
     fingertip_sigma: float,
+    fingertip_close_threshold: float,
+    fingertip_close_bonus: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Compute total reward for pick-and-place task.
+    Total reward for pick-and-place.
 
-    Pre-grasp signal is exclusively fingertip-based (exponential proximity + HWM progress).
-    Approach reward removed - the fingertip exponential gradient handles the whole approach.
+    Pre-grasp: fingertip potential-based shaping + small close bonus.
+    No approach reward — fingertip Phi gradient covers the whole approach.
 
     Returns (19 tensors):
         total_reward
         curr_dist, curr_transport_dist, curr_cube_z
-        new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped
+        new_stage_grasped/lifted/droppable/success/dropped
         action_cost, drop_penalty_reward
-        new_right_tip_dist, new_left_tip_dist  (raw Euclidean distances, for display)
-        new_right_hw, new_left_hw              (HWM Phi scores, stored as next prev_*)
+        new_right_tip_dist, new_left_tip_dist  (raw distances, for display)
+        new_right_hw, new_left_hw              (Phi(t), stored as next step's prev_*)
         d_L_pos, d_L_neg, d_R_pos, d_R_neg    (debug)
     """
-    # Gripper-to-cube distance for diagnostics only (not used in reward)
-    curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)
+    curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)  # diagnostic only
 
-    # Pre-grasp: exponential proximity + HWM progress
+    # Pre-grasp: potential-based fingertip reward
     (
         fingertip_reach_reward,
         new_right_tip_dist, new_left_tip_dist,
@@ -327,15 +301,15 @@ def compute_pick_place_rewards(
         use_x=use_x,
         fingertip_obb_weight=fingertip_obb_weight,
         sigma=fingertip_sigma,
+        close_threshold=fingertip_close_threshold,
+        close_bonus=fingertip_close_bonus,
     )
 
-    # Transport shaping (post-grasp)
+    # Post-grasp shaping
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
         cube_pos, cup_pos, cup_height, cube_half_size,
         prev_transport_dist, is_grasped, transport_weight
     )
-
-    # Lift shaping (post-grasp)
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight
@@ -344,7 +318,6 @@ def compute_pick_place_rewards(
     # One-time bonuses
     cube_z = cube_pos[:, 2]
     is_lifted = is_grasped & (cube_z > 0.03)
-
     (grasp_reward, lift_reward, droppable_reward, success_reward,
      new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success) = compute_one_time_bonuses(
         is_grasped, stage_grasped,
@@ -361,7 +334,6 @@ def compute_pick_place_rewards(
         stage_dropped
     )
 
-    # Total reward (no approach reward - fingertip reward handles all of pre-grasp)
     total_reward = (
         fingertip_reach_reward +
         grasp_reward +
