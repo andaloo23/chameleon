@@ -180,7 +180,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_approach_delta_weight = 2.0
     
     # Stage 2: Grasp cube (one-time bonus)
-    rew_grasp_bonus = 25.0
+    rew_grasp_bonus = 75.0
     
     # Stage 3: Lift cube (one-time bonus)
     rew_lift_bonus = 30.0
@@ -203,7 +203,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_cup_collision_penalty = -0.5
 
     # Pre-grasp fingertip reaching rewards
-    rew_fingertip_obb_weight     = 10.0   # weight for potential-based delta and close bonus
+    rew_fingertip_obb_weight     = 30.0   # weight for potential-based delta and close bonus
     fingertip_sigma              = 0.10   # exp scale (meters): 0.1 -> Phi=0.37 at 10cm
     fingertip_close_threshold    = 0.025  # avg fingertip distance below which close_bonus fires
     fingertip_close_bonus        = 0.5    # per-step bonus when avg d < close_threshold

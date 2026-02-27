@@ -212,8 +212,8 @@ def compute_fingertip_obb_reach_reward(
     d_avg = 0.5 * (d_L + d_R)             # average fingertip distance
     Phi   = torch.exp(-d_avg / sigma)      # bounded in (0, 1]
 
-    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, - on retreat
-    r_delta   = fingertip_obb_weight * delta_phi
+    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, 0 on retreat
+    r_delta   = fingertip_obb_weight * torch.clamp(delta_phi, min=0.0)  # no retreat penalty
 
     # Small per-step bonus when fingertips are very close
     r_close = close_bonus * (d_avg < close_threshold).float()
