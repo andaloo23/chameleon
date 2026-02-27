@@ -282,8 +282,8 @@ def main():
                         dl_n = _extract_val(task_state.get("d_L_neg"))
                         dr_p = _extract_val(task_state.get("d_R_pos"))
                         dr_n = _extract_val(task_state.get("d_R_neg"))
-                        print(f"  Distances Fixed Jaw:  [+Face={dl_p:.4f}, -Face={dl_n:.4f}]")
-                        print(f"  Distances Moving Jaw: [+Face={dr_p:.4f}, -Face={dr_n:.4f}]")
+                        print(f"  EucDist Fixed Jaw  to +/-face centers: [+Face={dl_p:.4f}, -Face={dl_n:.4f}]")
+                        print(f"  EucDist Moving Jaw to +/-face centers: [+Face={dr_p:.4f}, -Face={dr_n:.4f}]")
                         print(f"---")
                     print("[GRASPED] Cube is being held!")
                 elif not grasped and detector_state["grasped"]:
@@ -349,7 +349,7 @@ def main():
                 dl_print = f"{min_dl:.4f}" if min_dl != float('inf') else "inf   "
                 dr_print = f"{min_dr:.4f}" if min_dr != float('inf') else "inf   "
                 
-                sys.stdout.write(f"\r[Metrics] dist={gc_dist:.3f} | min_dL: {dl_print} | min_dR: {dr_print} | RG: {rg_val:.3f} (dL={dl_val:.4f}, dR={dr_val:.4f})     ")
+                sys.stdout.write(f"\r[Metrics] dist={gc_dist:.3f} | min_fcL: {dl_print} | min_fcR: {dr_print} | RG: {rg_val:.3f} (fcL={dl_val:.4f}, fcR={dr_val:.4f})     ")
                 sys.stdout.flush()
                 
     except KeyboardInterrupt:

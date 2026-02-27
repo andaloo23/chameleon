@@ -250,22 +250,19 @@ def compute_fingertip_obb_reach_reward(
     r_local_pos = face_offset * axis_local             # [N, 3] center of +face zone
     r_local_neg = -face_offset * axis_local            # [N, 3] center of -face zone
 
-    # --- Half-extents: tangent dirs = cube_half_size, normal dir = t/2 ---
-    h = torch.full_like(axis_local, cube_half_size)    # [N, 3]
-    half_t = t / 2.0
-    h[:, 0] = torch.where(use_x,  torch.tensor(half_t, device=h.device), h[:, 0])
-    h[:, 1] = torch.where(~use_x, torch.tensor(half_t, device=h.device), h[:, 1])
-
     # --- Transform tips to cube-local space ---
     # Fixed Jaw = L, Moving Jaw = R
     q_L = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
     q_R = torch.bmm(R_inv, (jaw_tip_pos     - cube_pos).unsqueeze(-1)).squeeze(-1)  # [N, 3]
 
-    # --- Distance from each tip to BOTH face zones ---
-    d_L_pos = torch.linalg.norm(torch.clamp((q_L - r_local_pos).abs() - h, min=0.0), dim=1)
-    d_L_neg = torch.linalg.norm(torch.clamp((q_L - r_local_neg).abs() - h, min=0.0), dim=1)
-    d_R_pos = torch.linalg.norm(torch.clamp((q_R - r_local_pos).abs() - h, min=0.0), dim=1)
-    d_R_neg = torch.linalg.norm(torch.clamp((q_R - r_local_neg).abs() - h, min=0.0), dim=1)
+    # --- Euclidean distance from each tip to BOTH face zone centers ---
+    # q_L/q_R and r_local_pos/r_local_neg are all in cube-local space.
+    # Rotation is isometric, so local-space norm == world-space norm.
+    # This decreases smoothly during approach (unlike the OBB clamped-box metric).
+    d_L_pos = torch.norm(q_L - r_local_pos, dim=1)
+    d_L_neg = torch.norm(q_L - r_local_neg, dim=1)
+    d_R_pos = torch.norm(q_R - r_local_pos, dim=1)
+    d_R_neg = torch.norm(q_R - r_local_neg, dim=1)
 
     # --- Optimal Assignment (Minimizing Total Distance) ---
     # Case A: L targets +face, R targets -face
