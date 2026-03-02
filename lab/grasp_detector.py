@@ -231,8 +231,12 @@ class GraspDetectorTensor:
         self.is_in_cup = xy_in_range & cube_inside_height
         
         # 7. Apply grasp detection logic
-        # If not grasped: need actively closing + lifted + following for N frames
-        grasp_condition = closed & lifted & following
+        # If not grasped: need actively closing + following for N frames
+        # NOTE: 'lifted' is intentionally excluded — it creates a chicken-and-egg problem
+        # (cube can't be lifted until grasped, grasp can't register until lifted).
+        # A stalling gripper that is following the cube already implies contact.
+        # 'lifted' remains a separate milestone check for the lift bonus in the reward.
+        grasp_condition = closed & following
         
         # Increment following_frames where condition met, reset otherwise
         self.following_frames = torch.where(
