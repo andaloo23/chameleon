@@ -213,6 +213,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_stall_threshold = 0.01 # Relaxed to catch grasp consistently
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
+    grasp_near_cube_threshold = 0.12  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
     grasp_frames_to_grasp = 3 # More responsive
     grasp_frames_to_drop = 5 # Faster drop registration
     grasp_history_len = 5 # More robust following checks

@@ -38,6 +38,7 @@ class GraspDetectorTensor:
         stall_threshold: float = 0.001,
         following_threshold: float = 0.0005,
         lift_threshold: float = 0.025,
+        near_cube_threshold: float = 0.12,
     ):
         """
         Initialize the grasp detector.
@@ -62,6 +63,7 @@ class GraspDetectorTensor:
         self.stall_threshold = stall_threshold
         self.following_threshold = following_threshold
         self.lift_threshold = lift_threshold
+        self.near_cube_threshold = near_cube_threshold
         
         # Persistent state tensors
         self._init_state_tensors()
@@ -231,12 +233,12 @@ class GraspDetectorTensor:
         self.is_in_cup = xy_in_range & cube_inside_height
         
         # 7. Apply grasp detection logic
-        # If not grasped: need actively closing + following for N frames
-        # NOTE: 'lifted' is intentionally excluded — it creates a chicken-and-egg problem
-        # (cube can't be lifted until grasped, grasp can't register until lifted).
-        # A stalling gripper that is following the cube already implies contact.
-        # 'lifted' remains a separate milestone check for the lift bonus in the reward.
-        grasp_condition = closed & following
+        # If not grasped: need actively closing + following + near cube for N frames.
+        # NOTE: 'lifted' excluded (chicken-and-egg). 'near_cube' replaces it as the
+        # spatial guard: gripper must be within near_cube_threshold of the cube center
+        # to prevent farming the grasp bonus by closing far from the cube.
+        near_cube = torch.norm(gripper_pos - cube_pos, dim=1) < self.near_cube_threshold
+        grasp_condition = closed & following & near_cube
         
         # Increment following_frames where condition met, reset otherwise
         self.following_frames = torch.where(

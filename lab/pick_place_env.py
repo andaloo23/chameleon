@@ -94,6 +94,7 @@ class PickPlaceEnv(DirectRLEnv):
             stall_threshold=self.cfg.grasp_stall_threshold,
             following_threshold=self.cfg.grasp_following_threshold,
             lift_threshold=self.cfg.grasp_lift_threshold,
+            near_cube_threshold=self.cfg.grasp_near_cube_threshold,
         )
         
         # Persistent state tensors for rewards
