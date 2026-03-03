@@ -711,7 +711,7 @@ class PickPlaceEnv(DirectRLEnv):
         dbg_axis_local[:, 0] = self._use_x.float()
         dbg_axis_local[:, 1] = (~self._use_x).float()
         dbg_sign_left = torch.where(self._left_is_positive,
-                                    torch.ones(n, device=self.device), -torch.ones(n, device=self.device))
+                                    torch.ones(self.num_envs, device=self.device), -torch.ones(self.num_envs, device=self.device))
         
         self.extras["task_state"] = {
             "gripper_cube_distance": gripper_cube_dist,  # [num_envs] tensor
