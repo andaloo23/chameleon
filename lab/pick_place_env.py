@@ -251,11 +251,10 @@ class PickPlaceEnv(DirectRLEnv):
             if prim.HasAPI(UsdPhysics.CollisionAPI):
                 prim.RemoveAPI(UsdPhysics.CollisionAPI)
 
-            # Apply PhysxCollisionAPI and explicitly disable it.
-            # This is the most reliable way to tell PhysX "never collide with this prim,"
-            # overriding any inherited or auto-added collision properties.
-            physx_col = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-            physx_col.GetCollisionEnabledAttr().Set(False)
+            # Apply UsdPhysics CollisionAPI and explicitly disable it.
+            # This tells PhysX "never collide with this prim."
+            col = UsdPhysics.CollisionAPI.Apply(prim)
+            col.GetCollisionEnabledAttr().Set(False)
 
             # Park off-screen until first _get_rewards() sets position (avoids 2m default cube blocking)
             UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.0, 0.0, -10.0))
