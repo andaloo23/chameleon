@@ -4,8 +4,8 @@
 """
 Tensor-based grasp detection for Isaac Lab.
 
-Ports the behavioral grasp detection from gripper.py to batched tensor operations
-for parallel environment execution.
+Detects grasp when both fingertips are inside their assigned OBB face zones
+for frames_to_grasp consecutive frames.
 """
 
 from __future__ import annotations
@@ -16,98 +16,56 @@ from torch import Tensor
 
 class GraspDetectorTensor:
     """
-    GPU-batched grasp detection based on behavioral signals.
-    
+    GPU-batched grasp detection based on fingertip zone occupancy.
+
     Detects grasp when:
-    - Gripper is actively closing and stalled (blocked by object)
-    - Cube is lifted above ground threshold
-    - Cube distance to gripper is stable (following) for N frames
-    
+    - Left fingertip is inside the left OBB face zone
+    - Right fingertip is inside the right OBB face zone
+    - Both conditions hold for frames_to_grasp consecutive frames
+
     Detects drop when:
-    - Cube distance is no longer stable for M frames
+    - Either fingertip leaves its zone for frames_to_drop consecutive frames
     """
 
     def __init__(
         self,
         num_envs: int,
         device: str,
+        frames_to_grasp: int = 3,
+        frames_to_drop: int = 5,
+        lift_threshold: float = 0.025,
+        # Legacy params kept for API compatibility (unused in new logic)
         history_len: int = 10,
         stall_frames: int = 5,
-        frames_to_grasp: int = 15,
-        frames_to_drop: int = 30,
         stall_threshold: float = 0.001,
-        following_threshold: float = 0.0005,
-        lift_threshold: float = 0.025,
+        following_threshold: float = 0.03,
         near_cube_threshold: float = 0.12,
-        close_command_threshold: float = 0.1,
+        close_command_threshold: float = 0.6,
     ):
-        """
-        Initialize the grasp detector.
-        
-        Args:
-            num_envs: Number of parallel environments
-            device: Torch device ("cuda" or "cpu")
-            history_len: Number of frames to track for following detection
-            stall_frames: Number of frames to consider gripper stalled
-            frames_to_grasp: Consecutive following frames to confirm grasp
-            frames_to_drop: Consecutive not-following frames to confirm drop
-            stall_threshold: Max joint position change to be considered stalled
-            following_threshold: Max distance variation to be considered following
-            lift_threshold: Height above which cube is considered lifted
-        """
         self.num_envs = num_envs
         self.device = device
-        self.history_len = history_len
-        self.stall_frames = stall_frames
         self.frames_to_grasp = frames_to_grasp
         self.frames_to_drop = frames_to_drop
-        self.stall_threshold = stall_threshold
-        self.following_threshold = following_threshold
         self.lift_threshold = lift_threshold
-        self.near_cube_threshold = near_cube_threshold
-        self.close_command_threshold = close_command_threshold
-        
+
         # Persistent state tensors
         self._init_state_tensors()
-    
+
     def _init_state_tensors(self):
         """Initialize all state tracking tensors."""
-        # Vector history for following detection: [num_envs, history_len, 6]
-        # Stores (gripper_pos - cube_pos) [0:3] and (jaw_pos - cube_pos) [3:6]
-        self.vector_history = torch.zeros(
-            self.num_envs, self.history_len, 6, device=self.device, dtype=torch.float32
-        )
-        self.dist_history_idx = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long
-        )
-        self.dist_history_filled = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.bool
-        )
-        
-        # Gripper value history for stall detection: [num_envs, stall_frames]
-        self.gripper_history = torch.zeros(
-            self.num_envs, self.stall_frames, device=self.device, dtype=torch.float32
-        )
-        self.gripper_history_idx = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long
-        )
-        self.gripper_history_filled = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.bool
-        )
-        
         # Frame counters for temporal filtering
-        self.following_frames = torch.zeros(
+        self.in_zone_frames = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long
         )
-        self.not_following_frames = torch.zeros(
+        self.out_of_zone_frames = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long
         )
-        
+
         # Main grasp state
         self.is_grasped = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
         )
-        
+
         # Droppable and in-cup detection (for reward computation)
         self.is_droppable = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
@@ -121,24 +79,16 @@ class GraspDetectorTensor:
         if env_ids is None:
             self._init_state_tensors()
         else:
-            self.vector_history[env_ids] = 0.0
-            self.dist_history_idx[env_ids] = 0
-            self.dist_history_filled[env_ids] = False
-            self.gripper_history[env_ids] = 0.0
-            self.gripper_history_idx[env_ids] = 0
-            self.gripper_history_filled[env_ids] = False
-            self.following_frames[env_ids] = 0
-            self.not_following_frames[env_ids] = 0
+            self.in_zone_frames[env_ids] = 0
+            self.out_of_zone_frames[env_ids] = 0
             self.is_grasped[env_ids] = False
             self.is_droppable[env_ids] = False
             self.is_in_cup[env_ids] = False
 
     def update(
         self,
-        gripper_value: Tensor,
-        target_gripper: Tensor,
-        gripper_pos: Tensor,
-        jaw_pos: Tensor,
+        left_in_zone: Tensor,
+        right_in_zone: Tensor,
         cube_pos: Tensor,
         cup_pos: Tensor,
         cup_height: float,
@@ -146,119 +96,70 @@ class GraspDetectorTensor:
         cube_half_size: float,
         droppable_min_height: float = 0.005,
         in_cup_height_margin: float = 0.02,
+        # Legacy params kept for API compatibility (unused)
+        gripper_value: Tensor | None = None,
+        target_gripper: Tensor | None = None,
+        gripper_pos: Tensor | None = None,
+        jaw_pos: Tensor | None = None,
     ) -> Tensor:
         """
         Update grasp detection state for all environments.
-        
+
+        Grasp condition: both fingertips inside their OBB face zones for N frames.
+        Drop condition:  either fingertip leaves its zone for M frames.
+
         Args:
-            gripper_value: Current gripper joint position [num_envs]
-            target_gripper: Target gripper position from action [num_envs]
-            gripper_pos: Gripper world position [num_envs, 3]
-            cube_pos: Cube world position [num_envs, 3]
-            cup_pos: Cup world position [num_envs, 3]
-            cup_height: Cup height (scalar)
-            cup_inner_radius: Cup inner radius (scalar)
-            cube_half_size: Half of cube side length (scalar)
-            droppable_min_height: Min height above cup to be droppable (scalar)
-            in_cup_height_margin: Height tolerance for in-cup detection (scalar)
-        
+            left_in_zone:   Bool [num_envs] — fixed jaw tip inside left face zone
+            right_in_zone:  Bool [num_envs] — moving jaw tip inside right face zone
+            cube_pos:       [num_envs, 3]
+            cup_pos:        [num_envs, 3]
+            cup_height:     scalar
+            cup_inner_radius: scalar
+            cube_half_size: scalar
+            droppable_min_height: scalar
+            in_cup_height_margin: scalar
+
         Returns:
-            is_grasped: Boolean tensor [num_envs] indicating grasp state
+            is_grasped: Boolean tensor [num_envs]
         """
-        # 1. Closed = gripper is physically in a closed position AND stalled.
-        # Using actual joint value (gripper_value) rather than the commanded target.
-        # Reason: when the gripper stalls against the cube, the target = physical_pos - action_scale
-        # (always just 0.1 below the stuck position), so a tight target threshold (0.1) never fires.
-        # The actual joint position when blocked by a 3cm cube settles at ~0.47,
-        # well below the 0.6 threshold but above the open range (1.0–1.5).
-        commanding_close = gripper_value < self.close_command_threshold
-        
-        # 2. Update gripper history and check stall
-        idx = self.gripper_history_idx % self.stall_frames
-        self.gripper_history.scatter_(1, idx.unsqueeze(1), gripper_value.unsqueeze(1))
-        self.gripper_history_idx = (self.gripper_history_idx + 1) % self.stall_frames
-        self.gripper_history_filled = self.gripper_history_filled | (self.gripper_history_idx == 0)
-        
-        # Stalled = max - min < threshold (only if history is filled)
-        gripper_max = self.gripper_history.max(dim=1).values
-        gripper_min = self.gripper_history.min(dim=1).values
-        stalled = self.gripper_history_filled & ((gripper_max - gripper_min) < self.stall_threshold)
-        
-        # Closed = commanding closure AND physically stalled
-        closed = commanding_close & stalled
-        
-        # 3. Check if cube is lifted
         cube_z = cube_pos[:, 2]
-        lifted = cube_z > self.lift_threshold
-        
-        # 4. Update vector history and check following
-        # We track relative XYZ vectors for BOTH jaws to ensure no slip or rotation
-        vec_gripper = gripper_pos - cube_pos
-        vec_jaw = jaw_pos - cube_pos
-        curr_vec = torch.cat([vec_gripper, vec_jaw], dim=1) # [num_envs, 6]
-        
-        idx = self.dist_history_idx % self.history_len
-        self.vector_history.scatter_(1, idx.view(-1, 1, 1).expand(-1, 1, 6), curr_vec.unsqueeze(1))
-        self.dist_history_idx = (self.dist_history_idx + 1) % self.history_len
-        self.dist_history_filled = self.dist_history_filled | (self.dist_history_idx == 0)
-        
-        # Following = max - min of EACH component < threshold
-        # This is much stricter than Euclidean distance as it catches slipping/rotation
-        v_max = self.vector_history.max(dim=1).values
-        v_min = self.vector_history.min(dim=1).values
-        v_diff_max = (v_max - v_min).max(dim=1).values # Max variation among any of the 6 components
-        following = self.dist_history_filled & (v_diff_max < self.following_threshold)
-        
-        # 5. Droppable detection: cube is above cup and aligned XY
+
+        # --- Droppable / in-cup detection (unchanged) ---
         cube_xy = cube_pos[:, :2]
         cup_xy = cup_pos[:, :2]
         cube_cup_xy_dist = torch.norm(cube_xy - cup_xy, dim=1)
         cup_top_z = cup_pos[:, 2] + cup_height
         cube_bottom_z = cube_z - cube_half_size
-        
+
         xy_in_range = cube_cup_xy_dist <= cup_inner_radius
         above_cup = cube_bottom_z >= (cup_top_z + droppable_min_height)
         self.is_droppable = xy_in_range & above_cup
-        
-        # 6. In-cup detection: cube XY aligned AND cube bottom inside cup height
+
         cup_bottom_z = cup_pos[:, 2]
         cube_inside_height = (cube_bottom_z >= (cup_bottom_z - in_cup_height_margin)) & (cube_bottom_z <= cup_top_z)
         self.is_in_cup = xy_in_range & cube_inside_height
-        
-        # 7. Apply grasp detection logic
-        # If not grasped: need actively closing + following + near cube for N frames.
-        # NOTE: 'lifted' excluded (chicken-and-egg). 'near_cube' replaces it as the
-        # spatial guard: gripper must be within near_cube_threshold of the cube center
-        # to prevent farming the grasp bonus by closing far from the cube.
-        near_cube = torch.norm(gripper_pos - cube_pos, dim=1) < self.near_cube_threshold
-        grasp_condition = closed & following & near_cube
-        
-        # Increment following_frames where condition met, reset otherwise
-        self.following_frames = torch.where(
-            ~self.is_grasped & grasp_condition,
-            self.following_frames + 1,
-            torch.zeros_like(self.following_frames)
+
+        # --- Grasp entry: both tips in zone for frames_to_grasp frames ---
+        both_in_zone = left_in_zone & right_in_zone
+
+        self.in_zone_frames = torch.where(
+            ~self.is_grasped & both_in_zone,
+            self.in_zone_frames + 1,
+            torch.zeros_like(self.in_zone_frames),
         )
-        
-        # Transition to grasped when following_frames >= frames_to_grasp
-        new_grasps = ~self.is_grasped & (self.following_frames >= self.frames_to_grasp)
+        new_grasps = ~self.is_grasped & (self.in_zone_frames >= self.frames_to_grasp)
         self.is_grasped = self.is_grasped | new_grasps
-        self.following_frames = torch.where(new_grasps, torch.zeros_like(self.following_frames), self.following_frames)
-        
-        # If grasped: lose grasp if commanding open OR (not following AND not lifted)
-        # This prevents toggling "Released" messages if the cube slips during transport
-        opening_intent = ~commanding_close
-        lost_grasp_condition = opening_intent | (~following & ~lifted)
-        
-        self.not_following_frames = torch.where(
-            self.is_grasped & lost_grasp_condition,
-            self.not_following_frames + 1,
-            torch.zeros_like(self.not_following_frames)
+        self.in_zone_frames = torch.where(new_grasps, torch.zeros_like(self.in_zone_frames), self.in_zone_frames)
+
+        # --- Drop: either tip leaves zone for frames_to_drop frames ---
+        lost_zone = ~both_in_zone
+        self.out_of_zone_frames = torch.where(
+            self.is_grasped & lost_zone,
+            self.out_of_zone_frames + 1,
+            torch.zeros_like(self.out_of_zone_frames),
         )
-        
-        # Transition to not grasped when not_following_frames >= frames_to_drop
-        drops = self.is_grasped & (self.not_following_frames >= self.frames_to_drop)
+        drops = self.is_grasped & (self.out_of_zone_frames >= self.frames_to_drop)
         self.is_grasped = self.is_grasped & ~drops
-        self.not_following_frames = torch.where(drops, torch.zeros_like(self.not_following_frames), self.not_following_frames)
-        
+        self.out_of_zone_frames = torch.where(drops, torch.zeros_like(self.out_of_zone_frames), self.out_of_zone_frames)
+
         return self.is_grasped

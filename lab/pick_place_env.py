@@ -581,12 +581,10 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_value = self.joint_pos[:, self._gripper_joint_idx]
         target_gripper = self._joint_targets[:, self._gripper_joint_idx]
         
-        # Update grasp detector with both jaws
+        # Update grasp detector with fingertip zone occupancy
         self.grasp_detector.update(
-            gripper_value=gripper_value,
-            target_gripper=target_gripper,
-            gripper_pos=gripper_pos,
-            jaw_pos=jaw_pos,
+            left_in_zone=self._fixed_tip_in_left_zone,
+            right_in_zone=self._moving_tip_in_right_zone,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             cup_height=self.cfg.cup_height,
@@ -600,6 +598,18 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_xy = gripper_pos[:, :2]
         cube_xy = cube_pos[:, :2]
         reach_dist = torch.norm(gripper_xy - cube_xy, dim=1)
+
+        # Contact force debug print (env_0 only, GUI mode only)
+        if self.sim.has_gui():
+            try:
+                cf = self.robot.data.body_net_contact_forces  # [num_envs, num_bodies, 3]
+                left_f  = cf[0, self._gripper_body_idx[0], :].norm().item()
+                right_f = cf[0, self._jaw_body_idx[0], :].norm().item()
+                CONTACT_THRESHOLD = 0.5  # Newtons
+                if left_f > CONTACT_THRESHOLD or right_f > CONTACT_THRESHOLD:
+                    print(f"[CONTACT] left={left_f:.2f}N  right={right_f:.2f}N")
+            except Exception:
+                pass  # contact force reporting not enabled in ArticulationCfg
 
         # Compute rewards
         (

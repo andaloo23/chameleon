@@ -369,27 +369,12 @@ def main():
                     # --- Grasp condition breakdown (only useful pre-grasp) ---
                     if not detector_state.get("grasped", False):
                         gd = env.grasp_detector
-                        gv = env.joint_pos[0, env._gripper_joint_idx].item()  # actual gripper position
-                        cmd_close = gv < env.cfg.grasp_close_command_threshold
-
-                        gh = gd.gripper_history[0]
-                        stall_delta = (gh.max() - gh.min()).item()
-                        stalled = gd.gripper_history_filled[0].item() and stall_delta < env.cfg.grasp_stall_threshold
-
-                        v_diff = (gd.vector_history[0].max(0).values - gd.vector_history[0].min(0).values).max().item()
-                        following = gd.dist_history_filled[0].item() and v_diff < env.cfg.grasp_following_threshold
-
-                        gripper_pos_w = env.robot.data.body_pos_w[0, env._gripper_body_idx[0]]
-                        cube_pos_w    = env.cube.data.root_pos_w[0]
-                        near_dist = (gripper_pos_w - cube_pos_w).norm().item()
-                        near = near_dist < env.cfg.grasp_near_cube_threshold
-
-                        f_frames = gd.following_frames[0].item()
+                        left_ok  = env._fixed_tip_in_left_zone[0].item()
+                        right_ok = env._moving_tip_in_right_zone[0].item()
+                        f_frames = gd.in_zone_frames[0].item()
                         print(f"  [GRASP DBG] "
-                              f"cmd_close={cmd_close}(gv={gv:.3f})  "
-                              f"stalled={stalled}(Δ={stall_delta:.4f})  "
-                              f"following={following}(v_diff={v_diff:.4f})  "
-                              f"near={near}(d={near_dist:.3f})  "
+                              f"L_in_zone={left_ok}  "
+                              f"R_in_zone={right_ok}  "
                               f"→ frames={f_frames}/{env.cfg.grasp_frames_to_grasp}")
                 
     except KeyboardInterrupt:
