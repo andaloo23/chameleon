@@ -240,13 +240,20 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Cube zone markers (boxes, visual-only, parented to cube)
         # Created as children of the cube prim so they move with it.
-        # No CollisionAPI applied — the gripper passes right through.
+        # Three-layer guarantee of zero collision:
+        #   1. purpose=guide → PhysX skips this prim entirely during parsing
+        #   2. No CollisionAPI applied
+        #   3. Explicit CollisionAPI removal in case cloning auto-adds one
         cube_prim_path = "/World/envs/env_0/Cube"
         for i in range(2):
             zone_path = f"{cube_prim_path}/ZoneMarker_{i}"
             zone = UsdGeom.Cube.Define(stage, zone_path)
-            # Material binding will happen per-episode in _get_rewards
-            # Default transform (will be updated)
+            # Mark as guide: USD standard for "physics/render ignore this prim"
+            zone.GetPurposeAttr().Set(UsdGeom.Tokens.guide)
+            # Remove CollisionAPI if it somehow got applied (e.g. via parent inheritance)
+            prim = zone.GetPrim()
+            if prim.HasAPI(UsdPhysics.CollisionAPI):
+                prim.RemoveAPI(UsdPhysics.CollisionAPI)
             UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, 0.0))
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
