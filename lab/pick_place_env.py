@@ -467,58 +467,59 @@ class PickPlaceEnv(DirectRLEnv):
             cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
             self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
             
-            # Update zone marker box transforms and colors
-            import isaaclab.sim.utils.stage as stage_utils
-            from pxr import UsdGeom, Gf
-            stage = stage_utils.get_current_stage()
-            half_val = float(self.cfg.cube_scale[0] / 2.0)
-            margin_val = float(self._zone_margin)
-            cube_size = float(self.cfg.cube_scale[0])
-            
-            # Box prim is base size 2.0 (-1 to 1). Using scale to set dimensions.
-            # Dimensions: face_size x face_size x margin
-            
-            for env_id in range(self.num_envs):
-                if not first_frame_mask[env_id]:
-                    continue
+            # Update zone marker box transforms and colors (visual only — skip in headless training)
+            if self.sim.has_gui():
+                import isaaclab.sim.utils.stage as stage_utils
+                from pxr import UsdGeom, Gf
+                stage = stage_utils.get_current_stage()
+                half_val = float(self.cfg.cube_scale[0] / 2.0)
+                margin_val = float(self._zone_margin)
+                cube_size = float(self.cfg.cube_scale[0])
                 
-                # Determine colors based on left/right assignment
-                # Left (Moving Jaw) = Red, Right (Fixed Jaw) = Green
-                is_left_pos = self._left_is_positive[env_id]
+                # Box prim is base size 2.0 (-1 to 1). Using scale to set dimensions.
+                # Dimensions: face_size x face_size x margin
                 
-                for i, sign in enumerate([1.0, -1.0]):
-                    prim_path = f"/World/envs/env_{env_id}/Cube/ZoneMarker_{i}"
-                    prim = stage.GetPrimAtPath(prim_path)
-                    if prim:
-                        xform = UsdGeom.XformCommonAPI(prim)
-                        
-                        # Position: center of zone volume
-                        # Offset from face center by margin/2 outwards
-                        offset = half_val + margin_val / 2.0
-                        
-                        # Scale: (face/2, face/2, margin/2) because base size is 2.0
-                        s_face = cube_size / 2.0
-                        s_margin = margin_val / 2.0
-                        
-                        if self._use_x[env_id]:
-                            # X-axis faces
-                            xform.SetTranslate(Gf.Vec3d(sign * offset, 0.0, 0.0))
-                            xform.SetScale(Gf.Vec3f(s_margin, s_face, s_face))
-                        else:
-                            # Y-axis faces
-                            xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
-                            xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
+                for env_id in range(self.num_envs):
+                    if not first_frame_mask[env_id]:
+                        continue
+                    
+                    # Determine colors based on left/right assignment
+                    # Left (Moving Jaw) = Red, Right (Fixed Jaw) = Green
+                    is_left_pos = self._left_is_positive[env_id]
+                    
+                    for i, sign in enumerate([1.0, -1.0]):
+                        prim_path = f"/World/envs/env_{env_id}/Cube/ZoneMarker_{i}"
+                        prim = stage.GetPrimAtPath(prim_path)
+                        if prim:
+                            xform = UsdGeom.XformCommonAPI(prim)
                             
-                        # Set Color directly on prim (no material)
-                        # Index 0 is +n face, Index 1 is -n face
-                        # If left_is_positive: +n is Left (Blue), -n is Right (Green)
-                        is_this_left = (i == 0) if is_left_pos else (i == 1)
-                        color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
-                        
-                        # Set color and opacity directly
-                        geom = UsdGeom.Cube(prim)
-                        geom.GetDisplayColorAttr().Set([color])
-                        geom.CreateDisplayOpacityAttr().Set([0.3])
+                            # Position: center of zone volume
+                            # Offset from face center by margin/2 outwards
+                            offset = half_val + margin_val / 2.0
+                            
+                            # Scale: (face/2, face/2, margin/2) because base size is 2.0
+                            s_face = cube_size / 2.0
+                            s_margin = margin_val / 2.0
+                            
+                            if self._use_x[env_id]:
+                                # X-axis faces
+                                xform.SetTranslate(Gf.Vec3d(sign * offset, 0.0, 0.0))
+                                xform.SetScale(Gf.Vec3f(s_margin, s_face, s_face))
+                            else:
+                                # Y-axis faces
+                                xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
+                                xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
+                                
+                            # Set Color directly on prim (no material)
+                            # Index 0 is +n face, Index 1 is -n face
+                            # If left_is_positive: +n is Left (Blue), -n is Right (Green)
+                            is_this_left = (i == 0) if is_left_pos else (i == 1)
+                            color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
+                            
+                            # Set color and opacity directly
+                            geom = UsdGeom.Cube(prim)
+                            geom.GetDisplayColorAttr().Set([color])
+                            geom.CreateDisplayOpacityAttr().Set([0.3])
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
