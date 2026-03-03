@@ -543,7 +543,7 @@ class PickPlaceEnv(DirectRLEnv):
         # --- Left/Right zone-entry check for each fingertip ---
         margin = self._zone_margin
         cube_quat_inv = cube_quat_w.clone()
-        cube_quat_inv[:, :3] *= -1.0  # conjugate = inverse for unit quat
+        cube_quat_inv[:, 1:] *= -1.0  # conjugate of [w,x,y,z] = [w,-x,-y,-z]
         half_size = half
         is_local_x = self._use_x
         fixed_local = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
@@ -570,7 +570,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Transform world-space delta into gripper's local frame
         # Inverse rotation = rotate by conjugate q* = (-x, -y, -z, w)
         gripper_quat_inv = gripper_quat.clone()
-        gripper_quat_inv[:, :3] *= -1.0
+        gripper_quat_inv[:, 1:] *= -1.0  # conjugate of [w,x,y,z] = [w,-x,-y,-z]
         
         gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
