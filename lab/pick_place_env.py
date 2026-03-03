@@ -238,19 +238,7 @@ class PickPlaceEnv(DirectRLEnv):
 
 
 
-        # Cube zone markers — parented to /World/DebugZones/ (plain Xform, NOT under Cube rigid body)
-        # Moving them under the Cube prim caused PhysX to treat them as collision shapes,
-        # crashing articulation initialization. Their world transform is updated each frame in _get_rewards().
-        debug_zones_path = "/World/DebugZones"
-        UsdGeom.Xform.Define(stage, debug_zones_path)
-        self._zone_prim_paths = []
-        for i in range(2):
-            zone_path = f"{debug_zones_path}/ZoneMarker_{i}"
-            zone = UsdGeom.Cube.Define(stage, zone_path)
-            # Park off-screen with scale=0 until first _get_rewards() positions them
-            UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, -10.0))
-            UsdGeom.XformCommonAPI(zone).SetScale(Gf.Vec3f(0.0, 0.0, 0.0))
-            self._zone_prim_paths.append(zone_path)
+
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
@@ -470,64 +458,9 @@ class PickPlaceEnv(DirectRLEnv):
             cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
             self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
             
-            # (Zone markers are now at /World/DebugZones/, not under the cube prim)
-            # Their world transforms are updated every frame in the has_gui() block below.
-            pass  # axis/side assignment handled above; visualization update is per-frame below
+            pass  # axis/side assignment handled above
 
-        # Update zone marker world transforms every frame (env_0 only, GUI only)
-        if self.sim.has_gui():
-            import isaaclab.sim.utils.stage as stage_utils
-            from pxr import UsdGeom, Gf
-            import math
-            stage = stage_utils.get_current_stage()
-            half_val   = float(self.cfg.cube_scale[0] / 2.0)
-            margin_val = float(self._zone_margin)
-            cube_size  = float(self.cfg.cube_scale[0])
-            s_face   = cube_size / 2.0
-            s_margin = margin_val / 2.0
-            offset_dist = half_val + margin_val / 2.0
 
-            # env_0 cube world pose
-            cp0 = cube_pos[0]        # [3] world position
-            cq0 = self.cube.data.root_quat_w[0]  # [4] world quaternion [w,x,y,z]
-
-            is_x_v      = self._use_x[0].item()
-            is_left_pos = self._left_is_positive[0].item()
-
-            # Quat → Euler ZYX (for XformCommonAPI.SetRotate)
-            w_, x_, y_, z_ = cq0[0].item(), cq0[1].item(), cq0[2].item(), cq0[3].item()
-            roll  = math.degrees(math.atan2(2*(w_*x_ + y_*z_), 1 - 2*(x_*x_ + y_*y_)))
-            pitch = math.degrees(math.asin(max(-1.0, min(1.0, 2*(w_*y_ - z_*x_)))))
-            yaw   = math.degrees(math.atan2(2*(w_*z_ + x_*y_), 1 - 2*(y_*y_ + z_*z_)))
-
-            for i, sign in enumerate([1.0, -1.0]):
-                prim = stage.GetPrimAtPath(self._zone_prim_paths[i])
-                if not prim:
-                    continue
-                xform = UsdGeom.XformCommonAPI(prim)
-
-                # Zone center in cube-local space, then rotated to world
-                if is_x_v:
-                    local_off = torch.tensor([sign * offset_dist, 0.0, 0.0], device=self.device)
-                    scale = Gf.Vec3f(s_margin, s_face, s_face)
-                else:
-                    local_off = torch.tensor([0.0, sign * offset_dist, 0.0], device=self.device)
-                    scale = Gf.Vec3f(s_face, s_margin, s_face)
-
-                world_off = quat_apply(cq0.unsqueeze(0), local_off.unsqueeze(0))[0]
-                world_center = cp0 + world_off
-
-                xform.SetTranslate(Gf.Vec3d(
-                    world_center[0].item(), world_center[1].item(), world_center[2].item()))
-                xform.SetRotate(Gf.Vec3f(roll, pitch, yaw),
-                                UsdGeom.XformCommonAPI.RotationOrderXYZ)
-                xform.SetScale(scale)
-
-                is_this_left = (i == 0) if is_left_pos else (i == 1)
-                color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
-                geom = UsdGeom.Cube(prim)
-                geom.GetDisplayColorAttr().Set([color])
-                geom.CreateDisplayOpacityAttr().Set([0.3])
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
@@ -550,22 +483,17 @@ class PickPlaceEnv(DirectRLEnv):
         fixed_local = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
         moving_local = quat_apply(cube_quat_inv, jaw_tip_pos - cube_pos)
         
-        def _in_face_zone(tip_local, is_x, positive_side):
-            """Check if tip is inside a specific face zone (positive or negative side)."""
+        def _near_face(tip_local, is_x, positive_side):
+            """Check if fingertip is within `margin` distance of the cube face plane (no tangential bounds)."""
             normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
-            tangent_coord = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])
-            z_coord = tip_local[:, 2]
-            # Check the correct side only
-            in_zone_pos = (normal_coord >= half_size) & (normal_coord <= half_size + margin)
-            in_zone_neg = (normal_coord <= -half_size) & (normal_coord >= -half_size - margin)
-            in_normal = torch.where(positive_side, in_zone_pos, in_zone_neg)
-            in_face = (tangent_coord.abs() <= half_size) & (z_coord.abs() <= half_size)
-            return in_normal & in_face
-        
-        # Fixed jaw (Left gripper tip) -> left face zone
-        self._fixed_tip_in_left_zone = _in_face_zone(fixed_local, is_local_x, self._left_is_positive)
-        # Moving jaw (Right gripper tip) -> right face zone (opposite side)
-        self._moving_tip_in_right_zone = _in_face_zone(moving_local, is_local_x, ~self._left_is_positive)
+            # Signed distance: positive = outside the face, negative = inside the cube
+            signed_dist = torch.where(positive_side, normal_coord - half_size, -half_size - normal_coord)
+            return signed_dist.abs() < margin
+
+        # Fixed jaw (Left gripper tip) -> left face plane
+        self._fixed_tip_in_left_zone = _near_face(fixed_local, is_local_x, self._left_is_positive)
+        # Moving jaw (Right gripper tip) -> right face plane (opposite side)
+        self._moving_tip_in_right_zone = _near_face(moving_local, is_local_x, ~self._left_is_positive)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
