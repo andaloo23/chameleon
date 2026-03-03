@@ -239,22 +239,26 @@ class PickPlaceEnv(DirectRLEnv):
 
 
         # Cube zone markers (boxes, visual-only, parented to cube)
-        # Created as children of the cube prim so they move with it.
-        # Three-layer guarantee of zero collision:
-        #   1. purpose=guide → PhysX skips this prim entirely during parsing
-        #   2. No CollisionAPI applied
-        #   3. Explicit CollisionAPI removal in case cloning auto-adds one
+        # Parented to cube so they move with it. Explicitly disabled in PhysX so
+        # the simulation never generates contacts, regardless of parent rigid body.
         cube_prim_path = "/World/envs/env_0/Cube"
         for i in range(2):
             zone_path = f"{cube_prim_path}/ZoneMarker_{i}"
             zone = UsdGeom.Cube.Define(stage, zone_path)
-            # Mark as guide: USD standard for "physics/render ignore this prim"
-            zone.GetPurposeAttr().Set(UsdGeom.Tokens.guide)
-            # Remove CollisionAPI if it somehow got applied (e.g. via parent inheritance)
             prim = zone.GetPrim()
+
+            # Remove any CollisionAPI that got added (via parent inheritance)
             if prim.HasAPI(UsdPhysics.CollisionAPI):
                 prim.RemoveAPI(UsdPhysics.CollisionAPI)
-            UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, 0.0))
+
+            # Apply PhysxCollisionAPI and explicitly disable it.
+            # This is the most reliable way to tell PhysX "never collide with this prim,"
+            # overriding any inherited or auto-added collision properties.
+            physx_col = PhysxSchema.PhysxCollisionAPI.Apply(prim)
+            physx_col.GetCollisionEnabledAttr().Set(False)
+
+            # Park off-screen until first _get_rewards() sets position (avoids 2m default cube blocking)
+            UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.0, 0.0, -10.0))
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
@@ -599,17 +603,24 @@ class PickPlaceEnv(DirectRLEnv):
         cube_xy = cube_pos[:, :2]
         reach_dist = torch.norm(gripper_xy - cube_xy, dim=1)
 
-        # Contact force debug print (env_0 only, GUI mode only)
+        # Contact debug print (env_0 only, GUI mode only)
         if self.sim.has_gui():
+            _contact_printed = False
             try:
                 cf = self.robot.data.body_net_contact_forces  # [num_envs, num_bodies, 3]
                 left_f  = cf[0, self._gripper_body_idx[0], :].norm().item()
                 right_f = cf[0, self._jaw_body_idx[0], :].norm().item()
-                CONTACT_THRESHOLD = 0.5  # Newtons
-                if left_f > CONTACT_THRESHOLD or right_f > CONTACT_THRESHOLD:
+                if left_f > 0.5 or right_f > 0.5:
                     print(f"[CONTACT] left={left_f:.2f}N  right={right_f:.2f}N")
+                    _contact_printed = True
             except Exception:
-                pass  # contact force reporting not enabled in ArticulationCfg
+                pass  # contact force reporting not enabled — fall back to zone proximity
+            if not _contact_printed:
+                l_c = self._fixed_tip_in_left_zone[0].item()
+                r_c = self._moving_tip_in_right_zone[0].item()
+                if l_c or r_c:
+                    sides = " + ".join(s for s, v in [("LEFT", l_c), ("RIGHT", r_c)] if v)
+                    print(f"[CONTACT proxy] {sides} tip on cube face")
 
         # Compute rewards
         (
