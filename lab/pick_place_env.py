@@ -95,6 +95,7 @@ class PickPlaceEnv(DirectRLEnv):
             following_threshold=self.cfg.grasp_following_threshold,
             lift_threshold=self.cfg.grasp_lift_threshold,
             near_cube_threshold=self.cfg.grasp_near_cube_threshold,
+            close_command_threshold=self.cfg.grasp_close_command_threshold,
         )
         
         # Persistent state tensors for rewards
@@ -130,6 +131,10 @@ class PickPlaceEnv(DirectRLEnv):
         self._fixed_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._moving_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
+        # Cached fingertip world positions (computed in _get_observations, reused in _get_rewards)
+        self._gripper_tip_pos = torch.zeros(self.num_envs, 3, device=self.device)
+        self._jaw_tip_pos     = torch.zeros(self.num_envs, 3, device=self.device)
+
         # Cup positions (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -394,11 +399,23 @@ class PickPlaceEnv(DirectRLEnv):
         self.joint_pos = self.robot.data.joint_pos
         self.joint_vel = self.robot.data.joint_vel
         
-        # Get gripper world position
-        gripper_pos = self.robot.data.body_pos_w[:, self._gripper_body_idx[0], :]
+        # Get gripper and jaw world positions / orientations
+        gripper_pos  = self.robot.data.body_pos_w[:, self._gripper_body_idx[0], :]
+        gripper_quat = self.robot.data.body_quat_w[:, self._gripper_body_idx[0], :]
+        jaw_pos      = self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :]
+        jaw_quat     = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
+
+        # Compute and cache fingertip world positions (reused in _get_rewards)
+        n = gripper_pos.shape[0]
+        self._gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
+        self._jaw_tip_pos     = jaw_pos     + quat_apply(jaw_quat,     self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
         # Get cube position
         cube_pos = self.cube.data.root_pos_w
+        
+        # Cube-relative fingertip positions (translation-invariant across workspace)
+        gripper_tip_rel = self._gripper_tip_pos - cube_pos  # [num_envs, 3]
+        jaw_tip_rel     = self._jaw_tip_pos     - cube_pos  # [num_envs, 3]
         
         # Concatenate observation
         obs = torch.cat([
@@ -407,24 +424,24 @@ class PickPlaceEnv(DirectRLEnv):
             gripper_pos,                       # [num_envs, 3]
             cube_pos,                          # [num_envs, 3]
             self._cup_pos,                     # [num_envs, 3]
-        ], dim=1)
+            gripper_tip_rel,                   # [num_envs, 3]  NEW
+            jaw_tip_rel,                       # [num_envs, 3]  NEW
+        ], dim=1)  # total: 27
         
         return {"policy": obs}
 
     def _get_rewards(self) -> Tensor:
         """Compute rewards for all environments."""
         # Get gripper and jaw world positions and orientations
-        gripper_pos = self.robot.data.body_pos_w[:, self._gripper_body_idx[0], :]
+        gripper_pos  = self.robot.data.body_pos_w[:, self._gripper_body_idx[0], :]
         gripper_quat = self.robot.data.body_quat_w[:, self._gripper_body_idx[0], :]
-        jaw_pos = self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :]
-        jaw_quat = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
-        cube_pos = self.cube.data.root_pos_w
+        jaw_pos      = self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :]
+        jaw_quat     = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
+        cube_pos     = self.cube.data.root_pos_w
         
-        # Compute fingertip world positions from mutable offsets
-        # Offsets must be [num_envs, 3] — quat_apply uses vec.shape for its final .view() call
-        n = gripper_pos.shape[0]
-        gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
-        jaw_tip_pos = jaw_pos + quat_apply(jaw_quat, self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
+        # Reuse fingertip positions cached by _get_observations this step
+        gripper_tip_pos = self._gripper_tip_pos
+        jaw_tip_pos     = self._jaw_tip_pos
         
         # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1

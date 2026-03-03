@@ -39,6 +39,7 @@ class GraspDetectorTensor:
         following_threshold: float = 0.0005,
         lift_threshold: float = 0.025,
         near_cube_threshold: float = 0.12,
+        close_command_threshold: float = 0.1,
     ):
         """
         Initialize the grasp detector.
@@ -64,6 +65,7 @@ class GraspDetectorTensor:
         self.following_threshold = following_threshold
         self.lift_threshold = lift_threshold
         self.near_cube_threshold = near_cube_threshold
+        self.close_command_threshold = close_command_threshold
         
         # Persistent state tensors
         self._init_state_tensors()
@@ -101,14 +103,6 @@ class GraspDetectorTensor:
             self.num_envs, device=self.device, dtype=torch.long
         )
         
-        # Previous target for closing intent detection
-        self.prev_target_gripper = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.float32
-        )
-        self.closing_intent = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.bool
-        )
-        
         # Main grasp state
         self.is_grasped = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
@@ -135,8 +129,6 @@ class GraspDetectorTensor:
             self.gripper_history_filled[env_ids] = False
             self.following_frames[env_ids] = 0
             self.not_following_frames[env_ids] = 0
-            self.prev_target_gripper[env_ids] = 0.0
-            self.closing_intent[env_ids] = False
             self.is_grasped[env_ids] = False
             self.is_droppable[env_ids] = False
             self.is_in_cup[env_ids] = False
@@ -173,12 +165,10 @@ class GraspDetectorTensor:
         Returns:
             is_grasped: Boolean tensor [num_envs] indicating grasp state
         """
-        # 1. Update closing intent based on target changes
-        target_decreasing = target_gripper < (self.prev_target_gripper - 1e-4)
-        target_increasing = target_gripper > (self.prev_target_gripper + 1e-4)
-        self.closing_intent = torch.where(target_decreasing, torch.ones_like(self.closing_intent), self.closing_intent)
-        self.closing_intent = torch.where(target_increasing, torch.zeros_like(self.closing_intent), self.closing_intent)
-        self.prev_target_gripper = target_gripper.clone()
+        # 1. Closed = target is commanding closure (below threshold) AND physically stalled
+        # This is more robust than tracking direction changes (which reset on any positive delta,
+        # causing false negatives with stochastic policy outputs).
+        commanding_close = target_gripper < self.close_command_threshold
         
         # 2. Update gripper history and check stall
         idx = self.gripper_history_idx % self.stall_frames
@@ -191,8 +181,8 @@ class GraspDetectorTensor:
         gripper_min = self.gripper_history.min(dim=1).values
         stalled = self.gripper_history_filled & ((gripper_max - gripper_min) < self.stall_threshold)
         
-        # Closed = actively closing AND stalled
-        closed = self.closing_intent & stalled
+        # Closed = commanding closure AND physically stalled
+        closed = commanding_close & stalled
         
         # 3. Check if cube is lifted
         cube_z = cube_pos[:, 2]
@@ -252,9 +242,9 @@ class GraspDetectorTensor:
         self.is_grasped = self.is_grasped | new_grasps
         self.following_frames = torch.where(new_grasps, torch.zeros_like(self.following_frames), self.following_frames)
         
-        # If grasped: lose grasp if actively opening OR (not following AND not lifted)
+        # If grasped: lose grasp if commanding open OR (not following AND not lifted)
         # This prevents toggling "Released" messages if the cube slips during transport
-        opening_intent = target_increasing
+        opening_intent = ~commanding_close
         lost_grasp_condition = opening_intent | (~following & ~lifted)
         
         self.not_following_frames = torch.where(

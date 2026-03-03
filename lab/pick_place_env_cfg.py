@@ -38,7 +38,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     # Action and observation space dimensions
     action_space = 6
-    observation_space = 21
+    observation_space = 27  # +6 for cube-relative fingertip positions (gripper_tip, jaw_tip)
     state_space = 0
 
     # ===== Simulation Settings =====
