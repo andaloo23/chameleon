@@ -489,7 +489,7 @@ class PickPlaceEnv(DirectRLEnv):
 
             # env_0 cube world pose
             cp0 = cube_pos[0]        # [3] world position
-            cq0 = cube_quat_w[0]     # [4] world quaternion [w,x,y,z]
+            cq0 = self.cube.data.root_quat_w[0]  # [4] world quaternion [w,x,y,z]
 
             is_x_v      = self._use_x[0].item()
             is_left_pos = self._left_is_positive[0].item()
