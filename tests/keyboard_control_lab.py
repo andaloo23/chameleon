@@ -365,6 +365,32 @@ def main():
                           f"fcR={dr_val:.4f} (min={dr_print})  "
                           f"RG={rg_val:.3f}  "
                           f"ft_rew={rew_val:.5f}")
+
+                    # --- Grasp condition breakdown (only useful pre-grasp) ---
+                    if not detector_state.get("grasped", False):
+                        gd = env.grasp_detector
+                        tgt_g = env.joint_pos[0, env._gripper_joint_idx].item()
+                        cmd_close = tgt_g < env.cfg.grasp_close_command_threshold
+
+                        gh = gd.gripper_history[0]
+                        stall_delta = (gh.max() - gh.min()).item()
+                        stalled = gd.gripper_history_filled[0].item() and stall_delta < env.cfg.grasp_stall_threshold
+
+                        v_diff = (gd.vector_history[0].max(0).values - gd.vector_history[0].min(0).values).max().item()
+                        following = gd.dist_history_filled[0].item() and v_diff < env.cfg.grasp_following_threshold
+
+                        gripper_pos_w = env.robot.data.body_pos_w[0, env._gripper_body_idx[0]]
+                        cube_pos_w    = env.cube.data.root_pos_w[0]
+                        near_dist = (gripper_pos_w - cube_pos_w).norm().item()
+                        near = near_dist < env.cfg.grasp_near_cube_threshold
+
+                        f_frames = gd.following_frames[0].item()
+                        print(f"  [GRASP DBG] "
+                              f"cmd_close={cmd_close}(tgt={tgt_g:.3f})  "
+                              f"stalled={stalled}(Δ={stall_delta:.4f})  "
+                              f"following={following}(v_diff={v_diff:.4f})  "
+                              f"near={near}(d={near_dist:.3f})  "
+                              f"→ frames={f_frames}/{env.cfg.grasp_frames_to_grasp}")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")
