@@ -238,26 +238,19 @@ class PickPlaceEnv(DirectRLEnv):
 
 
 
-        # Cube zone markers (boxes, visual-only, parented to cube)
-        # Parented to cube so they move with it. Explicitly disabled in PhysX so
-        # the simulation never generates contacts, regardless of parent rigid body.
-        cube_prim_path = "/World/envs/env_0/Cube"
+        # Cube zone markers — parented to /World/DebugZones/ (plain Xform, NOT under Cube rigid body)
+        # Moving them under the Cube prim caused PhysX to treat them as collision shapes,
+        # crashing articulation initialization. Their world transform is updated each frame in _get_rewards().
+        debug_zones_path = "/World/DebugZones"
+        UsdGeom.Xform.Define(stage, debug_zones_path)
+        self._zone_prim_paths = []
         for i in range(2):
-            zone_path = f"{cube_prim_path}/ZoneMarker_{i}"
+            zone_path = f"{debug_zones_path}/ZoneMarker_{i}"
             zone = UsdGeom.Cube.Define(stage, zone_path)
-            prim = zone.GetPrim()
-
-            # Remove any CollisionAPI that got added (via parent inheritance)
-            if prim.HasAPI(UsdPhysics.CollisionAPI):
-                prim.RemoveAPI(UsdPhysics.CollisionAPI)
-
-            # Apply UsdPhysics CollisionAPI and explicitly disable it.
-            # This tells PhysX "never collide with this prim."
-            col = UsdPhysics.CollisionAPI.Apply(prim)
-            col.GetCollisionEnabledAttr().Set(False)
-
-            # Park off-screen until first _get_rewards() sets position (avoids 2m default cube blocking)
-            UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.0, 0.0, -10.0))
+            # Park off-screen with scale=0 until first _get_rewards() positions them
+            UsdGeom.XformCommonAPI(zone).SetTranslate(Gf.Vec3d(0.0, 0.0, -10.0))
+            UsdGeom.XformCommonAPI(zone).SetScale(Gf.Vec3f(0.0, 0.0, 0.0))
+            self._zone_prim_paths.append(zone_path)
     def _create_cup_prim(self, prim_path: str, position: tuple):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
@@ -477,59 +470,64 @@ class PickPlaceEnv(DirectRLEnv):
             cross_z = approach_dir[:, 0] * best_axis_init[:, 1] - approach_dir[:, 1] * best_axis_init[:, 0]
             self._left_is_positive = cross_z > 0  # True: +n face = left, -n face = right
             
-            # Update zone marker box transforms and colors (visual only — skip in headless training)
-            if self.sim.has_gui():
-                import isaaclab.sim.utils.stage as stage_utils
-                from pxr import UsdGeom, Gf
-                stage = stage_utils.get_current_stage()
-                half_val = float(self.cfg.cube_scale[0] / 2.0)
-                margin_val = float(self._zone_margin)
-                cube_size = float(self.cfg.cube_scale[0])
-                
-                # Box prim is base size 2.0 (-1 to 1). Using scale to set dimensions.
-                # Dimensions: face_size x face_size x margin
-                
-                for env_id in range(self.num_envs):
-                    if not first_frame_mask[env_id]:
-                        continue
-                    
-                    # Determine colors based on left/right assignment
-                    # Left (Moving Jaw) = Red, Right (Fixed Jaw) = Green
-                    is_left_pos = self._left_is_positive[env_id]
-                    
-                    for i, sign in enumerate([1.0, -1.0]):
-                        prim_path = f"/World/envs/env_{env_id}/Cube/ZoneMarker_{i}"
-                        prim = stage.GetPrimAtPath(prim_path)
-                        if prim:
-                            xform = UsdGeom.XformCommonAPI(prim)
-                            
-                            # Position: center of zone volume
-                            # Offset from face center by margin/2 outwards
-                            offset = half_val + margin_val / 2.0
-                            
-                            # Scale: (face/2, face/2, margin/2) because base size is 2.0
-                            s_face = cube_size / 2.0
-                            s_margin = margin_val / 2.0
-                            
-                            if self._use_x[env_id]:
-                                # X-axis faces
-                                xform.SetTranslate(Gf.Vec3d(sign * offset, 0.0, 0.0))
-                                xform.SetScale(Gf.Vec3f(s_margin, s_face, s_face))
-                            else:
-                                # Y-axis faces
-                                xform.SetTranslate(Gf.Vec3d(0.0, sign * offset, 0.0))
-                                xform.SetScale(Gf.Vec3f(s_face, s_margin, s_face))
-                                
-                            # Set Color directly on prim (no material)
-                            # Index 0 is +n face, Index 1 is -n face
-                            # If left_is_positive: +n is Left (Blue), -n is Right (Green)
-                            is_this_left = (i == 0) if is_left_pos else (i == 1)
-                            color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
-                            
-                            # Set color and opacity directly
-                            geom = UsdGeom.Cube(prim)
-                            geom.GetDisplayColorAttr().Set([color])
-                            geom.CreateDisplayOpacityAttr().Set([0.3])
+            # (Zone markers are now at /World/DebugZones/, not under the cube prim)
+            # Their world transforms are updated every frame in the has_gui() block below.
+            pass  # axis/side assignment handled above; visualization update is per-frame below
+
+        # Update zone marker world transforms every frame (env_0 only, GUI only)
+        if self.sim.has_gui():
+            import isaaclab.sim.utils.stage as stage_utils
+            from pxr import UsdGeom, Gf
+            import math
+            stage = stage_utils.get_current_stage()
+            half_val   = float(self.cfg.cube_scale[0] / 2.0)
+            margin_val = float(self._zone_margin)
+            cube_size  = float(self.cfg.cube_scale[0])
+            s_face   = cube_size / 2.0
+            s_margin = margin_val / 2.0
+            offset_dist = half_val + margin_val / 2.0
+
+            # env_0 cube world pose
+            cp0 = cube_pos[0]        # [3] world position
+            cq0 = cube_quat_w[0]     # [4] world quaternion [w,x,y,z]
+
+            is_x_v      = self._use_x[0].item()
+            is_left_pos = self._left_is_positive[0].item()
+
+            # Quat → Euler ZYX (for XformCommonAPI.SetRotate)
+            w_, x_, y_, z_ = cq0[0].item(), cq0[1].item(), cq0[2].item(), cq0[3].item()
+            roll  = math.degrees(math.atan2(2*(w_*x_ + y_*z_), 1 - 2*(x_*x_ + y_*y_)))
+            pitch = math.degrees(math.asin(max(-1.0, min(1.0, 2*(w_*y_ - z_*x_)))))
+            yaw   = math.degrees(math.atan2(2*(w_*z_ + x_*y_), 1 - 2*(y_*y_ + z_*z_)))
+
+            for i, sign in enumerate([1.0, -1.0]):
+                prim = stage.GetPrimAtPath(self._zone_prim_paths[i])
+                if not prim:
+                    continue
+                xform = UsdGeom.XformCommonAPI(prim)
+
+                # Zone center in cube-local space, then rotated to world
+                if is_x_v:
+                    local_off = torch.tensor([sign * offset_dist, 0.0, 0.0], device=self.device)
+                    scale = Gf.Vec3f(s_margin, s_face, s_face)
+                else:
+                    local_off = torch.tensor([0.0, sign * offset_dist, 0.0], device=self.device)
+                    scale = Gf.Vec3f(s_face, s_margin, s_face)
+
+                world_off = quat_apply(cq0.unsqueeze(0), local_off.unsqueeze(0))[0]
+                world_center = cp0 + world_off
+
+                xform.SetTranslate(Gf.Vec3d(
+                    world_center[0].item(), world_center[1].item(), world_center[2].item()))
+                xform.SetRotate(Gf.Vec3f(roll, pitch, yaw),
+                                UsdGeom.XformCommonAPI.RotationOrderXYZ)
+                xform.SetScale(scale)
+
+                is_this_left = (i == 0) if is_left_pos else (i == 1)
+                color = Gf.Vec3f(0.0, 0.0, 1.0) if is_this_left else Gf.Vec3f(0.0, 1.0, 0.0)
+                geom = UsdGeom.Cube(prim)
+                geom.GetDisplayColorAttr().Set([color])
+                geom.CreateDisplayOpacityAttr().Set([0.3])
         
         # Recompute best_axis for zone checks (every frame, from live pose)
         cube_quat_w = self.cube.data.root_quat_w
