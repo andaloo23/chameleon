@@ -165,10 +165,13 @@ class GraspDetectorTensor:
         Returns:
             is_grasped: Boolean tensor [num_envs] indicating grasp state
         """
-        # 1. Closed = target is commanding closure (below threshold) AND physically stalled
-        # This is more robust than tracking direction changes (which reset on any positive delta,
-        # causing false negatives with stochastic policy outputs).
-        commanding_close = target_gripper < self.close_command_threshold
+        # 1. Closed = gripper is physically in a closed position AND stalled.
+        # Using actual joint value (gripper_value) rather than the commanded target.
+        # Reason: when the gripper stalls against the cube, the target = physical_pos - action_scale
+        # (always just 0.1 below the stuck position), so a tight target threshold (0.1) never fires.
+        # The actual joint position when blocked by a 3cm cube settles at ~0.47,
+        # well below the 0.6 threshold but above the open range (1.0–1.5).
+        commanding_close = gripper_value < self.close_command_threshold
         
         # 2. Update gripper history and check stall
         idx = self.gripper_history_idx % self.stall_frames

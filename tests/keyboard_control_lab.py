@@ -369,8 +369,8 @@ def main():
                     # --- Grasp condition breakdown (only useful pre-grasp) ---
                     if not detector_state.get("grasped", False):
                         gd = env.grasp_detector
-                        tgt_g = env.joint_pos[0, env._gripper_joint_idx].item()
-                        cmd_close = tgt_g < env.cfg.grasp_close_command_threshold
+                        gv = env.joint_pos[0, env._gripper_joint_idx].item()  # actual gripper position
+                        cmd_close = gv < env.cfg.grasp_close_command_threshold
 
                         gh = gd.gripper_history[0]
                         stall_delta = (gh.max() - gh.min()).item()
@@ -386,7 +386,7 @@ def main():
 
                         f_frames = gd.following_frames[0].item()
                         print(f"  [GRASP DBG] "
-                              f"cmd_close={cmd_close}(tgt={tgt_g:.3f})  "
+                              f"cmd_close={cmd_close}(gv={gv:.3f})  "
                               f"stalled={stalled}(Δ={stall_delta:.4f})  "
                               f"following={following}(v_diff={v_diff:.4f})  "
                               f"near={near}(d={near_dist:.3f})  "
