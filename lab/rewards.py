@@ -32,10 +32,15 @@ def compute_lift_shaping_delta(
     prev_cube_height: Tensor,
     is_grasped: Tensor,
     lift_weight: float,
+    stage_grasped: Tensor,
 ) -> tuple[Tensor, Tensor]:
-    """Delta-based lift shaping. Only active after grasping."""
+    """Delta-based lift shaping. Active whenever cube was ever grasped this episode.
+
+    Uses stage_grasped (latched) instead of is_grasped so brief zone-exit events
+    during lifting (from cube rotation) don't zero out the lift signal.
+    """
     delta = cube_height - prev_cube_height
-    reward = lift_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
+    reward = lift_weight * torch.clamp(delta, min=0.0) * stage_grasped.float()
     return reward, cube_height
 
 
@@ -316,7 +321,7 @@ def compute_pick_place_rewards(
     )
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
-        cube_z, prev_cube_z, is_grasped, lift_shaping_weight
+        cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped
     )
 
     # One-time bonuses

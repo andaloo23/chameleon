@@ -199,7 +199,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     # Penalties
     rew_action_cost_weight = 0.0001
-    rew_drop_penalty = -20.0
+    rew_drop_penalty = 0.0   # Disabled: was punishing lift attempts via zone-exit; re-enable once lift rate > 5%
     rew_cup_collision_penalty = -0.5
 
     # Pre-grasp fingertip reaching rewards
@@ -215,7 +215,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
     grasp_near_cube_threshold = 0.12  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
     grasp_frames_to_grasp = 3 # More responsive
-    grasp_frames_to_drop = 5 # Faster drop registration
+    grasp_frames_to_drop = 20 # Hysteresis: ~320ms at 62.5Hz — survives cube rotation during lift
     grasp_history_len = 5 # More robust following checks
     grasp_stall_frames = 5 # More robust stall detection
     # Euclidean radius for zone-entry: fingertip is "in zone" when its distance to
