@@ -217,6 +217,9 @@ def main():
                 # Reset fingertip HWM so ft_rew_sum starts fresh (warmup advances HWM to resting-position Phi)
                 env._prev_left_fingertip_dist.zero_()
                 env._prev_right_fingertip_dist.zero_()
+                # Also unlatch stage_grasped in case a grasp fired during warmup
+                env._stage_grasped.fill_(False)
+                env._stage_dropped.fill_(False)
             
             # Get detector states from task_state
             task_state = info.get("task_state", {})
@@ -306,6 +309,11 @@ def main():
                     min_dl = float('inf')
                     min_dr = float('inf')
                     ft_rew_sum = 0.0
+                    # Unlatch stage flags and HWM so the NEXT approach earns real ft_rew
+                    env._stage_grasped[0] = False
+                    env._stage_dropped[0] = False
+                    env._prev_left_fingertip_dist[0]  = 0.0
+                    env._prev_right_fingertip_dist[0] = 0.0
                 detector_state["grasped"] = grasped
             
             # Check droppable (cube over cup)
