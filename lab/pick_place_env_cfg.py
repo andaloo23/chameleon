@@ -218,6 +218,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_frames_to_drop = 5 # Faster drop registration
     grasp_history_len = 5 # More robust following checks
     grasp_stall_frames = 5 # More robust stall detection
+    # Euclidean radius for zone-entry: fingertip is "in zone" when its distance to
+    # the assigned face zone center (= fcL or fcR) is below this threshold.
+    # Tune based on keyboard_control_lab fcL/fcR values at successful contact.
+    grasp_zone_entry_radius = 0.04  # 4cm — from data: best-case fcL≈0.029m at contact
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
