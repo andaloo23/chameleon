@@ -376,6 +376,20 @@ def main():
                               f"L_in_zone={left_ok}  "
                               f"R_in_zone={right_ok}  "
                               f"→ frames={f_frames}/{env.cfg.grasp_frames_to_grasp}")
+                        # Print zone sub-components for diagnosis
+                        fd = _extract_val(task_state.get("dbg_fixed_depth"))
+                        ft1 = _extract_val(task_state.get("dbg_fixed_t1"))
+                        ft2 = _extract_val(task_state.get("dbg_fixed_t2"))
+                        md = _extract_val(task_state.get("dbg_moving_depth"))
+                        mt1 = _extract_val(task_state.get("dbg_moving_t1"))
+                        mt2 = _extract_val(task_state.get("dbg_moving_t2"))
+                        tb = _extract_val(task_state.get("dbg_tang_bound"))
+                        margin = env._zone_margin
+                        print(f"  [ZONE DBG] margin={margin:.3f}  tang_bound=±{tb:.3f}")
+                        print(f"    Fixed  jaw: depth={fd:+.4f} (need [{-margin*0.5:+.4f},{margin:+.4f}))  "
+                              f"t1={ft1:+.4f}  t2={ft2:+.4f}  (need |t|<={tb:.4f})")
+                        print(f"    Moving jaw: depth={md:+.4f} (need [{-margin*0.5:+.4f},{margin:+.4f}))  "
+                              f"t1={mt1:+.4f}  t2={mt2:+.4f}  (need |t|<={tb:.4f})")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")

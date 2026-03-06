@@ -127,7 +127,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Cached axis selection per env (set once per episode, used every frame)
         self._use_x = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._left_is_positive = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self._zone_margin = 0.015  # 1.5cm protrusion
+        self._zone_margin = 0.025  # 2.5cm protrusion (depth slab + tangential buffer)
         self._fixed_tip_in_left_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._moving_tip_in_right_zone = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
@@ -484,16 +484,48 @@ class PickPlaceEnv(DirectRLEnv):
         moving_local = quat_apply(cube_quat_inv, jaw_tip_pos - cube_pos)
         
         def _near_face(tip_local, is_x, positive_side):
-            """Check if fingertip is within `margin` distance of the cube face plane (no tangential bounds)."""
+            """Check if fingertip is within the OBB face zone.
+
+            Passes when:
+              1. Normal-axis: tip is between the cube face and `margin` outside it
+                 (i.e., the tip is near the face, not buried inside or far away).
+              2. Tangential axes: tip is within cube half-extents + `margin` in both
+                 directions perpendicular to the face normal.
+            """
+            # Normal-axis coordinate and the two tangential-axis coordinates
             normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
-            # Signed distance: positive = outside the face, negative = inside the cube
+            tang1 = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])  # the other XY axis
+            tang2 = tip_local[:, 2]  # always Z
+
+            # Signed distance from the face surface (positive = outside, negative = inside cube)
             signed_dist = torch.where(positive_side, normal_coord - half_size, -half_size - normal_coord)
-            return signed_dist.abs() < margin
+
+            # Depth check: tip must be on the outside of the face within `margin`
+            # Allow the tip to be slightly inside (up to half margin) to handle contact overlap
+            depth_ok = (signed_dist >= -margin * 0.5) & (signed_dist < margin)
+
+            # Tangential check: tip must be within the face footprint + margin buffer
+            tang_bound = half_size + margin
+            tang_ok = (tang1.abs() <= tang_bound) & (tang2.abs() <= tang_bound)
+
+            return depth_ok & tang_ok
 
         # Fixed jaw (Left gripper tip) -> left face plane
         self._fixed_tip_in_left_zone = _near_face(fixed_local, is_local_x, self._left_is_positive)
         # Moving jaw (Right gripper tip) -> right face plane (opposite side)
         self._moving_tip_in_right_zone = _near_face(moving_local, is_local_x, ~self._left_is_positive)
+
+        # Cache raw sub-components for debug output (env_0 only, used in task_state)
+        def _zone_components(tip_local, is_x, positive_side):
+            normal_coord = torch.where(is_x, tip_local[:, 0], tip_local[:, 1])
+            tang1 = torch.where(is_x, tip_local[:, 1], tip_local[:, 0])
+            tang2 = tip_local[:, 2]
+            signed_dist = torch.where(positive_side, normal_coord - half_size, -half_size - normal_coord)
+            tang_bound = half_size + margin
+            return signed_dist, tang1, tang2, tang_bound
+
+        _fixed_depth, _fixed_t1, _fixed_t2, _tang_bound = _zone_components(fixed_local, is_local_x, self._left_is_positive)
+        _moving_depth, _moving_t1, _moving_t2, _ = _zone_components(moving_local, is_local_x, ~self._left_is_positive)
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
@@ -704,6 +736,14 @@ class PickPlaceEnv(DirectRLEnv):
             "dbg_q_right": dbg_q_right,
             "dbg_axis_local": dbg_axis_local,
             "dbg_sign_left": dbg_sign_left,
+            # Zone sub-components for diagnosing detection failures
+            "dbg_fixed_depth": _fixed_depth,    # signed dist from left face surface (+outside, -inside)
+            "dbg_fixed_t1": _fixed_t1,           # tangential axis 1
+            "dbg_fixed_t2": _fixed_t2,           # tangential axis 2 (Z)
+            "dbg_moving_depth": _moving_depth,   # signed dist from right face surface
+            "dbg_moving_t1": _moving_t1,
+            "dbg_moving_t2": _moving_t2,
+            "dbg_tang_bound": _tang_bound,       # tangential limit (half_size + margin)
             "penalties": {
                 "action_cost": action_cost,
                 "drop_penalty": drop_penalty,
