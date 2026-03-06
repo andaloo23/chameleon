@@ -213,6 +213,10 @@ def main():
             frame_count += 1
             if frame_count < warmup_frames:
                 continue  # Skip detector checks during warmup
+            if frame_count == warmup_frames:
+                # Reset fingertip HWM so ft_rew_sum starts fresh (warmup advances HWM to resting-position Phi)
+                env._prev_left_fingertip_dist.zero_()
+                env._prev_right_fingertip_dist.zero_()
             
             # Get detector states from task_state
             task_state = info.get("task_state", {})
