@@ -380,9 +380,10 @@ def main():
                         d_fix = _extract_val(task_state.get("dbg_d_fixed"))
                         d_mov = _extract_val(task_state.get("dbg_d_moving"))
                         z_r   = _extract_val(task_state.get("dbg_zone_radius"))
+                        d_avg_v = 0.5 * (d_fix + d_mov)
                         print(f"  [ZONE DBG] zone_radius={z_r:.3f}  "
-                              f"fcL={d_fix:.4f} ({'IN' if d_fix < z_r else 'OUT'})  "
-                              f"fcR={d_mov:.4f} ({'IN' if d_mov < z_r else 'OUT'})")
+                              f"fcL={d_fix:.4f}  fcR={d_mov:.4f}  "
+                              f"avg={d_avg_v:.4f} ({'IN' if d_avg_v < z_r else 'OUT'})")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")

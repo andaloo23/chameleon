@@ -509,8 +509,14 @@ class PickPlaceEnv(DirectRLEnv):
         _d_moving_to_face = torch.where(use_A, d_moving_neg, d_moving_pos)  # == fcR
 
         zone_r = self.cfg.grasp_zone_entry_radius
-        self._fixed_tip_in_left_zone  = _d_fixed_to_face  < zone_r
-        self._moving_tip_in_right_zone = _d_moving_to_face < zone_r
+        # Use average distance rather than independent per-tip thresholds.
+        # The jaws never simultaneously reach their respective face centers in practice
+        # (one jaw contacts first due to lateral approach offset). d_avg < zone_r fires
+        # when the combined proximity is sufficient for a physical grasp.
+        d_avg_zone = 0.5 * (_d_fixed_to_face + _d_moving_to_face)
+        in_zone = d_avg_zone < zone_r
+        self._fixed_tip_in_left_zone  = in_zone
+        self._moving_tip_in_right_zone = in_zone
         
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
