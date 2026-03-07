@@ -203,10 +203,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_cup_collision_penalty = -0.5
 
     # Pre-grasp fingertip reaching rewards
-    rew_fingertip_obb_weight     = 50.0   # weight for potential-based delta and close bonus
-    fingertip_sigma              = 0.20   # exp scale (meters): 0.2 -> gradient stays strong out to ~40cm
-    fingertip_close_threshold    = 0.04   # avg fingertip distance below which close_bonus fires
-    fingertip_close_bonus        = 2.0    # per-step bonus when avg d < close_threshold
+    rew_fingertip_obb_weight     = 30.0   # weight for potential-based delta and close bonus
+    fingertip_sigma              = 0.10   # exp scale (meters): 0.1 -> Phi=0.37 at 10cm
+    fingertip_close_threshold    = 0.025  # avg fingertip distance below which close_bonus fires
+    fingertip_close_bonus        = 0.5    # per-step bonus when avg d < close_threshold
 
     # ===== Grasp Detection Thresholds =====
     grasp_close_command_threshold = 0.6  # gripper actual joint pos: blocked-on-cube ≈ 0.47, open ≈ 1.0–1.5
