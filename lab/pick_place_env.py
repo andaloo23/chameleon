@@ -843,9 +843,14 @@ class PickPlaceEnv(DirectRLEnv):
             dim=1
         )
         self._prev_cube_z[env_ids] = cube_pos[:, 2]
-        # Reset fingertip HWM Phi scores to 0.0 (no best yet = d=inf equivalent)
-        self._prev_left_fingertip_dist[env_ids]  = 0.0
-        self._prev_right_fingertip_dist[env_ids] = 0.0
+        # Initialize HWM Phi to the expected Phi at the starting gripper-cube distance.
+        # Using 0.0 (d=inf) causes a large first-step spike: delta = Phi(actual) - 0 = ~12
+        # with sigma=0.20, which the policy exploits by staying put each episode.
+        # Using the gripper-cube distance as a proxy (slightly overestimates Phi since
+        # OBB d_avg >= gripper-cube dist) makes the first-step delta ≈ 0.
+        init_phi = torch.exp(-self._prev_gripper_cube_dist[env_ids] / self.cfg.fingertip_sigma)
+        self._prev_left_fingertip_dist[env_ids]  = init_phi
+        self._prev_right_fingertip_dist[env_ids] = init_phi
         # Reset per-episode fingertip accumulator metrics
         self._steps_left_in_region[env_ids]  = 0.0
         self._steps_right_in_region[env_ids] = 0.0
