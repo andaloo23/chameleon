@@ -217,20 +217,17 @@ def compute_fingertip_obb_reach_reward(
     d_avg = 0.5 * (d_L + d_R)             # average fingertip distance
     Phi   = torch.exp(-d_avg / sigma)      # bounded in (0, 1]
 
-    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, 0 on retreat
-    r_delta   = fingertip_obb_weight * torch.clamp(delta_phi, min=0.0)  # no retreat penalty
+    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, - on retreat
+    r_delta   = fingertip_obb_weight * delta_phi  # plain potential-based shaping (no clamp)
 
     # Small per-step bonus when fingertips are very close
     r_close = close_bonus * (d_avg < close_threshold).float()
 
     reach_reward = (r_delta + r_close) * not_grasped
 
-    # High-water-mark: prev only moves forward (toward higher Phi = closer distance)
-    # Retreating does NOT reset the baseline → oscillation gives zero net reward
-    new_hw = torch.max(prev_left_tip_dist, Phi)
-
-    # Return HWM as both hw slots (pick_place_env stores both prev_left and prev_right = new_hw)
-    return reach_reward, d_R, d_L, new_hw, new_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    # Store current Phi as next step's baseline (no HWM — plain potential shaping).
+    # Anti-farming by construction: sum of deltas = Phi(final) - Phi(start).
+    return reach_reward, d_R, d_L, Phi, Phi, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script

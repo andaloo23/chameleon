@@ -198,7 +198,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_success_bonus = 100.0
     
     # Penalties
-    rew_action_cost_weight = 0.0001
+    rew_action_cost_weight = 0.0    # Disabled: biases toward inaction during exploration phase
     rew_drop_penalty = 0.0   # Disabled: was punishing lift attempts via zone-exit; re-enable once lift rate > 5%
     rew_cup_collision_penalty = -0.5
 
