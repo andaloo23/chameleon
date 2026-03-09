@@ -142,17 +142,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_left_fingertip_dist  = torch.zeros(self.num_envs, device=self.device)
         self._prev_right_fingertip_dist = torch.zeros(self.num_envs, device=self.device)
 
-        # Per-episode accumulators for fingertip debug metrics
-        self._steps_left_in_region  = torch.zeros(self.num_envs, device=self.device)
-        self._steps_right_in_region = torch.zeros(self.num_envs, device=self.device)
-        self._pre_grasp_steps       = torch.zeros(self.num_envs, device=self.device)
         self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
         self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
-        self._sum_d_left            = torch.zeros(self.num_envs, device=self.device)
-        self._min_d_left            = torch.full((self.num_envs,), float('inf'), device=self.device)
-        self._sum_d_right           = torch.zeros(self.num_envs, device=self.device)
-        self._min_d_right           = torch.full((self.num_envs,), float('inf'), device=self.device)
-        self._sum_reach_gate        = torch.zeros(self.num_envs, device=self.device)
 
     def _setup_scene(self):
         """Create the scene with robot, cube, cup, and ground."""
@@ -639,23 +630,8 @@ class PickPlaceEnv(DirectRLEnv):
             self.cfg.rew_fingertip_obb_weight * (_phi_delta_L + _phi_delta_R)
             + self.cfg.fingertip_close_bonus * _close_mask
         ) * not_grasped_mask
-        self._steps_left_in_region  += self._fixed_tip_in_left_zone.float()  * not_grasped_mask
-        self._steps_right_in_region += self._moving_tip_in_right_zone.float() * not_grasped_mask
-        self._pre_grasp_steps       += not_grasped_mask
         
-        # Accumulate pre-grasp averages and minimums
-        self._sum_d_left += new_left_tip_dist * not_grasped_mask
-        self._sum_d_right += new_right_tip_dist * not_grasped_mask
-        
-        # Compute reach_gate as diagnostic only (not used in reward)
-        sigma_reach = 0.10
-        reach_gate = torch.exp(-reach_dist / sigma_reach)
-        self._sum_reach_gate += reach_gate * not_grasped_mask
-        
-        # Update minimums
-        update_min_mask = not_grasped_mask.bool()
-        self._min_d_left = torch.where(update_min_mask, torch.minimum(self._min_d_left, new_left_tip_dist), self._min_d_left)
-        self._min_d_right = torch.where(update_min_mask, torch.minimum(self._min_d_right, new_right_tip_dist), self._min_d_right)
+        # Removed pre-grasp averages and minimums
 
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
@@ -718,15 +694,6 @@ class PickPlaceEnv(DirectRLEnv):
             "d_L_neg": d_L_neg,
             "d_R_pos": d_R_pos,
             "d_R_neg": d_R_neg,
-            "reach_gate": reach_gate,       # diagnostic only (not used in reward)
-            # Per-episode fingertip metrics (pre-grasp only)
-            "left_in_region_frac":  self._steps_left_in_region  / torch.clamp(self._pre_grasp_steps, min=1.0),
-            "right_in_region_frac": self._steps_right_in_region / torch.clamp(self._pre_grasp_steps, min=1.0),
-            "mean_d_left": self._sum_d_left / torch.clamp(self._pre_grasp_steps, min=1.0),
-            "ep_min_d_left": self._min_d_left.clone(),
-            "mean_d_right": self._sum_d_right / torch.clamp(self._pre_grasp_steps, min=1.0),
-            "ep_min_d_right": self._min_d_right.clone(),
-            "mean_reach_gate": self._sum_reach_gate / torch.clamp(self._pre_grasp_steps, min=1.0),
             "cum_left_obb_reward":  self._cum_left_obb_reward,
             "cum_right_obb_reward": self._cum_right_obb_reward,
             # Debug: cube-local tip positions for keyboard script
@@ -857,17 +824,8 @@ class PickPlaceEnv(DirectRLEnv):
         # reward on every step and killing the approach signal.
         self._prev_left_fingertip_dist[env_ids]  = 0.0
         self._prev_right_fingertip_dist[env_ids] = 0.0
-        # Reset per-episode fingertip accumulator metrics
-        self._steps_left_in_region[env_ids]  = 0.0
-        self._steps_right_in_region[env_ids] = 0.0
-        self._pre_grasp_steps[env_ids]       = 0.0
         self._cum_left_obb_reward[env_ids]   = 0.0
         self._cum_right_obb_reward[env_ids]  = 0.0
-        self._sum_d_left[env_ids]            = 0.0
-        self._min_d_left[env_ids]            = float('inf')
-        self._sum_d_right[env_ids]           = 0.0
-        self._min_d_right[env_ids]           = float('inf')
-        self._sum_reach_gate[env_ids]        = 0.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

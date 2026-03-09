@@ -317,13 +317,10 @@ def collect_rollout(
         ever_reached = state["ever_reached"]
         ever_grasped = state["ever_grasped"]
         ever_lifted = state["ever_lifted"]
-        ever_droppable = state["ever_droppable"]
         ever_success = state["ever_success"]
         prev_cube_z = state.get("prev_cube_z", torch.zeros_like(ever_grasped))
         penalties = state["penalties"]
         info = state["info"]
-        sum_left_in_region  = state.get("sum_left_in_region",  torch.zeros(num_envs, device=device))
-        sum_right_in_region = state.get("sum_right_in_region", torch.zeros(num_envs, device=device))
         ep_steps = state.get("ep_steps", torch.zeros(num_envs, device=device))
 
     episode_rewards, episode_flags, episode_min_dists, episode_final_dists = [], [], [], []
@@ -374,11 +371,6 @@ def collect_rollout(
             penalties["cup"] += p.get("cup_collision", 0.0)
             penalties["self"] += p.get("self_collision", 0.0)
 
-        # Fingertip in-region fractions (per-step values from env)
-        if "left_in_region_frac" in task_state:
-            sum_left_in_region  += task_state["left_in_region_frac"]
-        if "right_in_region_frac" in task_state:
-            sum_right_in_region += task_state["right_in_region_frac"]
         ep_steps += 1.0
             
         # Store in buffer
@@ -402,21 +394,12 @@ def collect_rollout(
                     "lifted": ever_lifted[i].item(),
                     "droppable": ever_droppable[i].item(),
                     "success": ever_success[i].item(),
-                    "left_in_region":  (sum_left_in_region[i]  / (ep_steps[i] + 1e-8)).item(),
-                    "right_in_region": (sum_right_in_region[i] / (ep_steps[i] + 1e-8)).item(),
-                    "mean_d_left": task_state.get("mean_d_left", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_left": task_state.get("ep_min_d_left", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
-                    "mean_d_right": task_state.get("mean_d_right", torch.zeros_like(sum_left_in_region))[i].item(),
-                    "min_d_right": task_state.get("ep_min_d_right", torch.full_like(sum_left_in_region, float('inf')))[i].item(),
-                    "mean_reach_gate": task_state.get("mean_reach_gate", torch.zeros_like(sum_left_in_region))[i].item(),
                 })
 
                 # Reset per-env
                 current_rewards[i] = 0.0
                 min_dists[i] = float("inf")
                 ever_reached[i], ever_grasped[i], ever_lifted[i], ever_droppable[i], ever_success[i] = False, False, False, False, False
-                sum_left_in_region[i]  = 0.0
-                sum_right_in_region[i] = 0.0
                 ep_steps[i] = 0.0
                 for k in penalties: penalties[k][i] = 0.0
                 
@@ -433,8 +416,6 @@ def collect_rollout(
         "ever_lifted": ever_lifted, "ever_droppable": ever_droppable, "ever_success": ever_success, 
         "prev_cube_z": getattr(env, "_prev_cube_z", torch.zeros_like(ever_grasped)),
         "penalties": penalties, "info": info,
-        "sum_left_in_region": sum_left_in_region,
-        "sum_right_in_region": sum_right_in_region,
         "ep_steps": ep_steps,
     }
     
@@ -774,29 +755,8 @@ def train_ppo(
                   f"Reward: {avg_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
-            if n_episodes > 0:
-                avg_left_rgn  = 100 * np.mean([f.get("left_in_region",  0.0) for f in all_flags])
-                avg_right_rgn = 100 * np.mean([f.get("right_in_region", 0.0) for f in all_flags])
-                
-                avg_mean_d_left = np.mean([f.get("mean_d_left", 0.0) for f in all_flags])
-                min_left_list = [v for f in all_flags if not math.isinf(v := f.get("min_d_left", 0.0))]
-                avg_min_d_left = np.mean(min_left_list) if min_left_list else float('inf')
-                
-                avg_mean_d_right = np.mean([f.get("mean_d_right", 0.0) for f in all_flags])
-                min_right_list = [v for f in all_flags if not math.isinf(v := f.get("min_d_right", 0.0))]
-                avg_min_d_right = np.mean(min_right_list) if min_right_list else float('inf')
-                
-                avg_mean_reach_gate = np.mean([f.get("mean_reach_gate", 0.0) for f in all_flags])
-            else:
-                avg_left_rgn = avg_right_rgn = 0.0
-                avg_mean_d_left = avg_min_d_left = avg_mean_d_right = avg_min_d_right = avg_mean_reach_gate = 0.0
-                
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
-                  f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}% "
-                  f"| LRgn:{avg_left_rgn:4.1f}% RRgn:{avg_right_rgn:4.1f}%")
-            print(f"           [Pre-Grasp] dL(avg/min): {avg_mean_d_left:.4f}/{avg_min_d_left:.4f} | "
-                  f"dR(avg/min): {avg_mean_d_right:.4f}/{avg_min_d_right:.4f} | "
-                  f"ReachGate: {avg_mean_reach_gate:.3f}")
+                  f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}%")
     
     # Final statistics
     print("\n" + "=" * 60)
