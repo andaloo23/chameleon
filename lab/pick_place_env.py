@@ -602,8 +602,8 @@ class PickPlaceEnv(DirectRLEnv):
             jaw_tip_pos=jaw_tip_pos,
             cube_quat_w=self.cube.data.root_quat_w,
             use_x=self._use_x,
-            prev_right_tip_dist=self._prev_right_fingertip_dist,  # HWM Phi score
-            prev_left_tip_dist=self._prev_left_fingertip_dist,    # HWM Phi score
+            gripper_value=gripper_value,
+            gripper_close_threshold=self.cfg.grasp_close_command_threshold,
             # Reward weights
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
@@ -613,10 +613,6 @@ class PickPlaceEnv(DirectRLEnv):
             lift_shaping_weight=self.cfg.rew_lift_shaping_weight,
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
-            fingertip_obb_weight=self.cfg.rew_fingertip_obb_weight,
-            fingertip_sigma=self.cfg.fingertip_sigma,
-            fingertip_close_threshold=self.cfg.fingertip_close_threshold,
-            fingertip_close_bonus=self.cfg.fingertip_close_bonus,
         )
         
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.

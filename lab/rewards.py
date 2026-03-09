@@ -131,44 +131,28 @@ def compute_fingertip_obb_reach_reward(
     cube_pos: Tensor,
     cube_half_size: float,
     zone_margin: float,
-    prev_right_tip_dist: Tensor,  # Phi(d_avg) from last step — stored but unused (same as prev_left)
-    prev_left_tip_dist: Tensor,   # Phi(d_avg) from last step
     stage_grasped: Tensor,
     cube_quat_w: Tensor,
     use_x: Tensor,
-    fingertip_obb_weight: float,
-    sigma: float,                  # exponential scale (meters)
-    close_threshold: float,        # d_avg below which close_bonus fires
-    close_bonus: float,            # small per-step bonus when very close
+    gripper_value: Tensor,
+    gripper_close_threshold: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Pre-grasp fingertip reaching reward: progress-based + bounded + close bonus.
+    Pre-grasp fingertip reaching reward: per-step exponential + distance milestones.
 
     Formula:
-      d_avg  = (d_L + d_R) / 2           -- avg Euclidean dist to assigned face zone centers
-      Phi(t) = exp(-d_avg / sigma)        -- bounded potential in (0, 1]
+      d_avg  = (d_L + d_R) / 2
+      r = 4 * exp(-d_avg / 0.12)                           -- continuous exponential
+        + 1*(d_avg<0.20) + 2*(d_avg<0.15)                  -- stacking milestones
+        + 3*(d_avg<0.10) + 5*(d_avg<0.05)
+        + 2*(d_avg<0.05)*(gripper closing)                  -- gripper closing near cube
 
-      r_ft = w * (Phi(t) - Phi(t-1))     -- signed delta (potential-based shaping)
-             + close_bonus * (d_avg < close_threshold)   -- small per-step close bonus
-
-    Properties:
-      - Positive when approaching, ~0 when stalled, negative when backing off
-      - Anti-farming by construction: sum of deltas over any cycle = Phi(final) - Phi(start)
-      - Bounded: Phi in (0, 1] → reward per step bounded by [-w, w+close_bonus]
-      - Gradient from far away: exp is always non-zero
-
-    The 'prev_left_tip_dist' stores Phi(t-1), initialized to 0.0 at reset.
-    On the very first step: delta = Phi(initial) - 0 = small positive spike (harmless).
-
-    Symmetric Straddle Assignment:
-      Case A: Fixed Tip -> +Normal Face, Moving Tip -> -Normal Face
-      Case B: Fixed Tip -> -Normal Face, Moving Tip -> +Normal Face
-    Pick whichever minimises (d_L + d_R).
+    All terms are per-step and only active pre-grasp (~stage_grasped).
 
     Returns:
         reach_reward:   [num_envs]
         d_R, d_L:       [num_envs] raw Euclidean distances (for display)
-        Phi, Phi:       [num_envs] current potential (stored as next step's prev_left/right)
+        d_avg, d_avg:   [num_envs] (stored in prev_left/right slots for display)
         d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] debug per-face distances
     """
     not_grasped = (~stage_grasped).float()
@@ -213,21 +197,24 @@ def compute_fingertip_obb_reach_reward(
     d_L = torch.where(use_A, d_L_pos, d_L_neg)
     d_R = torch.where(use_A, d_R_neg, d_R_pos)
 
-    # --- Progress-based bounded potential ---
-    d_avg = 0.5 * (d_L + d_R)             # average fingertip distance
-    Phi   = torch.exp(-d_avg / sigma)      # bounded in (0, 1]
+    # --- Per-step exponential approach reward ---
+    d_avg = 0.5 * (d_L + d_R)
+    r_exp = 4.0 * torch.exp(-d_avg / 0.12)
 
-    delta_phi = Phi - prev_left_tip_dist   # signed: + on approach, - on retreat
-    r_delta   = fingertip_obb_weight * delta_phi  # plain potential-based shaping (no clamp)
+    # --- Distance milestone bonuses (stacking) ---
+    r_dist = torch.zeros_like(d_avg)
+    r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
+    r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
+    r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
+    r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
 
-    # Small per-step bonus when fingertips are very close
-    r_close = close_bonus * (d_avg < close_threshold).float()
+    # --- Gripper closing near cube ---
+    gripper_closing = (gripper_value < gripper_close_threshold).float()
+    r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
 
-    reach_reward = (r_delta + r_close) * not_grasped
+    reach_reward = (r_exp + r_dist + r_grip_close) * not_grasped
 
-    # Store current Phi as next step's baseline (no HWM — plain potential shaping).
-    # Anti-farming by construction: sum of deltas = Phi(final) - Phi(start).
-    return reach_reward, d_R, d_L, Phi, Phi, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    return reach_reward, d_R, d_L, d_avg, d_avg, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
@@ -255,8 +242,8 @@ def compute_pick_place_rewards(
     jaw_tip_pos: Tensor,
     cube_quat_w: Tensor,
     use_x: Tensor,
-    prev_right_tip_dist: Tensor,
-    prev_left_tip_dist: Tensor,
+    gripper_value: Tensor,
+    gripper_close_threshold: float,
     # Reward weights
     grasp_bonus: float,
     transport_weight: float,
@@ -266,29 +253,25 @@ def compute_pick_place_rewards(
     lift_shaping_weight: float,
     action_cost_weight: float,
     drop_penalty: float,
-    fingertip_obb_weight: float,
-    fingertip_sigma: float,
-    fingertip_close_threshold: float,
-    fingertip_close_bonus: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
 
-    Pre-grasp: fingertip potential-based shaping + small close bonus.
-    No approach reward — fingertip Phi gradient covers the whole approach.
+    Pre-grasp: per-step exponential + distance milestones + gripper-closing bonus.
+    Post-grasp: lift shaping + transport shaping + one-time bonuses.
 
     Returns (19 tensors):
         total_reward
         curr_dist, curr_transport_dist, curr_cube_z
         new_stage_grasped/lifted/droppable/success/dropped
         action_cost, drop_penalty_reward
-        new_right_tip_dist, new_left_tip_dist  (raw distances, for display)
-        new_right_hw, new_left_hw              (Phi(t), stored as next step's prev_*)
+        new_right_tip_dist, new_left_tip_dist  (d_R, d_L raw distances)
+        new_right_hw, new_left_hw              (d_avg stored in both slots)
         d_L_pos, d_L_neg, d_R_pos, d_R_neg    (debug)
     """
     curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)  # diagnostic only
 
-    # Pre-grasp: potential-based fingertip reward
+    # Pre-grasp: per-step exponential + distance milestones
     (
         fingertip_reach_reward,
         new_right_tip_dist, new_left_tip_dist,
@@ -300,15 +283,11 @@ def compute_pick_place_rewards(
         cube_pos=cube_pos,
         cube_half_size=cube_half_size,
         zone_margin=zone_margin,
-        prev_right_tip_dist=prev_right_tip_dist,
-        prev_left_tip_dist=prev_left_tip_dist,
         stage_grasped=stage_grasped,
         cube_quat_w=cube_quat_w,
         use_x=use_x,
-        fingertip_obb_weight=fingertip_obb_weight,
-        sigma=fingertip_sigma,
-        close_threshold=fingertip_close_threshold,
-        close_bonus=fingertip_close_bonus,
+        gripper_value=gripper_value,
+        gripper_close_threshold=gripper_close_threshold,
     )
 
     # Post-grasp shaping

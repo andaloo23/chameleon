@@ -186,7 +186,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_lift_bonus = 30.0
     
     # Stage 3: Lift cube (dense shaping)
-    rew_lift_shaping_weight = 1.5
+    rew_lift_shaping_weight = 10.0
     
     # Stage 4: Transport to cup (3D delta-based shaping)
     rew_transport_weight = 5.0
@@ -214,14 +214,14 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
     grasp_near_cube_threshold = 0.12  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
-    grasp_frames_to_grasp = 3 # More responsive
+    grasp_frames_to_grasp = 1 # Single frame: grasp registers immediately on zone entry
     grasp_frames_to_drop = 20 # Hysteresis: ~320ms at 62.5Hz — survives cube rotation during lift
     grasp_history_len = 5 # More robust following checks
     grasp_stall_frames = 5 # More robust stall detection
     # Euclidean radius for zone-entry: fingertip is "in zone" when its distance to
     # the assigned face zone center (= fcL or fcR) is below this threshold.
     # Tune based on keyboard_control_lab fcL/fcR values at successful contact.
-    grasp_zone_entry_radius = 0.04  # 4cm — from data: best-case fcL≈0.029m at contact
+    grasp_zone_entry_radius = 0.06  # 6cm — relaxed to match achievable fingertip distances
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
