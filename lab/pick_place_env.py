@@ -403,8 +403,8 @@ class PickPlaceEnv(DirectRLEnv):
         cube_rel_gripper = cube_pos - gripper_pos
         cup_rel_cube = self._cup_pos - cube_pos
         
-        # Get gripper width
-        gripper_width = self.joint_pos[:, self._gripper_joint_idx]
+        # Get gripper width (unsqueeze to [num_envs, 1] for concatenation)
+        gripper_width = self.joint_pos[:, self._gripper_joint_idx].unsqueeze(-1)
 
         # Concatenate observation
         obs = torch.cat([
