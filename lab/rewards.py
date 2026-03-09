@@ -199,13 +199,14 @@ def compute_fingertip_obb_reach_reward(
 
     # --- Per-step exponential approach reward ---
     d_avg = 0.5 * (d_L + d_R)
-    r_exp = 4.0 * torch.exp(-d_avg / 0.12)
+    r_exp = 6.0 * torch.exp(-d_avg / 0.25)
 
     # --- Distance milestone bonuses (stacking) ---
     r_dist = torch.zeros_like(d_avg)
     r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
     r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
     r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
+    r_dist = r_dist + 10.0 * (d_avg < 0.10).float()
     r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
 
     # --- Gripper closing near cube ---
