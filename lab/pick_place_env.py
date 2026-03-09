@@ -615,6 +615,17 @@ class PickPlaceEnv(DirectRLEnv):
             drop_penalty=self.cfg.rew_drop_penalty,
         )
         
+        # DEBUG: Compare zone-check distances vs reward-function distances (env 0 only)
+        _step = getattr(self, '_debug_step_count', 0)
+        _step += 1
+        self._debug_step_count = _step
+        if _step % 200 == 0:
+            print(f"[DEBUG step {_step}] "
+                  f"zone_dL={_d_fixed_to_face[0]:.4f} zone_dR={_d_moving_to_face[0]:.4f} "
+                  f"zone_avg={0.5*(_d_fixed_to_face[0]+_d_moving_to_face[0]):.4f} "
+                  f"reward_dL={new_left_tip_dist[0]:.4f} reward_dR={new_right_tip_dist[0]:.4f} "
+                  f"in_zone={self._fixed_tip_in_left_zone[0].item()}")
+
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
         # Delta in Phi space (matches what the reward function computed)
