@@ -399,16 +399,23 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_tip_rel = self._gripper_tip_pos - cube_pos  # [num_envs, 3]
         jaw_tip_rel     = self._jaw_tip_pos     - cube_pos  # [num_envs, 3]
         
+        # Compute new relational vectors
+        cube_rel_gripper = cube_pos - gripper_pos
+        cup_rel_cube = self._cup_pos - cube_pos
+        
+        # Get gripper width
+        gripper_width = self.joint_pos[:, self._gripper_joint_idx]
+
         # Concatenate observation
         obs = torch.cat([
             self.joint_pos,                    # [num_envs, 6]
             self.joint_vel,                    # [num_envs, 6]
-            gripper_pos,                       # [num_envs, 3]
-            cube_pos,                          # [num_envs, 3]
-            self._cup_pos,                     # [num_envs, 3]
-            gripper_tip_rel,                   # [num_envs, 3]  NEW
-            jaw_tip_rel,                       # [num_envs, 3]  NEW
-        ], dim=1)  # total: 27
+            cube_rel_gripper,                  # [num_envs, 3]
+            cup_rel_cube,                      # [num_envs, 3]
+            gripper_tip_rel,                   # [num_envs, 3]
+            jaw_tip_rel,                       # [num_envs, 3]
+            gripper_width                      # [num_envs, 1]
+        ], dim=1)  # total: 25
         
         return {"policy": obs}
 
