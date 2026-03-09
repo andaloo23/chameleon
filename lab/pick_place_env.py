@@ -619,7 +619,7 @@ class PickPlaceEnv(DirectRLEnv):
         _step = getattr(self, '_debug_step_count', 0)
         _step += 1
         self._debug_step_count = _step
-        if _step % 200 == 0:
+        if _step % 10 == 0:
             print(f"[DEBUG step {_step}] "
                   f"zone_dL={_d_fixed_to_face[0]:.4f} zone_dR={_d_moving_to_face[0]:.4f} "
                   f"zone_avg={0.5*(_d_fixed_to_face[0]+_d_moving_to_face[0]):.4f} "
