@@ -141,7 +141,7 @@ def compute_fingertip_obb_reach_reward(
     use_x: Tensor,
     gripper_value: Tensor,
     gripper_close_threshold: float,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Pre-grasp fingertip reaching reward: densely paid out per step.
     When stage_grasped becomes true, the distance is driven to 0.0 to pay
@@ -159,9 +159,8 @@ def compute_fingertip_obb_reach_reward(
     All terms are active only pre-grasp (~stage_grasped).
 
     Returns:
-        reach_reward:   [num_envs] (delta from HWM + per-step close bonus)
+        reach_reward:   [num_envs] (dense per-step bonus)
         d_R, d_L:       [num_envs] raw Euclidean distances (for display)
-        new_left_hw, new_right_hw: [num_envs] Max Phi achieved so far
         d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] debug per-face distances
     """
     not_grasped = (~stage_grasped).float()
@@ -237,7 +236,7 @@ def compute_fingertip_obb_reach_reward(
     # handles the max payout perfectly when grasped.
     reach_reward = (r_exp + r_dist + r_grip_close)
 
-    return reach_reward, d_R, d_L, new_left_hw, new_right_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    return reach_reward, d_R, d_L, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
@@ -283,13 +282,12 @@ def compute_pick_place_rewards(
     Pre-grasp: per-step exponential + distance milestones + gripper-closing bonus.
     Post-grasp: lift shaping + transport shaping + one-time bonuses.
 
-    Returns (19 tensors):
+    Returns (15 tensors):
         total_reward
         curr_dist, curr_transport_dist, curr_cube_z
         new_stage_grasped/lifted/droppable/success/dropped
         action_cost, drop_penalty_reward
         new_right_tip_dist, new_left_tip_dist  (d_R, d_L raw distances)
-        new_right_hw, new_left_hw              (d_avg stored in both slots)
         d_L_pos, d_L_neg, d_R_pos, d_R_neg    (debug)
     """
     curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)  # diagnostic only
@@ -298,7 +296,6 @@ def compute_pick_place_rewards(
     (
         fingertip_reach_reward,
         new_right_tip_dist, new_left_tip_dist,
-        new_right_hw, new_left_hw,
         d_L_pos, d_L_neg, d_R_pos, d_R_neg,
     ) = compute_fingertip_obb_reach_reward(
         gripper_tip_pos=gripper_tip_pos,
@@ -359,5 +356,4 @@ def compute_pick_place_rewards(
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty_reward,
             new_right_tip_dist, new_left_tip_dist,
-            new_right_hw, new_left_hw,
             d_L_pos, d_L_neg, d_R_pos, d_R_neg)

@@ -574,7 +574,6 @@ class PickPlaceEnv(DirectRLEnv):
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success, new_stage_dropped,
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
-            new_right_hw, new_left_hw,
             d_L_pos, d_L_neg, d_R_pos, d_R_neg,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
@@ -617,17 +616,28 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
-        # Delta in Phi space (matches what the reward function computed)
-        _phi_delta_L = new_left_hw  - self._prev_left_fingertip_dist
-        _phi_delta_R = new_right_hw - self._prev_right_fingertip_dist
+        
+        # d_L and d_R directly from current step
         d_avg = 0.5 * (new_left_tip_dist + new_right_tip_dist)
         _close_mask = (d_avg < self.cfg.fingertip_close_threshold).float()
-        self._cum_left_obb_reward  += self.cfg.rew_fingertip_obb_weight * _phi_delta_L * not_grasped_mask
-        self._cum_right_obb_reward += self.cfg.rew_fingertip_obb_weight * _phi_delta_R * not_grasped_mask
-        _step_fingertip_rew = (
-            self.cfg.rew_fingertip_obb_weight * (_phi_delta_L + _phi_delta_R)
-            + self.cfg.fingertip_close_bonus * _close_mask
-        ) * not_grasped_mask
+        
+        # We no longer track HWM or compute cumulative phi deltas. 
+        # (Could restore direct cumulative reward tracking here later if desired)
+        self._cum_left_obb_reward  += 0.0
+        self._cum_right_obb_reward += 0.0
+        
+        # Step reward computation for debug display
+        r_exp = 6.0 * torch.exp(-d_avg / 0.25)
+        r_dist = torch.zeros_like(d_avg)
+        r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
+        r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
+        r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
+        r_dist = r_dist + 10.0 * (d_avg < 0.10).float()
+        r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
+        gripper_closing = (gripper_value < self.cfg.grasp_close_command_threshold).float()
+        r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
+        
+        _step_fingertip_rew = (r_exp + r_dist + r_grip_close) * not_grasped_mask
         
         # Removed pre-grasp averages and minimums
 
@@ -635,9 +645,9 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
         self._prev_cube_z = new_cube_z
-        # Store HWM Phi scores (not raw distances) as the next step's prev values
-        self._prev_right_fingertip_dist = new_right_hw
-        self._prev_left_fingertip_dist  = new_left_hw
+        # We no longer track HWM Phi scores 
+        # self._prev_right_fingertip_dist = new_right_hw
+        # self._prev_left_fingertip_dist  = new_left_hw
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
