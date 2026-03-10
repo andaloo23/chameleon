@@ -186,7 +186,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_lift_bonus = 30.0
     
     # Stage 3: Lift cube (dense shaping)
-    rew_lift_shaping_weight = 10.0
+    rew_lift_shaping_weight = 200.0
     
     # Stage 4: Transport to cup (3D delta-based shaping)
     rew_transport_weight = 5.0

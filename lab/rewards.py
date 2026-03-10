@@ -33,14 +33,19 @@ def compute_lift_shaping_delta(
     is_grasped: Tensor,
     lift_weight: float,
     stage_grasped: Tensor,
+    d_avg: Tensor,
+    zone_radius: float = 0.06,
 ) -> tuple[Tensor, Tensor]:
-    """Delta-based lift shaping. Active whenever cube was ever grasped this episode.
+    """Delta-based lift shaping. Active whenever cube was ever grasped this episode,
+    or if fingertips are very close to cube (pre-grasp lift shaping).
 
     Uses stage_grasped (latched) instead of is_grasped so brief zone-exit events
     during lifting (from cube rotation) don't zero out the lift signal.
     """
     delta = cube_height - prev_cube_height
-    reward = lift_weight * torch.clamp(delta, min=0.0) * stage_grasped.float()
+    # Enable lift shaping if latched grasp OR fingertips are very near cube
+    is_active = stage_grasped | (d_avg < zone_radius)
+    reward = lift_weight * torch.clamp(delta, min=0.0) * is_active.float()
     return reward, cube_height
 
 
@@ -136,23 +141,27 @@ def compute_fingertip_obb_reach_reward(
     use_x: Tensor,
     gripper_value: Tensor,
     gripper_close_threshold: float,
+    prev_left_hw: Tensor,
+    prev_right_hw: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Pre-grasp fingertip reaching reward: per-step exponential + distance milestones.
+    Pre-grasp fingertip reaching reward: uses potential-based HWM differences.
 
-    Formula:
-      d_avg  = (d_L + d_R) / 2
-      r = 4 * exp(-d_avg / 0.12)                           -- continuous exponential
-        + 1*(d_avg<0.20) + 2*(d_avg<0.15)                  -- stacking milestones
-        + 3*(d_avg<0.10) + 5*(d_avg<0.05)
-        + 2*(d_avg<0.05)*(gripper closing)                  -- gripper closing near cube
+    Formula (applied independently to left/right tips):
+      Phi_L = exp(-d_L / 0.10)
+      r_L = max(Phi_L - prev_left_hw, 0)
+      
+      Phi_R = exp(-d_R / 0.10)
+      r_R = max(Phi_R - prev_right_hw, 0)
+      
+      close_bonus (per step) = 1.0 if d_avg < 0.025
 
-    All terms are per-step and only active pre-grasp (~stage_grasped).
+    All terms are active only pre-grasp (~stage_grasped).
 
     Returns:
-        reach_reward:   [num_envs]
+        reach_reward:   [num_envs] (delta from HWM + per-step close bonus)
         d_R, d_L:       [num_envs] raw Euclidean distances (for display)
-        d_avg, d_avg:   [num_envs] (stored in prev_left/right slots for display)
+        new_left_hw, new_right_hw: [num_envs] Max Phi achieved so far
         d_L_pos, d_L_neg, d_R_pos, d_R_neg: [num_envs] debug per-face distances
     """
     not_grasped = (~stage_grasped).float()
@@ -197,25 +206,39 @@ def compute_fingertip_obb_reach_reward(
     d_L = torch.where(use_A, d_L_pos, d_L_neg)
     d_R = torch.where(use_A, d_R_neg, d_R_pos)
 
-    # --- Per-step exponential approach reward ---
-    d_avg = 0.5 * (d_L + d_R)
-    r_exp = 6.0 * torch.exp(-d_avg / 0.25)
-
-    # --- Distance milestone bonuses (stacking) ---
-    r_dist = torch.zeros_like(d_avg)
-    r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
-    r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
-    r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
-    r_dist = r_dist + 10.0 * (d_avg < 0.10).float()
-    r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
-
+    # --- Potential-based HWM differences ---
+    sigma = 0.10
+    phi_L = torch.exp(-d_L / sigma)
+    phi_R = torch.exp(-d_R / sigma)
+    
+    delta_L = torch.clamp(phi_L - prev_left_hw, min=0.0)
+    delta_R = torch.clamp(phi_R - prev_right_hw, min=0.0)
+    
+    new_left_hw = torch.maximum(prev_left_hw, phi_L)
+    new_right_hw = torch.maximum(prev_right_hw, phi_R)
+    
+    # Total HWM delta
+    r_hwm = delta_L + delta_R
+    
     # --- Gripper closing near cube ---
+    d_avg = 0.5 * (d_L + d_R)
     gripper_closing = (gripper_value < gripper_close_threshold).float()
     r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
+    
+    # --- Base approach bonus inside small radius (close bonus avoids plateau) ---
+    r_close = 0.5 * (d_avg < 0.025).float()
+    
+    # Note: caller will multiply r_hwm by rew_fingertip_obb_weight (typically 30.0)
+    # I am internally absorbing the weighting here to make it a self-contained return:
+    # return values must scale to the overall environment reward pool if I don't multiply externally.
+    # Actually wait I see the caller multiplies the return reach_reward by 1.0 (it just adds it).
+    # We must apply the weight here if we removed it externally, but wait, the caller
+    # adds reach_reward without a weight. Actually we need to verify caller behaviour.
+    # The caller does total_reward = fingertip_reach_reward + ... without weights.
+    
+    reach_reward = (r_hwm * 30.0 + r_close + r_grip_close) * not_grasped
 
-    reach_reward = (r_exp + r_dist + r_grip_close) * not_grasped
-
-    return reach_reward, d_R, d_L, d_avg, d_avg, d_L_pos, d_L_neg, d_R_pos, d_R_neg
+    return reach_reward, d_R, d_L, new_left_hw, new_right_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
 
 @torch.jit.script
@@ -245,6 +268,8 @@ def compute_pick_place_rewards(
     use_x: Tensor,
     gripper_value: Tensor,
     gripper_close_threshold: float,
+    prev_left_hw: Tensor,
+    prev_right_hw: Tensor,
     # Reward weights
     grasp_bonus: float,
     transport_weight: float,
@@ -289,6 +314,8 @@ def compute_pick_place_rewards(
         use_x=use_x,
         gripper_value=gripper_value,
         gripper_close_threshold=gripper_close_threshold,
+        prev_left_hw=prev_left_hw,
+        prev_right_hw=prev_right_hw,
     )
 
     # Post-grasp shaping
@@ -297,8 +324,9 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped, transport_weight
     )
     cube_z = cube_pos[:, 2]
+    d_avg = 0.5 * (new_right_tip_dist + new_left_tip_dist)
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
-        cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped
+        cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, d_avg
     )
 
     # One-time bonuses
