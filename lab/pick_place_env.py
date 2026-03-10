@@ -602,8 +602,6 @@ class PickPlaceEnv(DirectRLEnv):
             use_x=self._use_x,
             gripper_value=gripper_value,
             gripper_close_threshold=self.cfg.grasp_close_command_threshold,
-            prev_left_hw=self._prev_left_fingertip_dist,
-            prev_right_hw=self._prev_right_fingertip_dist,
             # Reward weights
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,

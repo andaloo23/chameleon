@@ -141,11 +141,11 @@ def compute_fingertip_obb_reach_reward(
     use_x: Tensor,
     gripper_value: Tensor,
     gripper_close_threshold: float,
-    prev_left_hw: Tensor,
-    prev_right_hw: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Pre-grasp fingertip reaching reward: uses potential-based HWM differences.
+    Pre-grasp fingertip reaching reward: densely paid out per step.
+    When stage_grasped becomes true, the distance is driven to 0.0 to pay
+    out the maximum potential, eliminating the farming cliff.
 
     Formula (applied independently to left/right tips):
       Phi_L = exp(-d_L / 0.10)
@@ -206,37 +206,36 @@ def compute_fingertip_obb_reach_reward(
     d_L = torch.where(use_A, d_L_pos, d_L_neg)
     d_R = torch.where(use_A, d_R_neg, d_R_pos)
 
-    # --- Potential-based HWM differences ---
-    sigma = 0.10
-    phi_L = torch.exp(-d_L / sigma)
-    phi_R = torch.exp(-d_R / sigma)
+    # --- Phantom Hover Logic ---
+    # Give the agent massive continuous rewards for hovering perfectly, 
+    # and KEEP giving them when grasped (d=0).
+    # This prevents the "reward farming cliff" where grasping turned OFF the hover reward.
     
-    delta_L = torch.clamp(phi_L - prev_left_hw, min=0.0)
-    delta_R = torch.clamp(phi_R - prev_right_hw, min=0.0)
+    # Base distances
+    d_avg_real = 0.5 * (d_L + d_R)
     
-    new_left_hw = torch.maximum(prev_left_hw, phi_L)
-    new_right_hw = torch.maximum(prev_right_hw, phi_R)
+    # If grasped, pretend the fingers are perfectly touching (d = 0.0)
+    # This ensures Grasping > Hovering.
+    d_avg = torch.where(stage_grasped, torch.zeros_like(d_avg_real), d_avg_real)
     
-    # Total HWM delta
-    r_hwm = delta_L + delta_R
+    # --- Per-step exponential approach reward ---
+    r_exp = 6.0 * torch.exp(-d_avg / 0.25)
+    
+    # --- Distance milestone bonuses (stacking) ---
+    r_dist = torch.zeros_like(d_avg)
+    r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
+    r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
+    r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
+    r_dist = r_dist + 10.0 * (d_avg < 0.10).float()
+    r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
     
     # --- Gripper closing near cube ---
-    d_avg = 0.5 * (d_L + d_R)
     gripper_closing = (gripper_value < gripper_close_threshold).float()
     r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
     
-    # --- Base approach bonus inside small radius (close bonus avoids plateau) ---
-    r_close = 0.5 * (d_avg < 0.025).float()
-    
-    # Note: caller will multiply r_hwm by rew_fingertip_obb_weight (typically 30.0)
-    # I am internally absorbing the weighting here to make it a self-contained return:
-    # return values must scale to the overall environment reward pool if I don't multiply externally.
-    # Actually wait I see the caller multiplies the return reach_reward by 1.0 (it just adds it).
-    # We must apply the weight here if we removed it externally, but wait, the caller
-    # adds reach_reward without a weight. Actually we need to verify caller behaviour.
-    # The caller does total_reward = fingertip_reach_reward + ... without weights.
-    
-    reach_reward = (r_hwm * 30.0 + r_close + r_grip_close) * not_grasped
+    # We no longer strictly multiply by `not_grasped` because `d_avg=0` 
+    # handles the max payout perfectly when grasped.
+    reach_reward = (r_exp + r_dist + r_grip_close)
 
     return reach_reward, d_R, d_L, new_left_hw, new_right_hw, d_L_pos, d_L_neg, d_R_pos, d_R_neg
 
@@ -268,8 +267,6 @@ def compute_pick_place_rewards(
     use_x: Tensor,
     gripper_value: Tensor,
     gripper_close_threshold: float,
-    prev_left_hw: Tensor,
-    prev_right_hw: Tensor,
     # Reward weights
     grasp_bonus: float,
     transport_weight: float,
@@ -314,8 +311,6 @@ def compute_pick_place_rewards(
         use_x=use_x,
         gripper_value=gripper_value,
         gripper_close_threshold=gripper_close_threshold,
-        prev_left_hw=prev_left_hw,
-        prev_right_hw=prev_right_hw,
     )
 
     # Post-grasp shaping
