@@ -142,6 +142,9 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_left_fingertip_dist  = torch.zeros(self.num_envs, device=self.device)
         self._prev_right_fingertip_dist = torch.zeros(self.num_envs, device=self.device)
 
+        # Delta-based approach: previous d_avg for potential shaping
+        self._prev_d_avg = torch.ones(self.num_envs, device=self.device)
+
         self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
         self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
 
@@ -575,6 +578,7 @@ class PickPlaceEnv(DirectRLEnv):
             action_cost, drop_penalty,
             new_right_tip_dist, new_left_tip_dist,
             d_L_pos, d_L_neg, d_R_pos, d_R_neg,
+            new_d_avg,
         ) = compute_pick_place_rewards(
             gripper_pos=gripper_pos,
             cube_pos=cube_pos,
@@ -601,6 +605,10 @@ class PickPlaceEnv(DirectRLEnv):
             use_x=self._use_x,
             gripper_value=gripper_value,
             gripper_close_threshold=self.cfg.grasp_close_command_threshold,
+            # Delta-based approach state
+            prev_d_avg=self._prev_d_avg,
+            approach_weight=self.cfg.rew_fingertip_obb_weight,
+            approach_sigma=self.cfg.fingertip_sigma,
             # Reward weights
             grasp_bonus=self.cfg.rew_grasp_bonus,
             transport_weight=self.cfg.rew_transport_weight,
@@ -626,18 +634,15 @@ class PickPlaceEnv(DirectRLEnv):
         self._cum_left_obb_reward  += 0.0
         self._cum_right_obb_reward += 0.0
         
-        # Step reward computation for debug display
-        r_exp = 6.0 * torch.exp(-d_avg / 0.25)
-        r_dist = torch.zeros_like(d_avg)
-        r_dist = r_dist + 1.0 * (d_avg < 0.20).float()
-        r_dist = r_dist + 2.0 * (d_avg < 0.15).float()
-        r_dist = r_dist + 3.0 * (d_avg < 0.10).float()
-        r_dist = r_dist + 10.0 * (d_avg < 0.10).float()
-        r_dist = r_dist + 5.0 * (d_avg < 0.05).float()
+        # Step reward computation for debug display (matches new delta-based reward)
+        phi_old = torch.exp(-self._prev_d_avg / self.cfg.fingertip_sigma)
+        phi_new = torch.exp(-new_d_avg / self.cfg.fingertip_sigma)
+        delta_phi = torch.clamp(phi_new - phi_old, min=0.0)
+        r_approach_dbg = self.cfg.rew_fingertip_obb_weight * delta_phi
         gripper_closing = (gripper_value < self.cfg.grasp_close_command_threshold).float()
-        r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
+        r_grip_close = 2.0 * (new_d_avg < 0.05).float() * gripper_closing
         
-        _step_fingertip_rew = (r_exp + r_dist + r_grip_close) * not_grasped_mask
+        _step_fingertip_rew = (r_approach_dbg + r_grip_close) * not_grasped_mask
         
         # Removed pre-grasp averages and minimums
 
@@ -645,9 +650,7 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_gripper_cube_dist = new_dist
         self._prev_transport_dist = new_transport_dist
         self._prev_cube_z = new_cube_z
-        # We no longer track HWM Phi scores 
-        # self._prev_right_fingertip_dist = new_right_hw
-        # self._prev_left_fingertip_dist  = new_left_hw
+        self._prev_d_avg = new_d_avg
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -834,6 +837,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_right_fingertip_dist[env_ids] = 0.0
         self._cum_left_obb_reward[env_ids]   = 0.0
         self._cum_right_obb_reward[env_ids]  = 0.0
+        # Initialize prev_d_avg to large value so first step earns approach reward
+        self._prev_d_avg[env_ids] = 1.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

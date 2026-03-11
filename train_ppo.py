@@ -752,8 +752,10 @@ def train_ppo(
             else:
                 pct_reached = pct_grasped = pct_lifted = pct_droppable = pct_success = 0.0
             
+            last_ep_reward = episode_rewards[-1] if episode_rewards else avg_reward
             print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} | "
                   f"Reward: {avg_reward:7.2f} | "
+                  f"Last: {last_ep_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
@@ -773,7 +775,8 @@ def train_ppo(
         pct_droppable = 100 * sum(1 for f in all_flags if f.get("droppable")) / n_episodes
         pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
         
-        print(f"Average Episode Reward: {avg_reward:.2f}")
+        print(f"Average Episode Reward (last 100): {avg_reward:.2f}")
+        print(f"Last Episode Reward: {all_rewards[-1]:.2f}")
         print(f"% Reached:   {pct_reached:.1f}%")
         print(f"% Grasped:   {pct_grasped:.1f}%")
         print(f"% Lifted:    {pct_lifted:.1f}%")
