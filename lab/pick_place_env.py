@@ -820,8 +820,9 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_right_fingertip_dist[env_ids] = 0.0
         self._cum_left_obb_reward[env_ids]   = 0.0
         self._cum_right_obb_reward[env_ids]  = 0.0
-        # Initialize prev_d_avg to large value so first step earns approach reward
-        self._prev_d_avg[env_ids] = 1.0
+        # Initialize prev_d_avg to 0.0 so phi_old=1.0 (max potential).
+        # First step gives zero delta (phi_new < phi_old), eliminating free first-step bonus.
+        self._prev_d_avg[env_ids] = 0.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

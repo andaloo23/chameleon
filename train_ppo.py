@@ -17,6 +17,39 @@ import torch.optim as optim
 from torch.distributions import Normal
 
 
+class RunningObsNormalizer:
+    """Welford online running mean/variance for observation normalization."""
+
+    def __init__(self, obs_dim: int, device: str = "cpu", clip: float = 10.0):
+        self.mean = torch.zeros(obs_dim, device=device)
+        self.var = torch.ones(obs_dim, device=device)
+        self.count = 1e-4  # avoid div-by-zero
+        self.clip = clip
+
+    def update(self, x: torch.Tensor):
+        """Update running stats with a batch [N, obs_dim]."""
+        batch_mean = x.mean(dim=0)
+        batch_var = x.var(dim=0, unbiased=False)
+        batch_count = x.shape[0]
+        self._update_from_moments(batch_mean, batch_var, batch_count)
+
+    def _update_from_moments(self, batch_mean, batch_var, batch_count):
+        delta = batch_mean - self.mean
+        tot_count = self.count + batch_count
+        new_mean = self.mean + delta * batch_count / tot_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / tot_count
+        new_var = m2 / tot_count
+        self.mean = new_mean
+        self.var = new_var
+        self.count = tot_count
+
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize observations to ~zero-mean, unit-variance."""
+        return torch.clamp((x - self.mean) / (self.var.sqrt() + 1e-8), -self.clip, self.clip)
+
+
 def _extract_obs(obs):
     """Extract observation tensor from Isaac Lab dict format.
     
@@ -167,7 +200,7 @@ def ppo_update(
     last_value: float,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
-    entropy_coef: float = 0.001,
+    entropy_coef: float = 0.01,
     n_epochs: int = 5,
     batch_size: int = 1024,
 ):
@@ -294,7 +327,7 @@ def collect_rollout(
     device = env.device
     
     # Initialize or restore state
-    if state is None:
+    if state is None or "obs_dict" not in state:
         obs_dict, info = env.reset()
         current_rewards = torch.zeros(num_envs, device=device)
         min_dists = torch.full((num_envs,), float("inf"), device=device)
@@ -337,13 +370,23 @@ def collect_rollout(
     
     steps_per_env = max(1, n_steps // num_envs)
     
+    # Get obs normalizer from state if available
+    obs_normalizer = state.get("obs_normalizer", None) if state else None
+
     for _ in range(steps_per_env):
         policy_obs = obs_dict["policy"]
         if not policy_obs.is_cuda and device.type == "cuda":
             policy_obs = policy_obs.to(device)
+
+        # Update and apply observation normalization
+        if obs_normalizer is not None:
+            obs_normalizer.update(policy_obs)
+            policy_obs_norm = obs_normalizer.normalize(policy_obs)
+        else:
+            policy_obs_norm = policy_obs
             
         with torch.no_grad():
-            action_mean, values = policy.forward(policy_obs)
+            action_mean, values = policy.forward(policy_obs_norm)
             action_std = torch.exp(policy.policy_log_std)
             dist = Normal(action_mean, action_std)
             actions = dist.sample()
@@ -383,7 +426,7 @@ def collect_rollout(
         ep_steps += 1.0
             
         # Store in buffer
-        po_np = policy_obs.cpu().numpy()
+        po_np = policy_obs_norm.cpu().numpy()
         ac_np = actions.cpu().numpy()
         re_np = rewards.cpu().numpy()
         va_np = values.cpu().numpy()
@@ -416,7 +459,10 @@ def collect_rollout(
         
     # Last value for GAE
     with torch.no_grad():
-        _, last_values = policy.forward(obs_dict["policy"].to(device))
+        last_obs = obs_dict["policy"].to(device)
+        if obs_normalizer is not None:
+            last_obs = obs_normalizer.normalize(last_obs)
+        _, last_values = policy.forward(last_obs)
         last_value = last_values[0].item()
         
     next_state = {
@@ -426,6 +472,7 @@ def collect_rollout(
         "prev_cube_z": getattr(env, "_prev_cube_z", torch.zeros_like(ever_grasped)),
         "penalties": penalties, "info": info,
         "ep_steps": ep_steps,
+        "obs_normalizer": obs_normalizer,
     }
     
     return last_value, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
@@ -708,7 +755,8 @@ def train_ppo(
     }
     
     # State for batched rollout persistence (Isaac Lab only)
-    rollout_state = None
+    obs_normalizer = RunningObsNormalizer(obs_dim, device=env.device)
+    rollout_state = {"obs_normalizer": obs_normalizer}
     
     while total_episodes < num_episodes:
         iteration += 1
@@ -898,8 +946,8 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes to train")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
     parser.add_argument("--headless", action="store_true", help="Run headless")
-    parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
-    parser.add_argument("--rollout-steps", type=int, default=65536, help="Steps per rollout")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--rollout-steps", type=int, default=131072, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
     
     args = parser.parse_args()
