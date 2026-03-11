@@ -552,24 +552,7 @@ class PickPlaceEnv(DirectRLEnv):
         cube_xy = cube_pos[:, :2]
         reach_dist = torch.norm(gripper_xy - cube_xy, dim=1)
 
-        # Contact debug print (env_0 only, GUI mode only)
-        if self.sim.has_gui():
-            _contact_printed = False
-            try:
-                cf = self.robot.data.body_net_contact_forces  # [num_envs, num_bodies, 3]
-                left_f  = cf[0, self._gripper_body_idx[0], :].norm().item()
-                right_f = cf[0, self._jaw_body_idx[0], :].norm().item()
-                if left_f > 0.5 or right_f > 0.5:
-                    print(f"[CONTACT] left={left_f:.2f}N  right={right_f:.2f}N")
-                    _contact_printed = True
-            except Exception:
-                pass  # contact force reporting not enabled — fall back to zone proximity
-            if not _contact_printed:
-                l_c = self._fixed_tip_in_left_zone[0].item()
-                r_c = self._moving_tip_in_right_zone[0].item()
-                if l_c or r_c:
-                    sides = " + ".join(s for s, v in [("LEFT", l_c), ("RIGHT", r_c)] if v)
-                    print(f"[CONTACT proxy] {sides} tip on cube face")
+
 
         # Compute rewards
         (

@@ -37,13 +37,13 @@ def _extract_obs(obs):
 
 class TinyMLP(nn.Module):
     """
-    Tiny MLP policy for PPO.
+    MLP policy for PPO with separate actor/critic heads.
     
-    Input: 21-dim observation
-    Output: 6-dim action mean + 6-dim action log_std
+    Input: obs_dim observation
+    Output: act_dim action mean + act_dim action log_std
     """
     
-    def __init__(self, obs_dim: int = 21, act_dim: int = 6, hidden_dim: int = 64):
+    def __init__(self, obs_dim: int = 21, act_dim: int = 6, hidden_dim: int = 256):
         super().__init__()
         
         # Shared feature extractor
@@ -54,18 +54,26 @@ class TinyMLP(nn.Module):
             nn.Tanh(),
         )
         
-        # Policy head (actor)
+        # Policy head (actor) — own hidden layer for specialization
+        self.actor_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+        )
         self.policy_mean = nn.Linear(hidden_dim, act_dim)
         self.policy_log_std = nn.Parameter(torch.zeros(act_dim))
         
-        # Value head (critic)
+        # Value head (critic) — own hidden layer for specialization
+        self.critic_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+        )
         self.value = nn.Linear(hidden_dim, 1)
     
     def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Returns action mean and value estimate."""
         features = self.shared(obs)
-        action_mean = self.policy_mean(features)
-        value = self.value(features)
+        action_mean = self.policy_mean(self.actor_head(features))
+        value = self.value(self.critic_head(features))
         
         # Clamp log_std to a stable range [-2.0, 0.5]
         with torch.no_grad():
@@ -660,7 +668,8 @@ def train_ppo(
     print(f"Action space: {act_dim}")
     
     # Create policy and optimizer
-    policy = TinyMLP(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=64)
+    hidden_dim = 256
+    policy = TinyMLP(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=hidden_dim)
     
     if torch.cuda.is_available():
         policy = policy.cuda()
@@ -668,7 +677,7 @@ def train_ppo(
     
     optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
     
-    print(f"Policy: TinyMLP({obs_dim} -> 64 -> 64 -> {act_dim})")
+    print(f"Policy: MLP({obs_dim} -> {hidden_dim}x2 -> actor:{hidden_dim} / critic:{hidden_dim} -> {act_dim})")
     print(f"Total parameters: {sum(p.numel() for p in policy.parameters())}")
     print("=" * 60)
     
