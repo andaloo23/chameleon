@@ -797,7 +797,7 @@ def train_ppo(
         metrics_history["value_loss"].append(metrics["value_loss"])
         
         # Log progress
-        if iteration % 8 == 1 or total_episodes >= num_episodes:
+        if True:  # Log every iteration
             # Count milestone percentages from THIS rollout's episodes (not stale deque)
             n_ep_this_iter = len(episode_flags)
             if n_ep_this_iter > 0:
