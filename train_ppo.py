@@ -798,20 +798,22 @@ def train_ppo(
         
         # Log progress
         if iteration % 8 == 1 or total_episodes >= num_episodes:
-            # Count milestone percentages
-            n_episodes = len(all_flags)
-            if n_episodes > 0:
-                pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
-                pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
-                pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
-                pct_droppable = 100 * sum(1 for f in all_flags if f.get("droppable")) / n_episodes
-                pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
+            # Count milestone percentages from THIS rollout's episodes (not stale deque)
+            n_ep_this_iter = len(episode_flags)
+            if n_ep_this_iter > 0:
+                pct_reached = 100 * sum(1 for f in episode_flags if f.get("reached")) / n_ep_this_iter
+                pct_grasped = 100 * sum(1 for f in episode_flags if f.get("grasped")) / n_ep_this_iter
+                pct_lifted = 100 * sum(1 for f in episode_flags if f.get("lifted")) / n_ep_this_iter
+                pct_droppable = 100 * sum(1 for f in episode_flags if f.get("droppable")) / n_ep_this_iter
+                pct_success = 100 * sum(1 for f in episode_flags if f.get("success")) / n_ep_this_iter
+                iter_avg_reward = np.mean(episode_rewards)
             else:
                 pct_reached = pct_grasped = pct_lifted = pct_droppable = pct_success = 0.0
+                iter_avg_reward = 0.0
             
-            last_ep_reward = episode_rewards[-1] if episode_rewards else avg_reward
-            print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} | "
-                  f"Reward: {avg_reward:7.2f} | "
+            last_ep_reward = episode_rewards[-1] if episode_rewards else 0.0
+            print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} ({n_ep_this_iter} this iter) | "
+                  f"Reward: {iter_avg_reward:7.2f} | "
                   f"Last: {last_ep_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
                   f"KL: {metrics['approx_kl']:.4f}")
