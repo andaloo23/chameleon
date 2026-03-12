@@ -820,27 +820,46 @@ def train_ppo(
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
                   f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}%")
     
-    # Final statistics
+    # Final statistics — use full metrics_history for accurate start-to-finish report
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)
     
-    n_episodes = len(all_flags)
-    if n_episodes > 0:
-        avg_reward = np.mean(all_rewards)
-        pct_reached = 100 * sum(1 for f in all_flags if f.get("reached")) / n_episodes
-        pct_grasped = 100 * sum(1 for f in all_flags if f.get("grasped")) / n_episodes
-        pct_lifted = 100 * sum(1 for f in all_flags if f.get("lifted")) / n_episodes
-        pct_droppable = 100 * sum(1 for f in all_flags if f.get("droppable")) / n_episodes
-        pct_success = 100 * sum(1 for f in all_flags if f.get("success")) / n_episodes
+    n_total = len(metrics_history["reward"])
+    if n_total > 0:
+        # Overall stats
+        avg_reward_all = np.mean(metrics_history["reward"])
+        last_reward = metrics_history["reward"][-1]
         
-        print(f"Average Episode Reward (last 100): {avg_reward:.2f}")
-        print(f"Last Episode Reward: {all_rewards[-1]:.2f}")
-        print(f"% Reached:   {pct_reached:.1f}%")
-        print(f"% Grasped:   {pct_grasped:.1f}%")
-        print(f"% Lifted:    {pct_lifted:.1f}%")
-        print(f"% Droppable: {pct_droppable:.1f}%")
-        print(f"% Success:   {pct_success:.1f}%")
+        # Compute percentages over ALL episodes
+        pct_reached_all   = 100 * sum(metrics_history["reached"])   / n_total
+        pct_grasped_all   = 100 * sum(metrics_history["grasped"])   / n_total
+        pct_lifted_all    = 100 * sum(metrics_history["lifted"])    / n_total
+        pct_droppable_all = 100 * sum(metrics_history["droppable"]) / n_total
+        pct_success_all   = 100 * sum(metrics_history["success"])   / n_total
+        
+        # Start vs finish comparison (first 10% vs last 10%)
+        window = max(1, n_total // 10)
+        
+        def pct(flags, start, end):
+            sl = flags[start:end]
+            return 100 * sum(sl) / max(1, len(sl))
+        
+        print(f"Total episodes: {n_total}")
+        print(f"Average Episode Reward (all): {avg_reward_all:.2f}")
+        print(f"Last Episode Reward: {last_reward:.2f}")
+        print()
+        print(f"{'Milestone':<12} {'Overall':>8}  {'First 10%':>10}  {'Last 10%':>10}  {'Delta':>8}")
+        print("-" * 54)
+        for key, label in [("reached", "Reached"), ("grasped", "Grasped"),
+                           ("lifted", "Lifted"), ("droppable", "Droppable"),
+                           ("success", "Success")]:
+            p_all   = pct(metrics_history[key], 0, n_total)
+            p_start = pct(metrics_history[key], 0, window)
+            p_end   = pct(metrics_history[key], n_total - window, n_total)
+            delta   = p_end - p_start
+            sign    = "+" if delta >= 0 else ""
+            print(f"{label:<12} {p_all:>7.1f}%  {p_start:>9.1f}%  {p_end:>9.1f}%  {sign}{delta:>6.1f}%")
     
     # Plot metrics
     plot_training_metrics(metrics_history)
@@ -876,7 +895,7 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         w = min(smoothing_window, len(episodes) // 2)  # Adaptive window
         ep_smoothed = episodes[w-1:]  # Align with smoothed data
         
-        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        fig, axes = plt.subplots(4, 2, figsize=(12, 13))
         fig.suptitle(f"PPO Training Metrics (smoothing window={w})", fontsize=14)
         
         # Plot 1: Episode Reward (smoothed)
@@ -896,7 +915,7 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         axes[0, 1].set_title("Min Gripper-Cube Distance (Smoothed)")
         axes[0, 1].grid(True, alpha=0.3)
         
-        # Plot 3: % Reached (smoothed success rate)
+        # Plot 3: % Reached
         reached_smoothed = moving_avg_bool(metrics["reached"], w)
         axes[1, 0].plot(ep_smoothed, reached_smoothed, 'g-', linewidth=2)
         axes[1, 0].set_xlabel("Episode")
@@ -905,7 +924,7 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         axes[1, 0].set_ylim(0, 105)
         axes[1, 0].grid(True, alpha=0.3)
         
-        # Plot 4: % Grasped (smoothed success rate)
+        # Plot 4: % Grasped
         grasped_smoothed = moving_avg_bool(metrics["grasped"], w)
         axes[1, 1].plot(ep_smoothed, grasped_smoothed, 'orange', linewidth=2)
         axes[1, 1].set_xlabel("Episode")
@@ -914,23 +933,42 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         axes[1, 1].set_ylim(0, 105)
         axes[1, 1].grid(True, alpha=0.3)
         
-        # Plot 5: % Droppable (smoothed success rate)
-        droppable_smoothed = moving_avg_bool(metrics["droppable"], w)
-        axes[2, 0].plot(ep_smoothed, droppable_smoothed, 'c-', linewidth=2)
+        # Plot 5: % Lifted
+        lifted_smoothed = moving_avg_bool(metrics["lifted"], w)
+        axes[2, 0].plot(ep_smoothed, lifted_smoothed, 'm-', linewidth=2)
         axes[2, 0].set_xlabel("Episode")
-        axes[2, 0].set_ylabel("% Droppable")
-        axes[2, 0].set_title("Success Rate: Aligned Above Cup")
+        axes[2, 0].set_ylabel("% Lifted")
+        axes[2, 0].set_title("Success Rate: Lifted Cube")
         axes[2, 0].set_ylim(0, 105)
         axes[2, 0].grid(True, alpha=0.3)
         
-        # Plot 6: % Success (smoothed success rate)
-        success_smoothed = moving_avg_bool(metrics["success"], w)
-        axes[2, 1].plot(ep_smoothed, success_smoothed, 'r-', linewidth=2)
+        # Plot 6: % Droppable
+        droppable_smoothed = moving_avg_bool(metrics["droppable"], w)
+        axes[2, 1].plot(ep_smoothed, droppable_smoothed, 'c-', linewidth=2)
         axes[2, 1].set_xlabel("Episode")
-        axes[2, 1].set_ylabel("% Success")
-        axes[2, 1].set_title("Success Rate: Placed in Cup")
+        axes[2, 1].set_ylabel("% Droppable")
+        axes[2, 1].set_title("Success Rate: Aligned Above Cup")
         axes[2, 1].set_ylim(0, 105)
         axes[2, 1].grid(True, alpha=0.3)
+        
+        # Plot 7: % Success
+        success_smoothed = moving_avg_bool(metrics["success"], w)
+        axes[3, 0].plot(ep_smoothed, success_smoothed, 'r-', linewidth=2)
+        axes[3, 0].set_xlabel("Episode")
+        axes[3, 0].set_ylabel("% Success")
+        axes[3, 0].set_title("Success Rate: Placed in Cup")
+        axes[3, 0].set_ylim(0, 105)
+        axes[3, 0].grid(True, alpha=0.3)
+        
+        # Plot 8: Entropy (training diagnostic)
+        if metrics.get("iter_episode") and metrics.get("entropy"):
+            axes[3, 1].plot(metrics["iter_episode"], metrics["entropy"], 'k-', linewidth=1, alpha=0.7)
+            axes[3, 1].set_xlabel("Episode")
+            axes[3, 1].set_ylabel("Entropy")
+            axes[3, 1].set_title("Policy Entropy")
+            axes[3, 1].grid(True, alpha=0.3)
+        else:
+            axes[3, 1].set_visible(False)
         
         plt.tight_layout()
         plt.savefig("ppo_training_metrics.png", dpi=150)

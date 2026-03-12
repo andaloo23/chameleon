@@ -267,12 +267,14 @@ def compute_pick_place_rewards(
     lift_shaping_weight: float,
     action_cost_weight: float,
     drop_penalty: float,
+    grasp_hold_weight: float,
+    height_bonus_weight: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
 
     Pre-grasp: delta-based potential approach shaping + gripper-closing bonus.
-    Post-grasp: lift shaping + transport shaping + one-time bonuses.
+    Post-grasp: grasp hold + lift shaping + height bonus + transport shaping + one-time bonuses.
 
     Returns (18 tensors):
         total_reward
@@ -318,9 +320,18 @@ def compute_pick_place_rewards(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, d_avg
     )
 
+    # Per-step grasp hold reward: incentivizes maintaining grasp, not just triggering it
+    grasp_hold_reward = grasp_hold_weight * is_grasped.float()
+
+    # Per-step height bonus while grasped: direct gradient for lifting the cube
+    # Dead zone at 2cm (0.5cm above rest) to ignore physics jitter at table level
+    height_above_rest = torch.clamp(cube_z - 0.02, min=0.0)
+    height_reward = height_bonus_weight * height_above_rest * is_grasped.float()
+
     # One-time bonuses
-    cube_z = cube_pos[:, 2]
-    is_lifted = is_grasped & (cube_z > 0.03)
+    # Use stage_grasped (latched) for is_lifted so brief zone-exit during
+    # lifting (cube rotation) doesn't prevent the lift bonus from firing
+    is_lifted = stage_grasped & (cube_z > 0.03)
     (grasp_reward, lift_reward, droppable_reward, success_reward,
      new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success) = compute_one_time_bonuses(
         is_grasped, stage_grasped,
@@ -340,8 +351,10 @@ def compute_pick_place_rewards(
     total_reward = (
         fingertip_reach_reward +
         grasp_reward +
+        grasp_hold_reward +
         lift_reward +
         lift_shaping_reward +
+        height_reward +
         transport_reward +
         droppable_reward +
         success_reward +

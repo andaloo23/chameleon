@@ -601,6 +601,8 @@ class PickPlaceEnv(DirectRLEnv):
             lift_shaping_weight=self.cfg.rew_lift_shaping_weight,
             action_cost_weight=self.cfg.rew_action_cost_weight,
             drop_penalty=self.cfg.rew_drop_penalty,
+            grasp_hold_weight=self.cfg.rew_grasp_hold_weight,
+            height_bonus_weight=self.cfg.rew_height_bonus_weight,
         )
         
 
@@ -707,12 +709,13 @@ class PickPlaceEnv(DirectRLEnv):
             }
         }
         
-        # Expose latched flags for PPO metrics
+        # Expose latched flags for PPO metrics — clone to survive auto-reset
+        # (_reset_idx clears _stage_* in-place before training script reads extras)
         self.extras["milestone_flags"] = {
-            "lifted": self._stage_lifted,
-            "droppable": self._stage_droppable,
-            "success": self._stage_success,
-            "grasped": self._stage_grasped,
+            "lifted": self._stage_lifted.clone(),
+            "droppable": self._stage_droppable.clone(),
+            "success": self._stage_success.clone(),
+            "grasped": self._stage_grasped.clone(),
         }
         
         return total_reward
