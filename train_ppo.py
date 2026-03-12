@@ -200,7 +200,7 @@ def ppo_update(
     last_value: float,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
-    entropy_coef: float = 0.0,
+    entropy_coef: float = 0.001,
     n_epochs: int = 5,
     batch_size: int = 1024,
 ):
