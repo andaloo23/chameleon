@@ -286,8 +286,8 @@ def ppo_update(
             n_updates += 1
             
             # KL Safety Brake: if KL divergence is too high, stop updating to prevent collapse
-            if approx_kl > 0.02:
-                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.02")
+            if approx_kl > 0.05:
+                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.05")
                 kl_brake_triggered = True
                 break
         
