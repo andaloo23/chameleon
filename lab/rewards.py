@@ -210,12 +210,12 @@ def compute_fingertip_obb_reach_reward(
     # This pays out remaining potential and ensures Grasping > Hovering.
     d_avg = torch.where(stage_grasped, torch.zeros_like(d_avg_real), d_avg_real)
 
-    # --- Delta-based potential shaping ---
+    # --- Delta-based potential shaping (unclamped) ---
     # Φ(d) = exp(-d / σ), higher when closer
     phi_old = torch.exp(-prev_d_avg / sigma)
     phi_new = torch.exp(-d_avg / sigma)
-    # Only reward closing distance (positive delta), zero for retreating
-    delta_phi = torch.clamp(phi_new - phi_old, min=0.0)
+    # Raw delta: positive for approach, negative for retreat (proper shaping)
+    delta_phi = phi_new - phi_old
     r_approach = approach_weight * delta_phi
 
     # --- Gripper closing near cube (per-step incentive) ---

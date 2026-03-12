@@ -204,7 +204,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight     = 200.0   # weight for potential-based delta and close bonus
-    fingertip_sigma              = 0.10   # exp scale (meters): 0.1 -> Phi=0.37 at 10cm
+    fingertip_sigma              = 0.20   # exp scale (meters): wider gradient for approach
     fingertip_close_threshold    = 0.025  # avg fingertip distance below which close_bonus fires
     fingertip_close_bonus        = 0.5    # per-step bonus when avg d < close_threshold
 
