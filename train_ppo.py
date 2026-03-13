@@ -678,6 +678,8 @@ def train_ppo(
     log_interval: int = 10,
     n_envs: int = 1,
     curriculum: bool = False,
+    lift_curriculum: bool = False,
+    curriculum_episodes: int = 1000,
 ):
     """
     Train PPO on the pick-and-place task using Isaac Lab.
@@ -703,13 +705,20 @@ def train_ppo(
     from lab.pick_place_env import PickPlaceEnv
     from lab.pick_place_env_cfg import PickPlaceEnvCfg
     
-    cfg = PickPlaceEnvCfg()
-    cfg.scene.num_envs = n_envs
-    cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
-    cfg.curriculum_lift_only = curriculum
-    env = PickPlaceEnv(cfg)
+    def make_env(use_curriculum: bool):
+        cfg = PickPlaceEnvCfg()
+        cfg.scene.num_envs = n_envs
+        cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
+        cfg.curriculum_lift_only = use_curriculum
+        return PickPlaceEnv(cfg), cfg
+    
+    # Phase 1: curriculum if lift_curriculum or curriculum
+    use_curriculum = curriculum or lift_curriculum
+    env, cfg = make_env(use_curriculum)
     print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
-    if curriculum:
+    if lift_curriculum:
+        print(f"[INFO] Lift curriculum: Phase 1 ({curriculum_episodes} ep) lift-only, then Phase 2 full task")
+    elif use_curriculum:
         print("[INFO] Curriculum mode: lift-only (cube teleported to gripper)")
     
     # Isaac Lab uses gymnasium-style API with dict observations
@@ -764,6 +773,16 @@ def train_ppo(
     rollout_state = {"obs_normalizer": obs_normalizer}
     
     while total_episodes < num_episodes:
+        # Phase switch: curriculum -> full task
+        if lift_curriculum and use_curriculum and total_episodes >= curriculum_episodes:
+            print("\n" + "=" * 60)
+            print(f"PHASE 2: Switching to full task (curriculum complete at {total_episodes} episodes)")
+            print("=" * 60 + "\n")
+            env.close()
+            env, cfg = make_env(use_curriculum=False)
+            rollout_state = None  # Force fresh state for new env (obs distribution differs)
+            use_curriculum = False
+        
         iteration += 1
         buffer.clear()
         
@@ -817,7 +836,8 @@ def train_ppo(
                 iter_avg_reward = 0.0
             
             last_ep_reward = episode_rewards[-1] if episode_rewards else 0.0
-            print(f"[Iter {iteration:4d}] Ep: {total_episodes:5d} ({n_ep_this_iter} this iter) | "
+            phase_tag = " [P1]" if use_curriculum and lift_curriculum else (" [P2]" if lift_curriculum else "")
+            print(f"[Iter {iteration:4d}]{phase_tag} Ep: {total_episodes:5d} ({n_ep_this_iter} this iter) | "
                   f"Reward: {iter_avg_reward:7.2f} | "
                   f"Last: {last_ep_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
@@ -995,6 +1015,10 @@ if __name__ == "__main__":
     parser.add_argument("--rollout-steps", type=int, default=131072, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
     parser.add_argument("--curriculum", action="store_true", help="Use curriculum: first learn to lift (cube teleported to gripper)")
+    parser.add_argument("--lift-curriculum", action="store_true",
+                        help="Two-phase: first curriculum (lift-only), then full task")
+    parser.add_argument("--curriculum-episodes", type=int, default=1000,
+                        help="Episodes for Phase 1 when using --lift-curriculum")
     
     args = parser.parse_args()
     
@@ -1010,5 +1034,7 @@ if __name__ == "__main__":
         rollout_steps=args.rollout_steps,
         n_envs=args.n_envs,
         curriculum=args.curriculum,
+        lift_curriculum=args.lift_curriculum,
+        curriculum_episodes=args.curriculum_episodes,
     )
 
