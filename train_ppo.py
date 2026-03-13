@@ -108,9 +108,10 @@ class TinyMLP(nn.Module):
         action_mean = self.policy_mean(self.actor_head(features))
         value = self.value(self.critic_head(features))
         
-        # Clamp log_std to a stable range [-2.0, 0.5]
+        # Clamp log_std: floor at -0.3 (std>=0.74) prevents entropy collapse,
+        # ceiling at 0.5 prevents excess noise
         with torch.no_grad():
-            self.policy_log_std.clamp_(-2.0, 0.5)
+            self.policy_log_std.clamp_(-0.3, 0.5)
             
         return action_mean, value
     
@@ -200,7 +201,7 @@ def ppo_update(
     last_value: float,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
-    entropy_coef: float = 0.003,
+    entropy_coef: float = 0.001,
     n_epochs: int = 5,
     batch_size: int = 1024,
 ):
