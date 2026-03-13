@@ -677,6 +677,7 @@ def train_ppo(
     rollout_steps: int = 2048,
     log_interval: int = 10,
     n_envs: int = 1,
+    curriculum: bool = False,
 ):
     """
     Train PPO on the pick-and-place task using Isaac Lab.
@@ -705,8 +706,11 @@ def train_ppo(
     cfg = PickPlaceEnvCfg()
     cfg.scene.num_envs = n_envs
     cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
+    cfg.curriculum_lift_only = curriculum
     env = PickPlaceEnv(cfg)
     print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
+    if curriculum:
+        print("[INFO] Curriculum mode: lift-only (cube teleported to gripper)")
     
     # Isaac Lab uses gymnasium-style API with dict observations
     obs_dim = cfg.observation_space
@@ -990,6 +994,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=131072, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
+    parser.add_argument("--curriculum", action="store_true", help="Use curriculum: first learn to lift (cube teleported to gripper)")
     
     args = parser.parse_args()
     
@@ -1004,5 +1009,6 @@ if __name__ == "__main__":
         learning_rate=args.lr,
         rollout_steps=args.rollout_steps,
         n_envs=args.n_envs,
+        curriculum=args.curriculum,
     )
 

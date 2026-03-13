@@ -358,6 +358,13 @@ class PickPlaceEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: Tensor) -> None:
         """Process actions before physics step."""
+        # Curriculum: teleport cube to gripper so it "sticks" (agent learns lift motion)
+        if getattr(self.cfg, "curriculum_lift_only", False) and getattr(self.cfg, "curriculum_teleport_cube", False):
+            mid = 0.5 * (self._gripper_tip_pos + self._jaw_tip_pos)
+            cube_quat = self.cube.data.root_quat_w.clone()
+            self.cube.write_root_pose_to_sim(torch.cat([mid, cube_quat], dim=1), self.robot._ALL_INDICES)
+            self.cube.write_root_velocity_to_sim(torch.zeros(self.num_envs, 6, device=self.device), self.robot._ALL_INDICES)
+        
         # Clip actions to [-1, 1]
         self.actions = torch.clamp(actions, -1.0, 1.0)
         
@@ -395,8 +402,11 @@ class PickPlaceEnv(DirectRLEnv):
         self._gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
         self._jaw_tip_pos     = jaw_pos     + quat_apply(jaw_quat,     self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
-        # Get cube position
-        cube_pos = self.cube.data.root_pos_w
+        # Get cube position (curriculum: cube sticks to gripper, use midpoint)
+        if getattr(self.cfg, "curriculum_lift_only", False):
+            cube_pos = 0.5 * (self._gripper_tip_pos + self._jaw_tip_pos)
+        else:
+            cube_pos = self.cube.data.root_pos_w
         
         # Cube-relative fingertip positions (translation-invariant across workspace)
         gripper_tip_rel = self._gripper_tip_pos - cube_pos  # [num_envs, 3]
@@ -429,11 +439,16 @@ class PickPlaceEnv(DirectRLEnv):
         gripper_quat = self.robot.data.body_quat_w[:, self._gripper_body_idx[0], :]
         jaw_pos      = self.robot.data.body_pos_w[:, self._jaw_body_idx[0], :]
         jaw_quat     = self.robot.data.body_quat_w[:, self._jaw_body_idx[0], :]
-        cube_pos     = self.cube.data.root_pos_w
         
         # Reuse fingertip positions cached by _get_observations this step
         gripper_tip_pos = self._gripper_tip_pos
         jaw_tip_pos     = self._jaw_tip_pos
+        
+        # Curriculum: cube "sticks" to gripper — use midpoint for reward computation
+        if getattr(self.cfg, "curriculum_lift_only", False):
+            cube_pos = 0.5 * (gripper_tip_pos + jaw_tip_pos)
+        else:
+            cube_pos = self.cube.data.root_pos_w
         
         # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1
@@ -743,9 +758,20 @@ class PickPlaceEnv(DirectRLEnv):
         
         num_reset = len(env_ids)
         
-        # Reset robot to default pose
-        joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
-        joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
+        # Reset robot to default or curriculum pose
+        if getattr(self.cfg, "curriculum_lift_only", False):
+            curriculum_pos = torch.tensor(
+                self.cfg.curriculum_joint_pos, device=self.device, dtype=torch.float32
+            ).unsqueeze(0).expand(num_reset, -1)
+            joint_pos = curriculum_pos.clone()
+            joint_vel = torch.zeros_like(joint_pos, device=self.device)
+            cube_xy = torch.tensor(
+                self.cfg.curriculum_cube_xy, device=self.device, dtype=torch.float32
+            ).unsqueeze(0).expand(num_reset, -1)
+        else:
+            joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
+            joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
+            cube_xy = self._sample_workspace_xy(num_reset)
         
         default_root_state = self.robot.data.default_root_state[env_ids].clone()
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
@@ -754,8 +780,7 @@ class PickPlaceEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         
-        # Randomize cube positions
-        cube_xy = self._sample_workspace_xy(num_reset)
+        # Cube position
         cube_z = torch.full((num_reset,), self.cfg.cube_scale[2] / 2.0, device=self.device)
         cube_pos = torch.stack([cube_xy[:, 0], cube_xy[:, 1], cube_z], dim=1)
         cube_pos += self.scene.env_origins[env_ids]
@@ -835,8 +860,13 @@ class PickPlaceEnv(DirectRLEnv):
         self._stage_success[env_ids] = False
         self._stage_dropped[env_ids] = False
         
+        # Curriculum: force "grasped" so agent only learns lift (after reset so it sticks)
+        if getattr(self.cfg, "curriculum_lift_only", False):
+            self.grasp_detector.is_grasped[env_ids] = True
+            self._stage_grasped[env_ids] = True
+        
         # Reset joint targets
-        self._joint_targets[env_ids] = self.robot.data.default_joint_pos[env_ids]
+        self._joint_targets[env_ids] = joint_pos
 
     def _sample_workspace_xy(
         self,

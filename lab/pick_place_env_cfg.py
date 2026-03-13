@@ -239,5 +239,13 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Randomization ranges for cube/cup positions are defined in workspace bounds above
     initial_joint_noise = 0.0  # No noise on joint positions at reset
 
+    # ===== Curriculum: Lift-First =====
+    # When True: cube starts "in grasp", agent only learns to lift (no approach/grasp)
+    curriculum_lift_only = False
+    # Fixed pose for curriculum: gripper low, ready to lift. Tune to match your robot.
+    curriculum_joint_pos = (0.0, 0.5, -1.6, 0.9, 0.0, 0.0)  # pan, lift, elbow, wrist, roll, gripper
+    curriculum_cube_xy = (0.0, -0.22)  # Fixed cube position (x, y) in front of robot
+    curriculum_teleport_cube = True  # Teleport cube to gripper each step (cube "sticks" to gripper)
+
     # ===== Termination Conditions =====
     max_episode_steps = 500  # Fallback; episode_length_s takes precedence
