@@ -7,6 +7,7 @@ Outputs statistics: avg reward, % reached, % grasped, % lifted, % success.
 
 import argparse
 import math
+import sys
 import numpy as np
 from collections import deque
 from typing import Dict, List, Tuple
@@ -1006,6 +1007,28 @@ def plot_training_metrics(metrics: Dict, smoothing_window: int = 20):
         print(f"[WARN] Failed to create plots: {e}")
 
 
+class TeeOutput:
+    """Write to both stdout and a file. Ensures output is visible when stdout is buffered/redirected."""
+
+    def __init__(self, filepath: str):
+        self._stdout = sys.stdout
+        self._stderr = sys.stderr
+        self._file = open(filepath, "w", buffering=1)  # line buffered
+
+    def write(self, data: str):
+        self._stdout.write(data)
+        self._stdout.flush()
+        self._file.write(data)
+        self._file.flush()
+
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+
+    def close(self):
+        self._file.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train PPO on pick-and-place task (Isaac Lab)")
     parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes to train")
@@ -1019,14 +1042,24 @@ if __name__ == "__main__":
                         help="Two-phase: first curriculum (lift-only), then full task")
     parser.add_argument("--curriculum-episodes", type=int, default=1000,
                         help="Episodes for Phase 1 when using --lift-curriculum")
+    parser.add_argument("--log-file", type=str, default=None,
+                        help="Optional: write training output to this file")
     
     args = parser.parse_args()
     
-    print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
-    print(f"[INFO] Parallel environments: {args.n_envs}")
-    print(f"[INFO] Total steps per iteration: {args.rollout_steps} ({args.rollout_steps // args.n_envs} steps/env)")
+    log_path = args.log_file
+    tee = None
+    if log_path:
+        tee = TeeOutput(log_path)
+        sys.stdout = tee
+        sys.stderr = tee
     
-    train_ppo(
+    try:
+        print("[INFO] Using Isaac Lab backend for GPU-accelerated training")
+        print(f"[INFO] Parallel environments: {args.n_envs}")
+        print(f"[INFO] Total steps per iteration: {args.rollout_steps} ({args.rollout_steps // args.n_envs} steps/env)")
+        
+        train_ppo(
         num_episodes=args.episodes,
         max_steps=args.max_steps,
         headless=args.headless,
@@ -1036,5 +1069,10 @@ if __name__ == "__main__":
         curriculum=args.curriculum,
         lift_curriculum=args.lift_curriculum,
         curriculum_episodes=args.curriculum_episodes,
-    )
+        )
+    finally:
+        if tee:
+            sys.stdout = tee._stdout
+            sys.stderr = tee._stderr
+            tee.close()
 
