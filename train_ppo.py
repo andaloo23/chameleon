@@ -699,7 +699,9 @@ def train_ppo(
     print("=" * 60)
     
     # Create environment(s)
+    from isaaclab.utils.logger import configure_logging
     from isaaclab.app import AppLauncher
+    configure_logging(save_logs_to_file=False)  # Console only, no .log file
     app_launcher = AppLauncher(headless=headless)
     simulation_app = app_launcher.app
     
