@@ -202,7 +202,7 @@ def ppo_update(
     last_value: float,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
-    entropy_coef: float = 0.001,
+    entropy_coef: float = 0.005,
     n_epochs: int = 5,
     batch_size: int = 1024,
 ):
@@ -288,8 +288,8 @@ def ppo_update(
             n_updates += 1
             
             # KL Safety Brake: if KL divergence is too high, stop updating to prevent collapse
-            if approx_kl > 0.05:
-                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.05")
+            if approx_kl > 0.03:
+                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.03")
                 kl_brake_triggered = True
                 break
         
