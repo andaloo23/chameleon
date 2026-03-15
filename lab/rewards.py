@@ -320,9 +320,8 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped, transport_weight
     )
     cube_z = cube_pos[:, 2]
-    d_avg = 0.5 * (new_right_tip_dist + new_left_tip_dist)
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
-        cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, d_avg
+        cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, new_d_avg
     )
 
     # Per-step grasp hold reward: incentivizes maintaining grasp, not just triggering it
@@ -336,7 +335,7 @@ def compute_pick_place_rewards(
     # One-time bonuses
     # Use stage_grasped (latched) for is_lifted so brief zone-exit during
     # lifting (cube rotation) doesn't prevent the lift bonus from firing
-    is_lifted = stage_grasped & (cube_z > 0.03)
+    is_lifted = stage_grasped & (cube_z > 0.025)
     (grasp_reward, lift_reward, droppable_reward, success_reward,
      new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success) = compute_one_time_bonuses(
         is_grasped, stage_grasped,

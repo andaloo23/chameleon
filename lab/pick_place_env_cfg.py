@@ -134,7 +134,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
                 angular_damping=0.5,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.1), # Heavier cube for stability (100g)
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for easier lifting (50g)
             collision_props=sim_utils.CollisionPropertiesCfg(
                 contact_offset=0.002,  # Increased to 2mm for smoother contact resolution
                 rest_offset=0.0,
@@ -182,8 +182,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 2: Grasp cube (one-time bonus — reduced to avoid reward-spike domination)
     rew_grasp_bonus = 100.0
     
-    # Stage 2b: Per-step reward for maintaining grasp (kept small to avoid hold-still local optimum)
-    rew_grasp_hold_weight = 0.5
+    # Stage 2b: Per-step reward for maintaining grasp (increased to incentivize holding through lift)
+    rew_grasp_hold_weight = 5.0
     
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
@@ -219,7 +219,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_stall_threshold = 0.01 # Relaxed to catch grasp consistently
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
-    grasp_near_cube_threshold = 0.12  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
+    grasp_near_cube_threshold = 0.06  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
     grasp_frames_to_grasp = 1 # Single frame: grasp registers immediately on zone entry
     grasp_frames_to_drop = 20 # Hysteresis: ~320ms at 62.5Hz — survives cube rotation during lift
     grasp_history_len = 5 # More robust following checks
