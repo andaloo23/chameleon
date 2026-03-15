@@ -237,7 +237,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reset Configuration =====
     # Randomization ranges for cube/cup positions are defined in workspace bounds above
-    initial_joint_noise = 0.1  # Small noise (radians) on joint positions at reset
+    initial_joint_noise = 0.0  # No noise on joint positions at reset
     # Reset pose: arm lowered and extended toward workspace (pan, lift, elbow, wrist, roll, gripper)
     reset_joint_pos = (0.0, 0.5, -1.6, 0.9, 0.0, 0.0)
 

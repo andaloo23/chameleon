@@ -715,16 +715,19 @@ def train_ppo(
         {
             "name": "Close",
             "workspace_radius_range": (0.20, 0.28),
+            "joint_noise": 0.0,
             "advance_when": {"grasped": 70},  # grasp% > 70%
         },
         {
             "name": "Medium",
             "workspace_radius_range": (0.20, 0.35),
+            "joint_noise": 0.1,
             "advance_when": {"grasped": 60, "lifted": 40},
         },
         {
             "name": "Full",
             "workspace_radius_range": (0.20, 0.45),
+            "joint_noise": 0.2,
             "advance_when": None,  # Final stage
         },
     ]
@@ -739,8 +742,9 @@ def train_ppo(
     if curriculum:
         stage = CURRICULUM_STAGES[curriculum_stage]
         cfg.workspace_radius_range = stage["workspace_radius_range"]
+        cfg.initial_joint_noise = stage["joint_noise"]
         print(f"[CURRICULUM] Stage {curriculum_stage + 1}/{len(CURRICULUM_STAGES)}: "
-              f"{stage['name']} (radius {stage['workspace_radius_range']})")
+              f"{stage['name']} (radius {stage['workspace_radius_range']}, noise {stage['joint_noise']})")
         if stage["advance_when"]:
             thresholds = ", ".join(f"{k}%>{v}" for k, v in stage["advance_when"].items())
             print(f"[CURRICULUM] Advance when: {thresholds} (over {CURRICULUM_WINDOW} ep window)")
@@ -817,9 +821,10 @@ def train_ppo(
                     curriculum_stage += 1
                     stage = CURRICULUM_STAGES[curriculum_stage]
                     env.cfg.workspace_radius_range = stage["workspace_radius_range"]
+                    env.cfg.initial_joint_noise = stage["joint_noise"]
                     print(f"\n{'=' * 60}")
                     print(f"[CURRICULUM] Advanced to Stage {curriculum_stage + 1}/{len(CURRICULUM_STAGES)}: "
-                          f"{stage['name']} (radius {stage['workspace_radius_range']}) at ep {total_episodes}")
+                          f"{stage['name']} (radius {stage['workspace_radius_range']}, noise {stage['joint_noise']}) at ep {total_episodes}")
                     if stage["advance_when"]:
                         thresholds_str = ", ".join(f"{k}%>{v}" for k, v in stage["advance_when"].items())
                         print(f"[CURRICULUM] Next advance when: {thresholds_str}")
