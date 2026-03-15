@@ -269,6 +269,7 @@ def compute_pick_place_rewards(
     drop_penalty: float,
     grasp_hold_weight: float,
     height_bonus_weight: float,
+    approach_delta_weight: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -285,7 +286,11 @@ def compute_pick_place_rewards(
         d_L_pos, d_L_neg, d_R_pos, d_R_neg    (debug)
         new_d_avg                               (state for next step)
     """
-    curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)  # diagnostic only
+    curr_dist = torch.norm(gripper_pos - cube_pos, dim=1)
+
+    # Coarse approach: reward gripper center getting closer to cube (pre-grasp only)
+    approach_delta = torch.clamp(prev_gripper_cube_dist - curr_dist, min=0.0)
+    coarse_approach_reward = approach_delta_weight * approach_delta * (~stage_grasped).float()
 
     # Pre-grasp: delta-based potential approach shaping
     (
@@ -349,6 +354,7 @@ def compute_pick_place_rewards(
     )
 
     total_reward = (
+        coarse_approach_reward +
         fingertip_reach_reward +
         grasp_reward +
         grasp_hold_reward +

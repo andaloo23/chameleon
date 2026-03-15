@@ -177,7 +177,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
-    rew_approach_delta_weight = 2.0
+    rew_approach_delta_weight = 50.0  # Coarse gripper-to-cube approach (pre-grasp delta shaping)
     
     # Stage 2: Grasp cube (one-time bonus — reduced to avoid reward-spike domination)
     rew_grasp_bonus = 100.0

@@ -603,6 +603,7 @@ class PickPlaceEnv(DirectRLEnv):
             drop_penalty=self.cfg.rew_drop_penalty,
             grasp_hold_weight=self.cfg.rew_grasp_hold_weight,
             height_bonus_weight=self.cfg.rew_height_bonus_weight,
+            approach_delta_weight=self.cfg.rew_approach_delta_weight,
         )
         
 
