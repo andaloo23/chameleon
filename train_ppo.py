@@ -679,12 +679,10 @@ def train_ppo(
     log_interval: int = 10,
     n_envs: int = 1,
     curriculum: bool = False,
-    lift_curriculum: bool = False,
-    curriculum_episodes: int = 1000,
 ):
     """
     Train PPO on the pick-and-place task using Isaac Lab.
-    
+
     Args:
         num_episodes: Target number of episodes to collect
         max_steps: Max steps per episode
@@ -693,11 +691,12 @@ def train_ppo(
         rollout_steps: Steps per rollout before update
         log_interval: Episodes between logging
         n_envs: Number of parallel environments
+        curriculum: Use adaptive staged curriculum
     """
     print("=" * 60)
     print("PPO Training for Pick-and-Place Task (Isaac Lab)")
     print("=" * 60)
-    
+
     # Create environment(s)
     from isaaclab.app import AppLauncher
     app_launcher = AppLauncher(headless=headless)
@@ -705,25 +704,49 @@ def train_ppo(
     # After AppLauncher, pxr is available. Disable file logging before any env creation.
     from isaaclab.utils.logger import configure_logging
     configure_logging(save_logs_to_file=False)
-    
+
     from lab.pick_place_env import PickPlaceEnv
     from lab.pick_place_env_cfg import PickPlaceEnvCfg
-    
-    def make_env(use_curriculum: bool):
-        cfg = PickPlaceEnvCfg()
-        cfg.scene.num_envs = n_envs
-        cfg.episode_length_s = max_steps / 60.0  # Convert steps to seconds
-        cfg.curriculum_lift_only = use_curriculum
-        return PickPlaceEnv(cfg), cfg
-    
-    # Phase 1: curriculum if lift_curriculum or curriculum
-    use_curriculum = curriculum or lift_curriculum
-    env, cfg = make_env(use_curriculum)
+
+    # --- Adaptive curriculum stages ---
+    # Each stage defines workspace difficulty and advancement thresholds.
+    # The agent must meet ALL thresholds (measured over a rolling window) to advance.
+    CURRICULUM_STAGES = [
+        {
+            "name": "Close",
+            "workspace_radius_range": (0.20, 0.28),
+            "advance_when": {"grasped": 70},  # grasp% > 70%
+        },
+        {
+            "name": "Medium",
+            "workspace_radius_range": (0.20, 0.35),
+            "advance_when": {"grasped": 60, "lifted": 40},
+        },
+        {
+            "name": "Full",
+            "workspace_radius_range": (0.20, 0.45),
+            "advance_when": None,  # Final stage
+        },
+    ]
+    CURRICULUM_WINDOW = 500  # Rolling window of episodes to evaluate thresholds
+
+    cfg = PickPlaceEnvCfg()
+    cfg.scene.num_envs = n_envs
+    cfg.episode_length_s = max_steps / 60.0
+
+    # Apply initial curriculum stage if enabled
+    curriculum_stage = 0
+    if curriculum:
+        stage = CURRICULUM_STAGES[curriculum_stage]
+        cfg.workspace_radius_range = stage["workspace_radius_range"]
+        print(f"[CURRICULUM] Stage {curriculum_stage + 1}/{len(CURRICULUM_STAGES)}: "
+              f"{stage['name']} (radius {stage['workspace_radius_range']})")
+        if stage["advance_when"]:
+            thresholds = ", ".join(f"{k}%>{v}" for k, v in stage["advance_when"].items())
+            print(f"[CURRICULUM] Advance when: {thresholds} (over {CURRICULUM_WINDOW} ep window)")
+
+    env = PickPlaceEnv(cfg)
     print(f"Using Isaac Lab with {n_envs} GPU-parallel environments")
-    if lift_curriculum:
-        print(f"[INFO] Lift curriculum: Phase 1 ({curriculum_episodes} ep) lift-only, then Phase 2 full task")
-    elif use_curriculum:
-        print("[INFO] Curriculum mode: lift-only (cube teleported to gripper)")
     
     # Isaac Lab uses gymnasium-style API with dict observations
     obs_dim = cfg.observation_space
@@ -776,17 +799,34 @@ def train_ppo(
     obs_normalizer = RunningObsNormalizer(obs_dim, device=env.device)
     rollout_state = {"obs_normalizer": obs_normalizer}
     
+    # Rolling window for curriculum advancement
+    curriculum_recent_flags = deque(maxlen=CURRICULUM_WINDOW)
+
     while total_episodes < num_episodes:
-        # Phase switch: curriculum -> full task
-        if lift_curriculum and use_curriculum and total_episodes >= curriculum_episodes:
-            print("\n" + "=" * 60)
-            print(f"PHASE 2: Switching to full task (curriculum complete at {total_episodes} episodes)")
-            print("=" * 60 + "\n")
-            env.close()
-            env, cfg = make_env(use_curriculum=False)
-            rollout_state = None  # Force fresh state for new env (obs distribution differs)
-            use_curriculum = False
-        
+        # --- Curriculum stage advancement ---
+        if curriculum and CURRICULUM_STAGES[curriculum_stage]["advance_when"] is not None:
+            if len(curriculum_recent_flags) >= CURRICULUM_WINDOW:
+                thresholds = CURRICULUM_STAGES[curriculum_stage]["advance_when"]
+                all_met = True
+                for metric, threshold in thresholds.items():
+                    pct = 100 * sum(1 for f in curriculum_recent_flags if f.get(metric)) / len(curriculum_recent_flags)
+                    if pct < threshold:
+                        all_met = False
+                        break
+                if all_met:
+                    curriculum_stage += 1
+                    stage = CURRICULUM_STAGES[curriculum_stage]
+                    env.cfg.workspace_radius_range = stage["workspace_radius_range"]
+                    print(f"\n{'=' * 60}")
+                    print(f"[CURRICULUM] Advanced to Stage {curriculum_stage + 1}/{len(CURRICULUM_STAGES)}: "
+                          f"{stage['name']} (radius {stage['workspace_radius_range']}) at ep {total_episodes}")
+                    if stage["advance_when"]:
+                        thresholds_str = ", ".join(f"{k}%>{v}" for k, v in stage["advance_when"].items())
+                        print(f"[CURRICULUM] Next advance when: {thresholds_str}")
+                    else:
+                        print(f"[CURRICULUM] Final stage reached")
+                    print(f"{'=' * 60}\n")
+
         iteration += 1
         buffer.clear()
         
@@ -803,6 +843,8 @@ def train_ppo(
         # Track statistics
         all_rewards.extend(episode_rewards)
         all_flags.extend(episode_flags)
+        if curriculum:
+            curriculum_recent_flags.extend(episode_flags)
         total_episodes += len(episode_rewards)
         avg_reward = np.mean(all_rewards) if all_rewards else 0.0
         
@@ -840,8 +882,8 @@ def train_ppo(
                 iter_avg_reward = 0.0
             
             last_ep_reward = episode_rewards[-1] if episode_rewards else 0.0
-            phase_tag = " [P1]" if use_curriculum and lift_curriculum else (" [P2]" if lift_curriculum else "")
-            print(f"[Iter {iteration:4d}]{phase_tag} Ep: {total_episodes:5d} ({n_ep_this_iter} this iter) | "
+            stage_tag = f" [S{curriculum_stage + 1}]" if curriculum else ""
+            print(f"[Iter {iteration:4d}]{stage_tag} Ep: {total_episodes:5d} ({n_ep_this_iter} this iter) | "
                   f"Reward: {iter_avg_reward:7.2f} | "
                   f"Last: {last_ep_reward:7.2f} | "
                   f"Entropy: {metrics['entropy']:.3f} | "
@@ -1040,11 +1082,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--rollout-steps", type=int, default=131072, help="Steps per rollout")
     parser.add_argument("--n-envs", type=int, default=1024, help="Number of parallel environments")
-    parser.add_argument("--curriculum", action="store_true", help="Use curriculum: first learn to lift (cube teleported to gripper)")
-    parser.add_argument("--lift-curriculum", action="store_true",
-                        help="Two-phase: first curriculum (lift-only), then full task")
-    parser.add_argument("--curriculum-episodes", type=int, default=1000,
-                        help="Episodes for Phase 1 when using --lift-curriculum")
+    parser.add_argument("--curriculum", action="store_true",
+                        help="Adaptive staged curriculum: start with cube close, expand as agent improves")
     parser.add_argument("--log-file", type=str, default=None,
                         help="Optional: write training output to this file")
     
@@ -1070,8 +1109,6 @@ if __name__ == "__main__":
         rollout_steps=args.rollout_steps,
         n_envs=args.n_envs,
         curriculum=args.curriculum,
-        lift_curriculum=args.lift_curriculum,
-        curriculum_episodes=args.curriculum_episodes,
         )
     finally:
         if tee:
