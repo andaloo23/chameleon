@@ -82,9 +82,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             pos=(0.0, 0.0, 0.0),
             joint_pos={
                 "shoulder_pan": 0.0,
-                "shoulder_lift": 0.0,
-                "elbow_flex": 0.0,
-                "wrist_flex": 1.0,
+                "shoulder_lift": 0.5,
+                "elbow_flex": -1.6,
+                "wrist_flex": 0.9,
                 "wrist_roll": 0.0,
                 "gripper": 0.0,
             },
@@ -237,7 +237,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Reset Configuration =====
     # Randomization ranges for cube/cup positions are defined in workspace bounds above
-    initial_joint_noise = 0.0  # No noise on joint positions at reset
+    initial_joint_noise = 0.1  # Small noise (radians) on joint positions at reset
 
     # ===== Termination Conditions =====
     max_episode_steps = 500  # Fallback; episode_length_s takes precedence

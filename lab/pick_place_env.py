@@ -744,8 +744,14 @@ class PickPlaceEnv(DirectRLEnv):
         
         num_reset = len(env_ids)
         
-        # Reset robot to default pose
+        # Reset robot to default pose with optional noise
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
+        if self.cfg.initial_joint_noise > 0.0:
+            noise = sample_uniform(
+                -self.cfg.initial_joint_noise, self.cfg.initial_joint_noise,
+                joint_pos.shape, self.device
+            )
+            joint_pos += noise
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
         cube_xy = self._sample_workspace_xy(num_reset)
         
