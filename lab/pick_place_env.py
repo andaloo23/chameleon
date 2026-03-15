@@ -745,16 +745,17 @@ class PickPlaceEnv(DirectRLEnv):
         num_reset = len(env_ids)
         
         # Reset robot to workspace-ready pose with optional noise
-        reset_pos = torch.tensor(
-            self.cfg.reset_joint_pos, device=self.device, dtype=torch.float32
-        ).unsqueeze(0).expand(num_reset, -1).clone()
+        # Start from default (robot-internal ordering), then overwrite with our reset pose
+        joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
+        for i, name in enumerate(self.cfg.joint_names):
+            idx = self._joint_indices[name]
+            joint_pos[:, idx] = self.cfg.reset_joint_pos[i]
         if self.cfg.initial_joint_noise > 0.0:
             noise = sample_uniform(
                 -self.cfg.initial_joint_noise, self.cfg.initial_joint_noise,
-                reset_pos.shape, self.device
+                joint_pos.shape, self.device
             )
-            reset_pos = reset_pos + noise
-        joint_pos = reset_pos
+            joint_pos = joint_pos + noise
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
         cube_xy = self._sample_workspace_xy(num_reset)
         
