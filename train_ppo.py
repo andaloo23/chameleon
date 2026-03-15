@@ -702,6 +702,9 @@ def train_ppo(
     from isaaclab.app import AppLauncher
     app_launcher = AppLauncher(headless=headless)
     simulation_app = app_launcher.app
+    # After AppLauncher, pxr is available. Disable file logging before any env creation.
+    from isaaclab.utils.logger import configure_logging
+    configure_logging(save_logs_to_file=False)
     
     from lab.pick_place_env import PickPlaceEnv
     from lab.pick_place_env_cfg import PickPlaceEnvCfg
