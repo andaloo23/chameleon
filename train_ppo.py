@@ -698,12 +698,12 @@ def train_ppo(
     print("PPO Training for Pick-and-Place Task (Isaac Lab)")
     print("=" * 60)
     
-    # Create environment(s)
-    from isaaclab.utils.logger import configure_logging
+    # Create environment(s) — AppLauncher must run first (initializes pxr/USD)
     from isaaclab.app import AppLauncher
-    configure_logging(save_logs_to_file=False)  # Console only, no .log file
     app_launcher = AppLauncher(headless=headless)
     simulation_app = app_launcher.app
+    from isaaclab.utils.logger import configure_logging
+    configure_logging(save_logs_to_file=False)  # Console only, no .log file
     
     from lab.pick_place_env import PickPlaceEnv
     from lab.pick_place_env_cfg import PickPlaceEnvCfg
