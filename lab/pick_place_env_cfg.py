@@ -182,17 +182,17 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 2: Grasp cube (one-time bonus — reduced to avoid reward-spike domination)
     rew_grasp_bonus = 100.0
     
-    # Stage 2b: Per-step reward for maintaining grasp (reduced so hold-still < lifting)
-    rew_grasp_hold_weight = 1.0
+    # Stage 2b: Per-step reward for maintaining grasp (balanced to avoid hold-still local optimum)
+    rew_grasp_hold_weight = 2.0
 
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
 
     # Stage 3: Lift cube (dense delta shaping per step)
-    rew_lift_shaping_weight = 400.0
+    rew_lift_shaping_weight = 300.0
 
     # Stage 3b: Per-step height bonus while grasped (direct gradient for lifting)
-    rew_height_bonus_weight = 400.0
+    rew_height_bonus_weight = 300.0
     
     # Stage 4: Transport to cup (3D delta-based shaping)
     rew_transport_weight = 5.0
@@ -227,7 +227,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Euclidean radius for zone-entry: fingertip is "in zone" when its distance to
     # the assigned face zone center (= fcL or fcR) is below this threshold.
     # Tune based on keyboard_control_lab fcL/fcR values at successful contact.
-    grasp_zone_entry_radius = 0.04  # 4cm — requires each tip to be near its face center
+    grasp_zone_entry_radius = 0.06  # 6cm — matches achievable fingertip distances
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
