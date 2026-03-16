@@ -509,29 +509,25 @@ class PickPlaceEnv(DirectRLEnv):
         _d_fixed_to_face  = torch.where(use_A, d_fixed_pos,  d_fixed_neg)   # == fcL
         _d_moving_to_face = torch.where(use_A, d_moving_neg, d_moving_pos)  # == fcR
 
+        # Get gripper joint value and target
+        gripper_value = self.joint_pos[:, self._gripper_joint_idx]
+        target_gripper = self._joint_targets[:, self._gripper_joint_idx]
+
         zone_r = self.cfg.grasp_zone_entry_radius
         # Require each tip to independently be within zone_r of its assigned face center,
         # AND require the gripper to be closing (not wide open).
         gripper_is_closing = gripper_value < self.cfg.grasp_close_command_threshold
         self._fixed_tip_in_left_zone   = (_d_fixed_to_face  < zone_r) & gripper_is_closing
         self._moving_tip_in_right_zone = (_d_moving_to_face < zone_r) & gripper_is_closing
-        # Keep d_avg for reward shaping (uses full average for smooth gradient)
-        d_avg_zone = 0.5 * (_d_fixed_to_face + _d_moving_to_face)
-        
+
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
         # Inverse rotation = rotate by conjugate q* = (-x, -y, -z, w)
         gripper_quat_inv = gripper_quat.clone()
         gripper_quat_inv[:, 1:] *= -1.0  # conjugate of [w,x,y,z] = [w,-x,-y,-z]
-        
+
         gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
-        
-
-        
-        # Get gripper joint value and target
-        gripper_value = self.joint_pos[:, self._gripper_joint_idx]
-        target_gripper = self._joint_targets[:, self._gripper_joint_idx]
         
         # Update grasp detector with fingertip zone occupancy
         self.grasp_detector.update(
