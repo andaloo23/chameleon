@@ -937,11 +937,23 @@ def train_ppo(
             sign    = "+" if delta >= 0 else ""
             print(f"{label:<12} {p_all:>7.1f}%  {p_start:>9.1f}%  {p_end:>9.1f}%  {sign}{delta:>6.1f}%")
     
+    # Save final checkpoint
+    checkpoint_path = "ppo_checkpoint_final.pt"
+    torch.save({
+        "policy_state_dict": policy.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "obs_normalizer_mean": obs_normalizer.mean,
+        "obs_normalizer_var": obs_normalizer.var,
+        "obs_normalizer_count": obs_normalizer.count,
+        "total_episodes": total_episodes,
+    }, checkpoint_path)
+    print(f"\n[INFO] Checkpoint saved to: {checkpoint_path}")
+
     # Plot metrics
     plot_training_metrics(metrics_history)
-    
+
     env.close()
-    
+
     return policy
 
 
