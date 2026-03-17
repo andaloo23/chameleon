@@ -72,8 +72,8 @@ def main():
                         help="Path to checkpoint file (default: ppo_checkpoint_final.pt)")
     parser.add_argument("--n", type=int, default=10,
                         help="Number of episodes to run (default: 10)")
-    parser.add_argument("--max-steps", type=int, default=500,
-                        help="Max steps per episode")
+    parser.add_argument("--max-steps", type=int, default=200,
+                        help="Max steps per episode (default: 200 for visualization)")
     parser.add_argument("--deterministic", action="store_true",
                         help="Use mean actions instead of sampling (less jitter)")
     parser.add_argument("--n-envs", type=int, default=1,
@@ -81,6 +81,9 @@ def main():
     parser.add_argument("--delay", type=float, default=0.0,
                         help="Sleep (seconds) between steps to slow down playback. "
                              "e.g. --delay 0.05 for ~20 steps/sec (default: 0 = full speed)")
+    parser.add_argument("--render-every", type=int, default=1,
+                        help="Only render every N steps (default: 1). "
+                             "Increase to speed up playback, e.g. --render-every 5")
     args = parser.parse_args()
 
     # Isaac Lab must be launched before importing env
@@ -137,6 +140,8 @@ def main():
         ever_droppable = torch.zeros(args.n_envs, dtype=torch.bool, device=device)
         ever_success   = torch.zeros(args.n_envs, dtype=torch.bool, device=device)
 
+        print(f"\n[Ep {ep+1}/{args.n}] Starting...", flush=True)
+        prev_flags = ""
         for step in range(args.max_steps):
             with torch.no_grad():
                 action, _ = policy.get_action(obs, deterministic=args.deterministic)
@@ -155,10 +160,30 @@ def main():
             ever_droppable |= milestones.get("droppable", torch.zeros_like(ever_droppable))
             ever_success   |= milestones.get("success",   torch.zeros_like(ever_success))
 
+            # Per-step status line (overwrite in place)
+            dist   = task_state.get("gripper_cube_distance", None)
+            is_g   = task_state.get("is_grasped", None)
+            cube_z = task_state.get("cube_pos", None)
+            dist_str   = f"dist={dist[0].item():.3f}m" if dist is not None else ""
+            grasped_str = f"grasped={'YES' if (is_g is not None and is_g[0].item()) else 'no'}"
+            height_str  = f"z={cube_z[0, 2].item():.3f}m" if cube_z is not None else ""
+            flags_str   = ("R" if ever_reached else ".") + \
+                          ("G" if ever_grasped[0].item() else ".") + \
+                          ("L" if ever_lifted[0].item() else ".") + \
+                          ("D" if ever_droppable[0].item() else ".") + \
+                          ("S" if ever_success[0].item() else ".")
+            line = f"  s{step:>3d} | r={reward[0].item():+7.2f} | {dist_str} | {height_str} | {grasped_str} | milestones={flags_str}"
+            print(f"\r{line:<80}", end="", flush=True)
+            # Print new line when a new milestone is reached
+            if flags_str != prev_flags:
+                print(flush=True)
+                prev_flags = flags_str
+
             if terminated[0].item() or truncated[0].item():
                 break
 
-            simulation_app.update()
+            if step % args.render_every == 0:
+                simulation_app.update()
 
             if args.delay > 0:
                 time.sleep(args.delay)
