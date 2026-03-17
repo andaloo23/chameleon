@@ -10,8 +10,12 @@ Run from repo root:
 """
 
 import argparse
+import os
 import sys
 import time
+
+# Ensure repo root is on path so `lab` package is importable
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
