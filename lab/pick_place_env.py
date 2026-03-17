@@ -514,9 +514,14 @@ class PickPlaceEnv(DirectRLEnv):
         target_gripper = self._joint_targets[:, self._gripper_joint_idx]
 
         zone_r = self.cfg.grasp_zone_entry_radius
-        # Require each tip to independently be within zone_r of its assigned face center.
-        self._fixed_tip_in_left_zone   = _d_fixed_to_face  < zone_r
-        self._moving_tip_in_right_zone = _d_moving_to_face < zone_r
+        # Require tips in zone AND gripper is closing AND gripper is stalled (blocked by cube).
+        # Stall means the gripper is commanded to close but not moving — physically blocked.
+        gripper_vel = self.joint_vel[:, self._gripper_joint_idx]
+        gripper_is_closing = gripper_value < self.cfg.grasp_close_command_threshold
+        gripper_stalled    = gripper_vel.abs() < self.cfg.grasp_stall_threshold
+        contact_confirmed  = gripper_is_closing & gripper_stalled
+        self._fixed_tip_in_left_zone   = (_d_fixed_to_face  < zone_r) & contact_confirmed
+        self._moving_tip_in_right_zone = (_d_moving_to_face < zone_r) & contact_confirmed
 
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame

@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200,
                         help="Max steps per episode (default: 200 for visualization)")
     parser.add_argument("--deterministic", action="store_true",
-                        help="Use mean actions instead of sampling (less jitter)")
+                        help="Use mean actions instead of sampling")
     parser.add_argument("--n-envs", type=int, default=1,
                         help="Number of parallel environments")
     parser.add_argument("--delay", type=float, default=0.0,
@@ -161,19 +161,21 @@ def main():
             ever_success   |= milestones.get("success",   torch.zeros_like(ever_success))
 
             # Per-step status line (overwrite in place)
-            dist   = task_state.get("gripper_cube_distance", None)
-            is_g   = task_state.get("is_grasped", None)
-            cube_z = task_state.get("cube_pos", None)
-            dist_str   = f"dist={dist[0].item():.3f}m" if dist is not None else ""
-            grasped_str = f"grasped={'YES' if (is_g is not None and is_g[0].item()) else 'no'}"
-            height_str  = f"z={cube_z[0, 2].item():.3f}m" if cube_z is not None else ""
+            dist    = task_state.get("gripper_cube_distance", None)
+            is_g    = task_state.get("is_grasped", None)
+            cube_z  = task_state.get("cube_pos", None)
+            g_width = task_state.get("gripper_width", None)
+            dist_str    = f"dist={dist[0].item():.3f}" if dist is not None else ""
+            height_str  = f"z={cube_z[0, 2].item():.3f}" if cube_z is not None else ""
+            gripper_str = f"grip={g_width[0].item():.3f}" if g_width is not None else ""
+            grasped_str = f"{'GRASPED' if (is_g is not None and is_g[0].item()) else '       '}"
             flags_str   = ("R" if ever_reached else ".") + \
                           ("G" if ever_grasped[0].item() else ".") + \
                           ("L" if ever_lifted[0].item() else ".") + \
                           ("D" if ever_droppable[0].item() else ".") + \
                           ("S" if ever_success[0].item() else ".")
-            line = f"  s{step:>3d} | r={reward[0].item():+7.2f} | {dist_str} | {height_str} | {grasped_str} | milestones={flags_str}"
-            print(f"\r{line:<80}", end="", flush=True)
+            line = f"  s{step:>3d} | r={reward[0].item():+7.2f} | {dist_str} | {height_str} | {gripper_str} | {grasped_str} | {flags_str}"
+            print(f"\r{line:<90}", end="", flush=True)
             # Print new line when a new milestone is reached
             if flags_str != prev_flags:
                 print(flush=True)
