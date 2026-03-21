@@ -388,7 +388,7 @@ def main():
                               f"L_in_zone={left_ok}  "
                               f"R_in_zone={right_ok}  "
                               f"→ frames={f_frames}/{env.cfg.grasp_frames_to_grasp}")
-                        # Print zone sub-components for diagnosis
+                        # Zone distances
                         d_fix = _extract_val(task_state.get("dbg_d_fixed"))
                         d_mov = _extract_val(task_state.get("dbg_d_moving"))
                         z_r   = _extract_val(task_state.get("dbg_zone_radius"))
@@ -396,6 +396,16 @@ def main():
                         print(f"  [ZONE DBG] zone_radius={z_r:.3f}  "
                               f"fcL={d_fix:.4f}  fcR={d_mov:.4f}  "
                               f"avg={d_avg_v:.4f} ({'IN' if d_avg_v < z_r else 'OUT'})")
+                        # Gripper closure + stall conditions
+                        g_pos = env.joint_pos[0, env._gripper_joint_idx].item()
+                        g_vel = env.joint_vel[0, env._gripper_joint_idx].item()
+                        closing = g_pos < env.cfg.grasp_close_command_threshold
+                        stalled = abs(g_vel) < env.cfg.grasp_stall_threshold
+                        print(f"  [GRIP DBG] pos={g_pos:.3f} (closing={closing}, thresh<{env.cfg.grasp_close_command_threshold})  "
+                              f"vel={g_vel:+.3f} (stalled={stalled}, thresh<{env.cfg.grasp_stall_threshold})")
+                        print(f"  [GRASPED]  = zone_L AND zone_R AND closing AND stalled = "
+                              f"{left_ok} AND {right_ok} AND {closing} AND {stalled} = "
+                              f"{left_ok and right_ok and closing and stalled}")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")
