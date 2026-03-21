@@ -399,13 +399,14 @@ def main():
                         # Gripper closure + stall conditions
                         g_pos = env.joint_pos[0, env._gripper_joint_idx].item()
                         g_vel = env.joint_vel[0, env._gripper_joint_idx].item()
-                        closing = g_pos < env.cfg.grasp_close_command_threshold
+                        in_range = env.cfg.grasp_min_contact_pos < g_pos < env.cfg.grasp_close_command_threshold
                         stalled = abs(g_vel) < env.cfg.grasp_stall_threshold
-                        print(f"  [GRIP DBG] pos={g_pos:.3f} (closing={closing}, thresh<{env.cfg.grasp_close_command_threshold})  "
+                        print(f"  [GRIP DBG] pos={g_pos:.3f} (in_contact_range={in_range}, "
+                              f"{env.cfg.grasp_min_contact_pos}<pos<{env.cfg.grasp_close_command_threshold})  "
                               f"vel={g_vel:+.3f} (stalled={stalled}, thresh<{env.cfg.grasp_stall_threshold})")
-                        print(f"  [GRASPED]  = zone_L AND zone_R AND closing AND stalled = "
-                              f"{left_ok} AND {right_ok} AND {closing} AND {stalled} = "
-                              f"{left_ok and right_ok and closing and stalled}")
+                        print(f"  [GRASPED]  = zone_L AND zone_R AND in_range AND stalled = "
+                              f"{left_ok} AND {right_ok} AND {in_range} AND {stalled} = "
+                              f"{left_ok and right_ok and in_range and stalled}")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")

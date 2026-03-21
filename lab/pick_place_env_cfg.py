@@ -215,7 +215,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     fingertip_close_bonus        = 0.5    # per-step bonus when avg d < close_threshold
 
     # ===== Grasp Detection Thresholds =====
-    grasp_close_command_threshold = 0.6  # gripper actual joint pos: blocked-on-cube ≈ 0.47, open ≈ 1.0–1.5
+    grasp_min_contact_pos = 0.20         # gripper must be > this to count as blocked-on-cube (excludes initial pos ≈ 0.0)
+    grasp_close_command_threshold = 0.6  # gripper must be < this (open ≈ 1.0–1.5, blocked-on-cube ≈ 0.25–0.55)
     grasp_stall_threshold = 0.5  # rad/s — gripper velocity below this = stalled/blocked by cube
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
