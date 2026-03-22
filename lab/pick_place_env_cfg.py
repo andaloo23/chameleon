@@ -183,7 +183,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_grasp_bonus = 100.0
     
     # Stage 2b: Per-step reward for maintaining grasp (balanced to avoid hold-still local optimum)
-    rew_grasp_hold_weight = 3.0
+    rew_grasp_hold_weight = 2.0
 
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
