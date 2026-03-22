@@ -145,6 +145,9 @@ class PickPlaceEnv(DirectRLEnv):
         # Delta-based approach: previous d_avg for potential shaping
         self._prev_d_avg = torch.ones(self.num_envs, device=self.device)
 
+        # Previous gripper joint value for delta-based grip-close reward
+        self._prev_gripper_value = torch.zeros(self.num_envs, device=self.device)
+
         self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
         self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
 
@@ -609,6 +612,23 @@ class PickPlaceEnv(DirectRLEnv):
         
 
 
+        # Delta-based grip-close reward: fires only when actively closing near cube (pre-grasp).
+        # Rewards closing motion (delta > 0 when gripper_value decreases = closing).
+        # Inherently un-farmable: total reward is bounded by total gripper displacement.
+        gripper_close_delta = torch.clamp(self._prev_gripper_value - gripper_value, min=0.0)
+        gripper_in_contact_range = (
+            (gripper_value > self.cfg.grasp_min_contact_pos) &
+            (gripper_value < self.cfg.grasp_close_command_threshold)
+        ).float()
+        r_grip_close_delta = (
+            self.cfg.rew_grip_close
+            * (new_d_avg < 0.05).float()
+            * gripper_in_contact_range
+            * gripper_close_delta
+            * (~new_stage_grasped).float()
+        )
+        total_reward = total_reward + r_grip_close_delta
+
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
         
@@ -635,7 +655,7 @@ class PickPlaceEnv(DirectRLEnv):
         # so a fully-closed idle gripper (pos≈0.0) does NOT get this reward.
         gripper_in_range = ((gripper_value > self.cfg.grasp_min_contact_pos) &
                             (gripper_value < self.cfg.grasp_close_command_threshold)).float()
-        r_grip_close = self.cfg.rew_grip_close * (new_d_avg < 0.05).float() * gripper_in_range
+        r_grip_close = self.cfg.rew_grip_close * (new_d_avg < 0.10).float() * gripper_in_range
 
         _step_fingertip_rew = (r_approach_dbg + r_open_near + r_grip_close) * not_grasped_mask
         
@@ -646,6 +666,7 @@ class PickPlaceEnv(DirectRLEnv):
         self._prev_transport_dist = new_transport_dist
         self._prev_cube_z = new_cube_z
         self._prev_d_avg = new_d_avg
+        self._prev_gripper_value = gripper_value.clone()
         self._was_grasped = self.grasp_detector.is_grasped.clone()
         self._was_droppable = self.grasp_detector.is_droppable.clone()
         self._was_in_cup = self.grasp_detector.is_in_cup.clone()
@@ -846,6 +867,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Initialize prev_d_avg to typical starting distance (~0.5m).
         # With unclamped delta, this avoids a large penalty on the first step.
         self._prev_d_avg[env_ids] = 0.5
+        self._prev_gripper_value[env_ids] = 0.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False

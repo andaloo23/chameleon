@@ -400,13 +400,12 @@ def main():
                         g_pos = env.joint_pos[0, env._gripper_joint_idx].item()
                         g_vel = env.joint_vel[0, env._gripper_joint_idx].item()
                         in_range = env.cfg.grasp_min_contact_pos < g_pos < env.cfg.grasp_close_command_threshold
-                        stalled = abs(g_vel) < env.cfg.grasp_stall_threshold
                         print(f"  [GRIP DBG] pos={g_pos:.3f} (in_contact_range={in_range}, "
                               f"{env.cfg.grasp_min_contact_pos}<pos<{env.cfg.grasp_close_command_threshold})  "
-                              f"vel={g_vel:+.3f} (stalled={stalled}, thresh<{env.cfg.grasp_stall_threshold})")
-                        print(f"  [GRASPED]  = zone_L AND zone_R AND in_range AND stalled = "
-                              f"{left_ok} AND {right_ok} AND {in_range} AND {stalled} = "
-                              f"{left_ok and right_ok and in_range and stalled}")
+                              f"vel={g_vel:+.3f}")
+                        print(f"  [GRASPED]  = zone_L AND zone_R AND in_range = "
+                              f"{left_ok} AND {right_ok} AND {in_range} = "
+                              f"{left_ok and right_ok and in_range}")
                 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user")

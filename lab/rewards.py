@@ -218,11 +218,7 @@ def compute_fingertip_obb_reach_reward(
     delta_phi = phi_new - phi_old
     r_approach = approach_weight * delta_phi
 
-    # --- Gripper closing near cube (per-step incentive) ---
-    gripper_closing = (gripper_value < gripper_close_threshold).float()
-    r_grip_close = 2.0 * (d_avg < 0.05).float() * gripper_closing
-
-    reach_reward = r_approach + r_grip_close
+    reach_reward = r_approach
 
     return reach_reward, d_R, d_L, d_L_pos, d_L_neg, d_R_pos, d_R_neg, d_avg
 
