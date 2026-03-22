@@ -626,10 +626,18 @@ class PickPlaceEnv(DirectRLEnv):
         phi_new = torch.exp(-new_d_avg / self.cfg.fingertip_sigma)
         delta_phi = torch.clamp(phi_new - phi_old, min=0.0)
         r_approach_dbg = self.cfg.rew_fingertip_obb_weight * delta_phi
-        gripper_closing = (gripper_value < self.cfg.grasp_close_command_threshold).float()
-        r_grip_close = 2.0 * (new_d_avg < 0.05).float() * gripper_closing
-        
-        _step_fingertip_rew = (r_approach_dbg + r_grip_close) * not_grasped_mask
+        # Reward 1: gripper open (pos > 0.5) while tips are near the cube.
+        # Teaches the policy to approach with an open gripper, enabling the grasp.
+        gripper_open = (gripper_value > 0.50).float()
+        r_open_near = self.cfg.rew_grip_open_near * (new_d_avg < 0.10).float() * gripper_open
+        # Reward 2: gripper in contact range (0.20–0.60) while tips are very close.
+        # Rewards the closing-onto-cube transition. Uses contact range, not just pos<0.6,
+        # so a fully-closed idle gripper (pos≈0.0) does NOT get this reward.
+        gripper_in_range = ((gripper_value > self.cfg.grasp_min_contact_pos) &
+                            (gripper_value < self.cfg.grasp_close_command_threshold)).float()
+        r_grip_close = self.cfg.rew_grip_close * (new_d_avg < 0.05).float() * gripper_in_range
+
+        _step_fingertip_rew = (r_approach_dbg + r_open_near + r_grip_close) * not_grasped_mask
         
         # Removed pre-grasp averages and minimums
 
