@@ -180,7 +180,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_approach_delta_weight = 50.0  # Coarse gripper-to-cube approach (pre-grasp delta shaping)
     
     # Stage 2: Grasp cube (one-time bonus — reduced to avoid reward-spike domination)
-    rew_grasp_bonus = 100.0
+    rew_grasp_bonus = 200.0
     
     # Stage 2b: Per-step reward for maintaining grasp (balanced to avoid hold-still local optimum)
     rew_grasp_hold_weight = 2.0
@@ -205,7 +205,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     # Penalties
     rew_action_cost_weight = 0.0    # Disabled: biases toward inaction during exploration phase
-    rew_drop_penalty = -100.0   # Re-enabled: discourages grab-and-release strategy
+    rew_drop_penalty = 0.0      # Disabled: was canceling grasp_bonus (+100 grasp - 100 drop = 0 net)
     rew_cup_collision_penalty = -0.5
 
     # Pre-grasp fingertip reaching rewards
