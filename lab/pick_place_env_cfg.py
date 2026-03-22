@@ -211,15 +211,15 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight     = 200.0   # weight for potential-based delta and close bonus
     rew_grip_open_near           = 0.5     # per-step reward for open gripper (>0.5) within 10cm of cube
-    rew_grip_close               = 50.0    # delta-based: reward per rad of closing in contact range (0.20–0.60) within 5cm; ~35 total per committed close
-    fingertip_sigma              = 0.12   # exp scale (meters): sharper gradient near cube surface
+    rew_grip_close               = 150.0   # delta-based: reward per rad of closing in contact range (0.20–0.60) within 5cm; ~100 total per committed close
+    fingertip_sigma              = 0.20   # exp scale (meters): wider gradient gives signal across full approach range
     fingertip_close_threshold    = 0.025  # avg fingertip distance below which close_bonus fires
     fingertip_close_bonus        = 0.5    # per-step bonus when avg d < close_threshold
 
     # ===== Grasp Detection Thresholds =====
     grasp_min_contact_pos = 0.20         # gripper must be > this to count as blocked-on-cube (excludes initial pos ≈ 0.0)
     grasp_close_command_threshold = 0.6  # gripper must be < this (open ≈ 1.0–1.5, blocked-on-cube ≈ 0.25–0.55)
-    grasp_stall_threshold = 1.5  # rad/s — gripper velocity below this = stalled/blocked by cube
+    grasp_stall_threshold = 1.0  # rad/s — gripper velocity below this = stalled/blocked by cube
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
     grasp_near_cube_threshold = 0.06  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
