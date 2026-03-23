@@ -141,6 +141,47 @@ class TinyMLP(nn.Module):
         return log_prob, entropy, value.squeeze(-1)
 
 
+class RunningRewardNormalizer:
+    """Normalizes rewards by a running estimate of return std.
+
+    Divides each reward by the running std of discounted returns so the value
+    function always operates on a stable scale, regardless of how large raw
+    rewards grow as the policy improves.  The mean is NOT subtracted so that
+    positive/negative reward polarity is preserved.
+    """
+
+    def __init__(self, gamma: float = 0.99, clip: float = 10.0):
+        self.gamma = gamma
+        self.clip = clip
+        self._var = 1.0
+        self._mean = 0.0
+        self._count = 1e-4
+
+    def _update(self, returns: np.ndarray):
+        batch_mean = returns.mean()
+        batch_var  = returns.var()
+        batch_n    = returns.size
+        delta      = batch_mean - self._mean
+        tot        = self._count + batch_n
+        self._mean  = self._mean + delta * batch_n / tot
+        m2          = self._var * self._count + batch_var * batch_n + delta**2 * self._count * batch_n / tot
+        self._var   = m2 / tot
+        self._count = tot
+
+    def normalize(self, rewards: np.ndarray, dones: np.ndarray) -> np.ndarray:
+        """Update running stats and return normalised rewards (shape [T, N])."""
+        T, N = rewards.shape
+        # Compute undiscounted running returns to estimate variance scale
+        disc_returns = np.zeros_like(rewards)
+        running = np.zeros(N, dtype=np.float32)
+        for t in reversed(range(T)):
+            running = rewards[t] + self.gamma * running * (1.0 - dones[t])
+            disc_returns[t] = running
+        self._update(disc_returns)
+        std = np.sqrt(self._var) + 1e-8
+        return np.clip(rewards / std, -self.clip, self.clip)
+
+
 class RolloutBuffer:
     """Simple buffer for storing rollout data."""
     
@@ -168,7 +209,7 @@ class RolloutBuffer:
         self.dones.clear()
         self.log_probs.clear()
     
-    def compute_returns_and_advantages(self, last_values_per_env: np.ndarray, num_envs: int, gamma: float = 0.99, gae_lambda: float = 0.95):
+    def compute_returns_and_advantages(self, last_values_per_env: np.ndarray, num_envs: int, gamma: float = 0.99, gae_lambda: float = 0.95, reward_normalizer: "RunningRewardNormalizer | None" = None):
         """Compute GAE advantages and returns, correctly handling multi-env rollouts.
 
         Buffer layout: [env0_t0, env1_t0, ..., envN_t0, env0_t1, ...] (num_envs entries per timestep).
@@ -180,6 +221,9 @@ class RolloutBuffer:
         rewards = np.array(self.rewards,  dtype=np.float32).reshape(T, num_envs)
         values  = np.array(self.values,   dtype=np.float32).reshape(T, num_envs)
         dones   = np.array(self.dones,    dtype=np.float32).reshape(T, num_envs)
+
+        if reward_normalizer is not None:
+            rewards = reward_normalizer.normalize(rewards, dones)
 
         advantages = np.zeros((T, num_envs), dtype=np.float32)
         gae = np.zeros(num_envs, dtype=np.float32)
@@ -215,12 +259,13 @@ def ppo_update(
     entropy_coef: float = 0.003,
     n_epochs: int = 5,
     batch_size: int = 1024,
+    reward_normalizer: "RunningRewardNormalizer | None" = None,
 ):
     """Perform PPO update. Returns dict of metrics."""
     # Get device from policy
     device = next(policy.parameters()).device
 
-    returns, advantages = buffer.compute_returns_and_advantages(last_values_per_env, num_envs)
+    returns, advantages = buffer.compute_returns_and_advantages(last_values_per_env, num_envs, reward_normalizer=reward_normalizer)
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
     obs_tensor, actions_tensor, old_log_probs_tensor = buffer.get_tensors()
@@ -812,6 +857,7 @@ def train_ppo(
     
     # State for batched rollout persistence (Isaac Lab only)
     obs_normalizer = RunningObsNormalizer(obs_dim, device=env.device)
+    reward_normalizer = RunningRewardNormalizer(gamma=0.99)
     rollout_state = {"obs_normalizer": obs_normalizer}
     
     # Rolling window for curriculum advancement
@@ -853,7 +899,8 @@ def train_ppo(
         # Update policy
         metrics = ppo_update(
             policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
-            n_epochs=5, batch_size=1024, entropy_coef=0.003
+            n_epochs=5, batch_size=1024, entropy_coef=0.003,
+            reward_normalizer=reward_normalizer,
         )
         
         # Track statistics
