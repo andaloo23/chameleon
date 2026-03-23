@@ -230,7 +230,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Euclidean radius for zone-entry: fingertip is "in zone" when its distance to
     # the assigned face zone center (= fcL or fcR) is below this threshold.
     # Tune based on keyboard_control_lab fcL/fcR values at successful contact.
-    grasp_zone_entry_radius = 0.06  # 6cm — matches achievable fingertip distances
+    grasp_zone_entry_radius = 0.03  # 3cm — tighter zone to reduce false positives
     
     # Droppable/In-cup detection
     droppable_xy_margin = 1.0
