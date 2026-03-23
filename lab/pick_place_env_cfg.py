@@ -219,7 +219,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # ===== Grasp Detection Thresholds =====
     grasp_min_contact_pos = 0.20         # gripper must be > this to count as blocked-on-cube (excludes initial pos ≈ 0.0)
     grasp_close_command_threshold = 0.6  # gripper must be < this (open ≈ 1.0–1.5, blocked-on-cube ≈ 0.25–0.55)
-    grasp_stall_threshold = 1.0  # rad/s — gripper velocity below this = stalled/blocked by cube
+    grasp_stall_threshold = 0.7  # rad/s — gripper velocity below this = stalled/blocked by cube
     grasp_lift_threshold = 0.022 # Detect lift earlier
     grasp_following_threshold = 0.03 # 3cm tolerance: handles contact-phase noise during gripper snap-close
     grasp_near_cube_threshold = 0.06  # Max gripper-to-cube dist to allow grasp registration (blocks air-grasp farming)
