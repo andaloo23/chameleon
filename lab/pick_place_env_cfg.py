@@ -210,7 +210,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight     = 200.0   # weight for potential-based delta and close bonus
-    rew_grip_open_near           = 0.5     # per-step reward for open gripper (>0.5) within 10cm of cube
+    rew_grip_open_near           = 1.0     # per-step reward for open gripper (>0.5) within 10cm of cube
     rew_grip_close               = 150.0   # delta-based: reward per rad of closing in contact range (0.20–0.60) within 5cm; ~100 total per committed close
     fingertip_sigma              = 0.20   # exp scale (meters): wider gradient gives signal across full approach range
     fingertip_close_threshold    = 0.025  # avg fingertip distance below which close_bonus fires

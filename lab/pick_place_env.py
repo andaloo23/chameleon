@@ -650,6 +650,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Teaches the policy to approach with an open gripper, enabling the grasp.
         gripper_open = (gripper_value > 0.50).float()
         r_open_near = self.cfg.rew_grip_open_near * (new_d_avg < 0.10).float() * gripper_open
+        total_reward = total_reward + r_open_near * (~new_stage_grasped).float()
         # Reward 2: gripper in contact range (0.20–0.60) while tips are very close.
         # Rewards the closing-onto-cube transition. Uses contact range, not just pos<0.6,
         # so a fully-closed idle gripper (pos≈0.0) does NOT get this reward.
