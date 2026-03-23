@@ -168,23 +168,32 @@ class RolloutBuffer:
         self.dones.clear()
         self.log_probs.clear()
     
-    def compute_returns_and_advantages(self, last_value: float, gamma: float = 0.99, gae_lambda: float = 0.95):
-        """Compute GAE advantages and returns."""
-        advantages = []
-        returns = []
-        
-        gae = 0.0
-        next_value = last_value
-        
-        for t in reversed(range(len(self.rewards))):
-            mask = 1.0 - float(self.dones[t])
-            delta = self.rewards[t] + gamma * next_value * mask - self.values[t]
+    def compute_returns_and_advantages(self, last_values_per_env: np.ndarray, num_envs: int, gamma: float = 0.99, gae_lambda: float = 0.95):
+        """Compute GAE advantages and returns, correctly handling multi-env rollouts.
+
+        Buffer layout: [env0_t0, env1_t0, ..., envN_t0, env0_t1, ...] (num_envs entries per timestep).
+        Reshape to [T, N] and compute GAE per-env so that bootstrapping never crosses environment boundaries.
+        """
+        total = len(self.rewards)
+        T = total // num_envs  # steps per env
+
+        rewards = np.array(self.rewards,  dtype=np.float32).reshape(T, num_envs)
+        values  = np.array(self.values,   dtype=np.float32).reshape(T, num_envs)
+        dones   = np.array(self.dones,    dtype=np.float32).reshape(T, num_envs)
+
+        advantages = np.zeros((T, num_envs), dtype=np.float32)
+        gae = np.zeros(num_envs, dtype=np.float32)
+        next_values = last_values_per_env  # [num_envs]
+
+        for t in reversed(range(T)):
+            mask = 1.0 - dones[t]
+            delta = rewards[t] + gamma * next_values * mask - values[t]
             gae = delta + gamma * gae_lambda * mask * gae
-            advantages.insert(0, gae)
-            returns.insert(0, gae + self.values[t])
-            next_value = self.values[t]
-        
-        return np.array(returns, dtype=np.float32), np.array(advantages, dtype=np.float32)
+            advantages[t] = gae
+            next_values = values[t]
+
+        returns = advantages + values
+        return returns.flatten(), advantages.flatten()
     
     def get_tensors(self):
         """Convert buffer to tensors."""
@@ -199,7 +208,8 @@ def ppo_update(
     policy: TinyMLP,
     optimizer: optim.Optimizer,
     buffer: RolloutBuffer,
-    last_value: float,
+    last_values_per_env: np.ndarray,
+    num_envs: int,
     clip_eps: float = 0.2,
     value_coef: float = 0.5,
     entropy_coef: float = 0.003,
@@ -209,8 +219,8 @@ def ppo_update(
     """Perform PPO update. Returns dict of metrics."""
     # Get device from policy
     device = next(policy.parameters()).device
-    
-    returns, advantages = buffer.compute_returns_and_advantages(last_value)
+
+    returns, advantages = buffer.compute_returns_and_advantages(last_values_per_env, num_envs)
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
     obs_tensor, actions_tensor, old_log_probs_tensor = buffer.get_tensors()
@@ -459,13 +469,14 @@ def collect_rollout(
                 
         obs_dict = next_obs_dict
         
-    # Last value for GAE
+    # Last value for GAE — capture per-env so bootstrapping doesn't cross environment boundaries
     with torch.no_grad():
         last_obs = obs_dict["policy"].to(device)
         if obs_normalizer is not None:
             last_obs = obs_normalizer.normalize(last_obs)
         _, last_values = policy.forward(last_obs)
-        last_value = last_values[0].item()
+        last_values_per_env = last_values.squeeze(-1).cpu().numpy()  # [num_envs]
+        last_value = last_values_per_env[0]  # scalar for legacy compatibility
         
     next_state = {
         "obs_dict": obs_dict, "current_rewards": current_rewards, "min_dists": min_dists,
@@ -477,7 +488,7 @@ def collect_rollout(
         "obs_normalizer": obs_normalizer,
     }
     
-    return last_value, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
+    return last_values_per_env, episode_rewards, episode_flags, np.mean(action_magnitudes), episode_min_dists, episode_final_dists, next_state
 
 
 
@@ -835,13 +846,13 @@ def train_ppo(
         iteration += 1
         buffer.clear()
         
-        last_value, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists, rollout_state = collect_rollout(
+        last_values_per_env, episode_rewards, episode_flags, mean_action_mag, ep_min_dists, ep_final_dists, rollout_state = collect_rollout(
             env, policy, buffer, n_steps=rollout_steps, num_envs=n_envs, state=rollout_state
         )
-        
+
         # Update policy
         metrics = ppo_update(
-            policy, optimizer, buffer, last_value,
+            policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
             n_epochs=5, batch_size=1024, entropy_coef=0.003
         )
         
