@@ -175,6 +175,12 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # ===== Action Scaling =====
     action_scale = 0.1  # Increased from 0.05 for faster overall robot response
 
+    # ===== Action Smoothing =====
+    # EMA on joint targets: smoothed = alpha * prev_smoothed + (1-alpha) * new_target
+    # Reduces high-frequency jitter that prevents stable grasp zone contact.
+    # alpha=0.0 disables smoothing, alpha→1.0 = frozen (use 0.5–0.7 range).
+    action_smooth_alpha = 0.6
+
     # ===== Reward Weights =====
     # Stage 1: Approach cube (delta-based shaping)
     rew_approach_delta_weight = 50.0  # Coarse gripper-to-cube approach (pre-grasp delta shaping)
@@ -204,7 +210,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_success_bonus = 1000.0
     
     # Penalties
-    rew_action_cost_weight = 0.0    # Disabled: biases toward inaction during exploration phase
+    rew_action_cost_weight = 0.01   # Small joint-velocity penalty to discourage oscillatory jitter
     rew_drop_penalty = 0.0      # Disabled: was canceling grasp_bonus (+100 grasp - 100 drop = 0 net)
     rew_cup_collision_penalty = -0.5
 

@@ -42,7 +42,7 @@ class TinyMLP(nn.Module):
         action_mean = self.policy_mean(self.actor_head(features))
         value = self.value(self.critic_head(features))
         with torch.no_grad():
-            self.policy_log_std.clamp_(-0.1, 0.5)
+            self.policy_log_std.clamp_(-0.15, 0.0)
         return action_mean, value
 
     def get_action(self, obs: torch.Tensor, deterministic: bool = False):
@@ -72,8 +72,8 @@ def main():
                         help="Path to checkpoint file (default: ppo_checkpoint_final.pt)")
     parser.add_argument("--n", type=int, default=10,
                         help="Number of episodes to run (default: 10)")
-    parser.add_argument("--max-steps", type=int, default=200,
-                        help="Max steps per episode (default: 200 for visualization)")
+    parser.add_argument("--max-steps", type=int, default=500,
+                        help="Max steps per episode (default: 500, matches training episode length)")
     parser.add_argument("--deterministic", action="store_true",
                         help="Use mean actions instead of sampling")
     parser.add_argument("--n-envs", type=int, default=1,

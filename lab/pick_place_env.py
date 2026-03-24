@@ -116,6 +116,9 @@ class PickPlaceEnv(DirectRLEnv):
         
         # Current joint targets
         self._joint_targets = torch.zeros(self.num_envs, 6, device=self.device)
+
+        # EMA-smoothed joint targets (reduces per-step jitter)
+        self._smoothed_joint_targets = torch.zeros(self.num_envs, 6, device=self.device)
         
         # Debug sphere offsets (mutable for keyboard tuning)
         # Fixed (Green): offset in gripper's local frame
@@ -366,19 +369,23 @@ class PickPlaceEnv(DirectRLEnv):
         """Process actions before physics step."""
         # Clip actions to [-1, 1]
         self.actions = torch.clamp(actions, -1.0, 1.0)
-        
+
         # Convert delta actions to absolute joint targets
         delta = self.actions * self.cfg.action_scale
         current_pos = self.joint_pos.clone()
-        self._joint_targets = current_pos + delta
-        
+        raw_targets = current_pos + delta
+
         # Clamp to joint limits
         for i, name in enumerate(self.cfg.joint_names):
             lower, upper = self.cfg.joint_limits[name]
-            self._joint_targets[:, i] = torch.clamp(self._joint_targets[:, i], lower, upper)
-        
-        # Note: Removed gripper override logic that forced gripper open before grasp.
-        # This allows direct gripper control for testing and training.
+            raw_targets[:, i] = torch.clamp(raw_targets[:, i], lower, upper)
+
+        # EMA smoothing: blend toward new target to reduce per-step jitter.
+        # Stable grasp detection needs fingertips in zone for several consecutive frames;
+        # high-frequency oscillation breaks this even when the policy is "close enough".
+        alpha = self.cfg.action_smooth_alpha
+        self._smoothed_joint_targets = alpha * self._smoothed_joint_targets + (1.0 - alpha) * raw_targets
+        self._joint_targets = self._smoothed_joint_targets
 
     def _apply_action(self) -> None:
         """Apply joint position targets to robot."""
@@ -882,8 +889,9 @@ class PickPlaceEnv(DirectRLEnv):
         self._stage_success[env_ids] = False
         self._stage_dropped[env_ids] = False
         
-        # Reset joint targets
+        # Reset joint targets and smoothed targets
         self._joint_targets[env_ids] = joint_pos
+        self._smoothed_joint_targets[env_ids] = joint_pos
 
     def _sample_workspace_xy(
         self,
