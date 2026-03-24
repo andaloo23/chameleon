@@ -65,7 +65,7 @@ def compute_transport_shaping_3d(
     dx = cube_pos[:, 0] - cup_pos[:, 0]
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
-    curr_dist = torch.sqrt(dx**2 + dy**2 + 0.3 * dz**2)
+    curr_dist = torch.sqrt(dx**2 + dy**2 + 2.0 * dz**2)
     delta = prev_transport_dist - curr_dist
     reward = transport_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
     return reward, curr_dist
