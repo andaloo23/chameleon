@@ -210,7 +210,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_success_bonus = 1000.0
     
     # Penalties
-    rew_action_cost_weight = 0.01   # Small joint-velocity penalty to discourage oscillatory jitter
+    rew_action_cost_weight = 0.05   # Joint-velocity penalty to discourage oscillatory jitter during lift
     rew_drop_penalty = 0.0      # Disabled: was canceling grasp_bonus (+100 grasp - 100 drop = 0 net)
     rew_cup_collision_penalty = -0.5
 
