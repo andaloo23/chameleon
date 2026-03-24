@@ -192,10 +192,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_lift_shaping_weight = 300.0
 
     # Stage 3b: Per-step height bonus while grasped (direct gradient for lifting)
-    rew_height_bonus_weight = 300.0
-    
+    rew_height_bonus_weight = 50.0
+
     # Stage 4: Transport to cup (3D delta-based shaping)
-    rew_transport_weight = 5.0
+    rew_transport_weight = 150.0
     
     # Stage 4: Droppable range (one-time bonus)
     rew_droppable_bonus = 300.0
