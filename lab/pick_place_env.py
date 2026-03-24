@@ -147,6 +147,9 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Previous gripper joint value for delta-based grip-close reward
         self._prev_gripper_value = torch.zeros(self.num_envs, device=self.device)
+        # Ratchet: tracks the minimum (most-closed) gripper value seen this episode.
+        # Only rewards closing beyond this — prevents oscillation farming.
+        self._min_gripper_value = torch.full((self.num_envs,), fill_value=2.0, device=self.device)
 
         self._cum_left_obb_reward   = torch.zeros(self.num_envs, device=self.device)
         self._cum_right_obb_reward  = torch.zeros(self.num_envs, device=self.device)
@@ -612,19 +615,20 @@ class PickPlaceEnv(DirectRLEnv):
         
 
 
-        # Delta-based grip-close reward: fires only when actively closing near cube (pre-grasp).
-        # Rewards closing motion (delta > 0 when gripper_value decreases = closing).
-        # Inherently un-farmable: total reward is bounded by total gripper displacement.
-        gripper_close_delta = torch.clamp(self._prev_gripper_value - gripper_value, min=0.0)
+        # Ratchet grip-close reward: only fires when gripper reaches a new minimum this episode.
+        # Oscillating open→close earns nothing after the first close — un-farmable.
+        # Total possible reward per episode: rew_grip_close × (close_threshold - min_contact) ≈ 60.
         gripper_in_contact_range = (
             (gripper_value > self.cfg.grasp_min_contact_pos) &
             (gripper_value < self.cfg.grasp_close_command_threshold)
         ).float()
+        gripper_ratchet_delta = torch.clamp(self._min_gripper_value - gripper_value, min=0.0)
+        self._min_gripper_value = torch.minimum(self._min_gripper_value, gripper_value)
         r_grip_close_delta = (
             self.cfg.rew_grip_close
             * (new_d_avg < 0.05).float()
             * gripper_in_contact_range
-            * gripper_close_delta
+            * gripper_ratchet_delta
             * (~new_stage_grasped).float()
         )
         total_reward = total_reward + r_grip_close_delta
@@ -868,6 +872,7 @@ class PickPlaceEnv(DirectRLEnv):
         # With unclamped delta, this avoids a large penalty on the first step.
         self._prev_d_avg[env_ids] = 0.5
         self._prev_gripper_value[env_ids] = 0.0
+        self._min_gripper_value[env_ids] = 2.0
         self._was_grasped[env_ids] = False
         self._was_droppable[env_ids] = False
         self._was_in_cup[env_ids] = False
