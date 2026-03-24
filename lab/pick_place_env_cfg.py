@@ -197,8 +197,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3: Lift cube (dense delta shaping per step)
     rew_lift_shaping_weight = 300.0
 
-    # Stage 3b: Per-step height bonus while grasped (kept small — lift is learned, don't let it compete with transport)
-    rew_height_bonus_weight = 5.0
+    # Stage 3b: Per-step height bonus while grasped — strong gradient to bridge the gap between
+    # lift_bonus threshold (2.5cm) and droppable height (9cm). Without this, the robot collects
+    # grasp(200) + lift(500) at 2.5cm then stalls — no incentive to keep going.
+    rew_height_bonus_weight = 50.0
 
     # Stage 4: Transport to cup (3D delta-based shaping)
     rew_transport_weight = 400.0
