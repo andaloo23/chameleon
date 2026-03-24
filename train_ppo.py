@@ -109,10 +109,10 @@ class TinyMLP(nn.Module):
         action_mean = self.policy_mean(self.actor_head(features))
         value = self.value(self.critic_head(features))
         
-        # Clamp log_std: floor at -0.5 (std≥0.6) keeps enough entropy for exploration,
+        # Clamp log_std: floor at -0.15 (std≥0.86, entropy≥7.6) prevents collapse zone,
         # ceiling at 0.0 (std≤1.0) prevents jittery actions
         with torch.no_grad():
-            self.policy_log_std.clamp_(-0.5, 0.0)
+            self.policy_log_std.clamp_(-0.15, 0.0)
             
         return action_mean, value
     
