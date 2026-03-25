@@ -200,6 +200,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3b: Per-step height bonus while grasped — disabled, transport reward handles height
     rew_height_bonus_weight = 0.0
 
+    # Stage 4: Transport to cup — per-step proximity penalty (makes hovering costly)
+    rew_transport_proximity_weight = 5.0  # per-step: -weight * dist_to_cup_target * is_grasped
+
     # Stage 4: Transport to cup (3D delta-based shaping)
     # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
     # xy_weight > z_weight: focus gradient on horizontal navigation (height handled by height_bonus)

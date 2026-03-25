@@ -275,6 +275,7 @@ def compute_pick_place_rewards(
     approach_delta_weight: float,
     transport_xy_weight: float = 1.0,
     transport_z_weight: float = 2.0,
+    transport_proximity_weight: float = 0.0,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -325,6 +326,9 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
+    # Per-step proximity penalty: -weight * dist_to_target * is_grasped
+    # Provides gradient even when stationary — hovering far from cup is costly.
+    transport_proximity_reward = -transport_proximity_weight * curr_transport_dist * is_grasped.float()
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, new_d_avg
@@ -367,6 +371,7 @@ def compute_pick_place_rewards(
         lift_shaping_reward +
         height_reward +
         transport_reward +
+        transport_proximity_reward +
         droppable_reward +
         success_reward +
         action_cost +
