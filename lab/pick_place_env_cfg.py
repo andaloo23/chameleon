@@ -194,8 +194,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
 
-    # Stage 3: Lift cube (dense delta shaping per step) — disabled, transport reward handles height
-    rew_lift_shaping_weight = 0.0
+    # Stage 3: Lift cube (dense delta shaping per step)
+    rew_lift_shaping_weight = 50.0
 
     # Stage 3b: Per-step height bonus while grasped — disabled, transport reward handles height
     rew_height_bonus_weight = 0.0
