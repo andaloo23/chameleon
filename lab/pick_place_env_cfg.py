@@ -194,20 +194,18 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
 
-    # Stage 3: Lift cube (dense delta shaping per step)
-    rew_lift_shaping_weight = 300.0
+    # Stage 3: Lift cube (dense delta shaping per step) — disabled, transport reward handles height
+    rew_lift_shaping_weight = 0.0
 
-    # Stage 3b: Per-step height bonus while grasped — strong gradient to bridge the gap between
-    # lift_bonus threshold (2.5cm) and droppable height (9cm). Without this, the robot collects
-    # grasp(200) + lift(500) at 2.5cm then stalls — no incentive to keep going.
-    rew_height_bonus_weight = 10.0
+    # Stage 3b: Per-step height bonus while grasped — disabled, transport reward handles height
+    rew_height_bonus_weight = 0.0
 
     # Stage 4: Transport to cup (3D delta-based shaping)
     # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
     # xy_weight > z_weight: focus gradient on horizontal navigation (height handled by height_bonus)
-    rew_transport_weight = 600.0
+    rew_transport_weight = 800.0
     transport_xy_weight = 1.0
-    transport_z_weight = 2.0  # current default; reduce toward 0.5 if hovering persists
+    transport_z_weight = 1.0  # equal weight: pure Euclidean distance to target point above cup
     
     # Stage 4: Droppable range (one-time bonus)
     rew_droppable_bonus = 300.0
