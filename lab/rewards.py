@@ -58,14 +58,21 @@ def compute_transport_shaping_3d(
     prev_transport_dist: Tensor,
     is_grasped: Tensor,
     transport_weight: float,
+    xy_weight: float = 1.0,
+    z_weight: float = 2.0,
 ) -> tuple[Tensor, Tensor]:
-    """3D transport shaping (delta-based, post-grasp)."""
+    """3D transport shaping (delta-based, post-grasp).
+
+    Distance metric: sqrt(xy_weight*(dx²+dy²) + z_weight*dz²)
+    Reduce z_weight relative to xy_weight to focus gradient on horizontal
+    navigation when height is already handled by height_bonus.
+    """
     z_target = cup_pos[:, 2] + cup_height + 0.02
     z_bottom = cube_pos[:, 2] - cube_half_size
     dx = cube_pos[:, 0] - cup_pos[:, 0]
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
-    curr_dist = torch.sqrt(dx**2 + dy**2 + 2.0 * dz**2)
+    curr_dist = torch.sqrt(xy_weight * (dx**2 + dy**2) + z_weight * dz**2)
     delta = prev_transport_dist - curr_dist
     reward = transport_weight * torch.clamp(delta, min=0.0) * is_grasped.float()
     return reward, curr_dist
@@ -266,6 +273,8 @@ def compute_pick_place_rewards(
     grasp_hold_weight: float,
     height_bonus_weight: float,
     approach_delta_weight: float,
+    transport_xy_weight: float = 1.0,
+    transport_z_weight: float = 2.0,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -313,7 +322,8 @@ def compute_pick_place_rewards(
     # Post-grasp shaping
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
         cube_pos, cup_pos, cup_height, cube_half_size,
-        prev_transport_dist, is_grasped, transport_weight
+        prev_transport_dist, is_grasped, transport_weight,
+        xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(

@@ -200,10 +200,14 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3b: Per-step height bonus while grasped — strong gradient to bridge the gap between
     # lift_bonus threshold (2.5cm) and droppable height (9cm). Without this, the robot collects
     # grasp(200) + lift(500) at 2.5cm then stalls — no incentive to keep going.
-    rew_height_bonus_weight = 50.0
+    rew_height_bonus_weight = 10.0
 
     # Stage 4: Transport to cup (3D delta-based shaping)
-    rew_transport_weight = 400.0
+    # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
+    # xy_weight > z_weight: focus gradient on horizontal navigation (height handled by height_bonus)
+    rew_transport_weight = 600.0
+    transport_xy_weight = 1.0
+    transport_z_weight = 2.0  # current default; reduce toward 0.5 if hovering persists
     
     # Stage 4: Droppable range (one-time bonus)
     rew_droppable_bonus = 300.0
@@ -241,7 +245,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     grasp_zone_entry_radius = 0.03  # 3cm — tighter zone to reduce false positives
     
     # Droppable/In-cup detection
-    droppable_xy_margin = 1.0
+    droppable_xy_margin = 0.15  # 15cm extra radius beyond cup_inner_radius_top for droppable XY check.
+                                # Droppable = lifted to 9cm AND within ~20cm of cup center.
+                                # Looser than in-cup (5.2cm) but tighter than "anywhere" — gives
+                                # a one-time reward pull toward the cup before transport kicks in.
     droppable_min_height = 0.0
     in_cup_xy_margin = 1.0
     in_cup_height_margin = 0.02

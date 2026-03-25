@@ -96,6 +96,7 @@ class GraspDetectorTensor:
         cube_half_size: float,
         droppable_min_height: float = 0.005,
         in_cup_height_margin: float = 0.02,
+        droppable_xy_radius: float | None = None,
         # Legacy params kept for API compatibility (unused)
         gripper_value: Tensor | None = None,
         target_gripper: Tensor | None = None,
@@ -109,35 +110,44 @@ class GraspDetectorTensor:
         Drop condition:  either fingertip leaves its zone for M frames.
 
         Args:
-            left_in_zone:   Bool [num_envs] — fixed jaw tip inside left face zone
-            right_in_zone:  Bool [num_envs] — moving jaw tip inside right face zone
-            cube_pos:       [num_envs, 3]
-            cup_pos:        [num_envs, 3]
-            cup_height:     scalar
-            cup_inner_radius: scalar
-            cube_half_size: scalar
+            left_in_zone:        Bool [num_envs] — fixed jaw tip inside left face zone
+            right_in_zone:       Bool [num_envs] — moving jaw tip inside right face zone
+            cube_pos:            [num_envs, 3]
+            cup_pos:             [num_envs, 3]
+            cup_height:          scalar
+            cup_inner_radius:    scalar — physical cup opening (used for is_in_cup XY check)
+            cube_half_size:      scalar
             droppable_min_height: scalar
             in_cup_height_margin: scalar
+            droppable_xy_radius: scalar or None — XY tolerance for is_droppable (learning milestone).
+                                 Defaults to cup_inner_radius if None. Set larger than cup_inner_radius
+                                 so "droppable" fires before the precise in-cup XY is reached.
 
         Returns:
             is_grasped: Boolean tensor [num_envs]
         """
         cube_z = cube_pos[:, 2]
 
-        # --- Droppable / in-cup detection (unchanged) ---
+        # --- Droppable / in-cup detection ---
         cube_xy = cube_pos[:, :2]
         cup_xy = cup_pos[:, :2]
         cube_cup_xy_dist = torch.norm(cube_xy - cup_xy, dim=1)
         cup_top_z = cup_pos[:, 2] + cup_height
         cube_bottom_z = cube_z - cube_half_size
 
-        xy_in_range = cube_cup_xy_dist <= cup_inner_radius
+        # is_droppable: learning milestone — cube is above cup height, within a generous XY radius.
+        # Uses droppable_xy_radius (wider) so the robot gets rewarded for lifting high
+        # before it achieves precise XY alignment.
+        _droppable_xy_r = droppable_xy_radius if droppable_xy_radius is not None else cup_inner_radius
+        droppable_xy_ok = cube_cup_xy_dist <= _droppable_xy_r
         above_cup = cube_bottom_z >= (cup_top_z + droppable_min_height)
-        self.is_droppable = xy_in_range & above_cup
+        self.is_droppable = droppable_xy_ok & above_cup
 
+        # is_in_cup: success condition — cube physically inside the cup (tight XY = cup_inner_radius).
         cup_bottom_z = cup_pos[:, 2]
+        xy_in_cup = cube_cup_xy_dist <= cup_inner_radius
         cube_inside_height = (cube_bottom_z >= (cup_bottom_z - in_cup_height_margin)) & (cube_bottom_z <= cup_top_z)
-        self.is_in_cup = xy_in_range & cube_inside_height
+        self.is_in_cup = xy_in_cup & cube_inside_height
 
         # --- Grasp entry: both tips in zone for frames_to_grasp frames ---
         both_in_zone = left_in_zone & right_in_zone
