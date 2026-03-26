@@ -387,6 +387,13 @@ class PickPlaceEnv(DirectRLEnv):
         self._smoothed_joint_targets = alpha * self._smoothed_joint_targets + (1.0 - alpha) * raw_targets
         self._joint_targets = self._smoothed_joint_targets
 
+        # Rule: if droppable (cube above cup, within XY tolerance), force gripper fully open.
+        # Applied after EMA so the release is immediate and not damped out.
+        gripper_open_pos = self.cfg.joint_limits["gripper"][1]  # upper limit = fully open
+        droppable = self.grasp_detector.is_droppable
+        self._joint_targets[droppable, self._gripper_joint_idx] = gripper_open_pos
+        self._smoothed_joint_targets[droppable, self._gripper_joint_idx] = gripper_open_pos
+
     def _apply_action(self) -> None:
         """Apply joint position targets to robot."""
         self.robot.set_joint_position_target(self._joint_targets)
