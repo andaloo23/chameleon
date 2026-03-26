@@ -340,8 +340,11 @@ def compute_pick_place_rewards(
     grasp_hold_reward = grasp_hold_weight * is_grasped.float()
 
     # Per-step height bonus while grasped: direct gradient for lifting the cube
-    # Dead zone at 2cm (0.5cm above rest) to ignore physics jitter at table level
-    height_above_rest = torch.clamp(cube_z - 0.02, min=0.0)
+    # Dead zone at 2cm (0.5cm above rest) to ignore physics jitter at table level.
+    # Capped at 0.08m above rest (cube_z ~0.10m) to prevent extreme-lift local optimum:
+    # without the cap the robot maximises reward by lifting to full arm extension (~30-40cm)
+    # where the grasp becomes physically unstable and G%/L% collapse.
+    height_above_rest = torch.clamp(cube_z - 0.02, min=0.0, max=0.08)
     height_reward = height_bonus_weight * height_above_rest * is_grasped.float()
 
     # One-time bonuses
