@@ -622,6 +622,7 @@ class PickPlaceEnv(DirectRLEnv):
             transport_xy_weight=self.cfg.transport_xy_weight,
             transport_z_weight=self.cfg.transport_z_weight,
             transport_proximity_weight=self.cfg.rew_transport_proximity_weight,
+            transport_proximity_max_dist=self.cfg.transport_proximity_max_dist,
         )
         
 

@@ -97,7 +97,9 @@ def compute_one_time_bonuses(
     new_grasp     = is_grasped    & ~stage_grasped
     new_lift      = is_lifted     & ~stage_lifted
     new_droppable = is_droppable  & ~stage_droppable
-    new_success   = is_in_cup     & ~stage_success
+    # Require stage_droppable: cube must have been above the cup before success counts.
+    # Prevents exploit where robot pushes cube into cup from the side at table level.
+    new_success   = is_in_cup & stage_droppable & ~stage_success
 
     grasp_reward     = grasp_bonus     * new_grasp.float()
     lift_reward      = lift_bonus      * new_lift.float()
@@ -107,7 +109,7 @@ def compute_one_time_bonuses(
     new_stage_grasped   = stage_grasped   | is_grasped
     new_stage_lifted    = stage_lifted    | is_lifted
     new_stage_droppable = stage_droppable | is_droppable
-    new_stage_success   = stage_success   | is_in_cup
+    new_stage_success   = stage_success   | (is_in_cup & stage_droppable)
 
     return (grasp_reward, lift_reward, droppable_reward, success_reward,
             new_stage_grasped, new_stage_lifted, new_stage_droppable, new_stage_success)
@@ -276,6 +278,7 @@ def compute_pick_place_rewards(
     transport_xy_weight: float = 1.0,
     transport_z_weight: float = 2.0,
     transport_proximity_weight: float = 0.0,
+    transport_proximity_max_dist: float = 0.3,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -326,11 +329,11 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped & stage_lifted, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
-    # Per-step proximity penalty: -weight * dist_to_target * (is_grasped & stage_lifted)
-    # Requires BOTH: currently holding the cube AND already achieved a lift.
-    # Gating on is_grasped prevents catastrophic penalty accumulation after a drop —
-    # the penalty stops the moment the cube is released.
-    transport_proximity_reward = -transport_proximity_weight * curr_transport_dist * (is_grasped & stage_lifted).float()
+    # Per-step proximity penalty: -weight * min(dist, max_dist) * (is_grasped & stage_lifted)
+    # Distance is capped so the max penalty per step = -weight * max_dist (never catastrophic).
+    # At weight=2, cap=0.3: max -0.6/step → max -300/episode, always dominated by grasp_hold +1000.
+    capped_dist = torch.clamp(curr_transport_dist, max=transport_proximity_max_dist)
+    transport_proximity_reward = -transport_proximity_weight * capped_dist * (is_grasped & stage_lifted).float()
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, new_d_avg

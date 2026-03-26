@@ -201,7 +201,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_height_bonus_weight = 20.0
 
     # Stage 4: Transport to cup — per-step proximity penalty (makes hovering costly)
-    rew_transport_proximity_weight = 0.0  # disabled: was causing catastrophic negative rewards and increasing entropy
+    rew_transport_proximity_weight = 2.0  # per-step: -weight * min(dist, 0.3) * (is_grasped & stage_lifted)
+    transport_proximity_max_dist = 0.3   # cap dist so max penalty = -weight*cap/step (never catastrophic)
 
     # Stage 4: Transport to cup (3D delta-based shaping)
     # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
