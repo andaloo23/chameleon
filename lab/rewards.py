@@ -326,10 +326,11 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
-    # Per-step proximity penalty: -weight * dist_to_target * stage_lifted
-    # Gated on stage_lifted (not is_grasped) so grasping itself is never penalized —
-    # only hovering after the lift milestone is costly.
-    transport_proximity_reward = -transport_proximity_weight * curr_transport_dist * stage_lifted.float()
+    # Per-step proximity penalty: -weight * dist_to_target * (is_grasped & stage_lifted)
+    # Requires BOTH: currently holding the cube AND already achieved a lift.
+    # Gating on is_grasped prevents catastrophic penalty accumulation after a drop —
+    # the penalty stops the moment the cube is released.
+    transport_proximity_reward = -transport_proximity_weight * curr_transport_dist * (is_grasped & stage_lifted).float()
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, new_d_avg
