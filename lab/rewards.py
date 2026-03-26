@@ -320,10 +320,10 @@ def compute_pick_place_rewards(
         sigma=approach_sigma,
     )
 
-    # Post-grasp shaping
+    # Post-grasp shaping (gated on stage_lifted to prevent dragging along table)
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
         cube_pos, cup_pos, cup_height, cube_half_size,
-        prev_transport_dist, is_grasped, transport_weight,
+        prev_transport_dist, is_grasped & stage_lifted, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
     # Per-step proximity penalty: -weight * dist_to_target * (is_grasped & stage_lifted)
