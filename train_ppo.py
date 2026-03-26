@@ -953,7 +953,17 @@ def train_ppo(
                   f"KL: {metrics['approx_kl']:.4f}")
             print(f"           R:{pct_reached:4.1f}% G:{pct_grasped:4.1f}% "
                   f"L:{pct_lifted:4.1f}% D:{pct_droppable:4.1f}% S:{pct_success:4.1f}%")
-    
+
+        # Save latest checkpoint after every iteration (overwrites same file)
+        torch.save({
+            "policy_state_dict": policy.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "obs_normalizer_mean": obs_normalizer.mean,
+            "obs_normalizer_var": obs_normalizer.var,
+            "obs_normalizer_count": obs_normalizer.count,
+            "total_episodes": total_episodes,
+        }, "ppo_checkpoint_final.pt")
+
     # Final statistics — use full metrics_history for accurate start-to-finish report
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
@@ -995,17 +1005,7 @@ def train_ppo(
             sign    = "+" if delta >= 0 else ""
             print(f"{label:<12} {p_all:>7.1f}%  {p_start:>9.1f}%  {p_end:>9.1f}%  {sign}{delta:>6.1f}%")
     
-    # Save final checkpoint
-    checkpoint_path = "ppo_checkpoint_final.pt"
-    torch.save({
-        "policy_state_dict": policy.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "obs_normalizer_mean": obs_normalizer.mean,
-        "obs_normalizer_var": obs_normalizer.var,
-        "obs_normalizer_count": obs_normalizer.count,
-        "total_episodes": total_episodes,
-    }, checkpoint_path)
-    print(f"\n[INFO] Checkpoint saved to: {checkpoint_path}")
+    print(f"\n[INFO] Final checkpoint saved to: ppo_checkpoint_final.pt")
 
     # Plot metrics
     plot_training_metrics(metrics_history)
