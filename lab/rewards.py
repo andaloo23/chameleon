@@ -277,8 +277,6 @@ def compute_pick_place_rewards(
     approach_delta_weight: float,
     transport_xy_weight: float = 1.0,
     transport_z_weight: float = 2.0,
-    transport_proximity_weight: float = 0.0,
-    transport_proximity_max_dist: float = 0.3,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -329,11 +327,6 @@ def compute_pick_place_rewards(
         prev_transport_dist, is_grasped & stage_lifted, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
     )
-    # Per-step proximity penalty: -weight * min(dist, max_dist) * (is_grasped & stage_lifted)
-    # Distance is capped so the max penalty per step = -weight * max_dist (never catastrophic).
-    # At weight=2, cap=0.3: max -0.6/step → max -300/episode, always dominated by grasp_hold +1000.
-    capped_dist = torch.clamp(curr_transport_dist, max=transport_proximity_max_dist)
-    transport_proximity_reward = -transport_proximity_weight * capped_dist * (is_grasped & stage_lifted).float()
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
         cube_z, prev_cube_z, is_grasped, lift_shaping_weight, stage_grasped, new_d_avg
@@ -379,7 +372,6 @@ def compute_pick_place_rewards(
         lift_shaping_reward +
         height_reward +
         transport_reward +
-        transport_proximity_reward +
         droppable_reward +
         success_reward +
         action_cost +

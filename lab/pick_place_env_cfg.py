@@ -200,10 +200,6 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3b: Per-step height bonus while grasped — absolute gradient to maintain height
     rew_height_bonus_weight = 20.0
 
-    # Stage 4: Transport to cup — per-step proximity penalty (makes hovering costly)
-    rew_transport_proximity_weight = 2.0  # per-step: -weight * min(dist, 0.3) * (is_grasped & stage_lifted)
-    transport_proximity_max_dist = 0.3   # cap dist so max penalty = -weight*cap/step (never catastrophic)
-
     # Stage 4: Transport to cup (3D delta-based shaping)
     # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
     # xy_weight > z_weight: focus gradient on horizontal navigation (height handled by height_bonus)
@@ -211,7 +207,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     transport_xy_weight = 1.0
     transport_z_weight = 1.0  # equal weight: pure Euclidean distance to target point above cup
     
-    # Stage 4: Droppable range (one-time bonus)
+    # Stage 4: Aligned above cup (one-time bonus — cube reached target point above cup center)
     rew_droppable_bonus = 300.0
     
     # Stage 5: Success (one-time bonus)
@@ -246,13 +242,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Tune based on keyboard_control_lab fcL/fcR values at successful contact.
     grasp_zone_entry_radius = 0.03  # 3cm — tighter zone to reduce false positives
     
-    # Droppable/In-cup detection
-    droppable_xy_margin = 0.15  # 15cm extra radius beyond cup_inner_radius_top for droppable XY check.
-                                # Droppable = lifted to 9cm AND within ~20cm of cup center.
-                                # Looser than in-cup (5.2cm) but tighter than "anywhere" — gives
-                                # a one-time reward pull toward the cup before transport kicks in.
-    droppable_min_height = 0.0
-    in_cup_xy_margin = 1.0
+    # Aligned / in-cup detection
+    # Aligned = cube bottom above cup rim AND cube XY within cup_inner_radius_top of cup center.
+    # This is the "target point" — cube is directly above the cup opening, ready to drop.
+    aligned_min_height_above_rim = 0.01  # cube bottom must clear cup rim by at least 1cm
     in_cup_height_margin = 0.02
 
     # ===== Reset Configuration =====
