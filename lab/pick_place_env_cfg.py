@@ -197,8 +197,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 3: Lift cube (dense delta shaping per step)
     rew_lift_shaping_weight = 300.0
 
-    # Stage 3b: Per-step height bonus while grasped — disabled, transport reward handles height
-    rew_height_bonus_weight = 0.0
+    # Stage 3b: Per-step height bonus while grasped — absolute gradient to maintain height
+    rew_height_bonus_weight = 20.0
 
     # Stage 4: Transport to cup — per-step proximity penalty (makes hovering costly)
     rew_transport_proximity_weight = 3.0  # per-step: -weight * dist_to_cup_target * (is_grasped & stage_lifted)
