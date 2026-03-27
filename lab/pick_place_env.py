@@ -857,8 +857,9 @@ class PickPlaceEnv(DirectRLEnv):
         cup_pos = torch.stack([cup_xy[:, 0], cup_xy[:, 1], cup_z], dim=1)
         cup_pos_world = cup_pos + self.scene.env_origins[env_ids]
         
-        # Update internal cup position tracking
-        self._cup_pos[env_ids] = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
+        # Update internal cup position tracking (world coordinates: cup base at table level)
+        cup_local = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
+        self._cup_pos[env_ids] = cup_local + self.scene.env_origins[env_ids]
         
         # Move cup using RigidObject API
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
@@ -878,6 +879,13 @@ class PickPlaceEnv(DirectRLEnv):
             dim=1
         )
         self._prev_cube_z[env_ids] = cube_pos[:, 2]
+        # Initialize transport dist to cube-cup distance at episode start (world coords, correct now)
+        cube_cup_dx = cube_pos[:, 0] - self._cup_pos[env_ids, 0]
+        cube_cup_dy = cube_pos[:, 1] - self._cup_pos[env_ids, 1]
+        cube_bottom_z = cube_pos[:, 2] - self.cfg.cube_scale[2] / 2.0
+        cup_z_target = self._cup_pos[env_ids, 2] + self.cfg.cup_height + 0.02
+        cube_cup_dz = cube_bottom_z - cup_z_target
+        self._prev_transport_dist[env_ids] = torch.sqrt(cube_cup_dx**2 + cube_cup_dy**2 + cube_cup_dz**2)
         # Reset fingertip HWM Phi scores to 0.0 (no best yet = d=inf equivalent).
         # With sigma=0.10 the first-step spike is only ~1.77 — too small to farm but
         # provides a useful early-training gradient. The proxy init (gripper-body-dist)
