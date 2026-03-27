@@ -36,18 +36,17 @@ def compute_lift_shaping_delta(
     d_avg: Tensor,
     zone_radius: float = 0.06,
 ) -> tuple[Tensor, Tensor]:
-    """Delta-based lift shaping. Active whenever cube was ever grasped this episode,
-    or if fingertips are very close to cube (pre-grasp lift shaping).
+    """Delta-based lift shaping. Active only after a registered grasp this episode.
 
     Uses stage_grasped (latched) instead of is_grasped so brief zone-exit events
     during lifting (from cube rotation) don't zero out the lift signal.
     """
     delta = cube_height - prev_cube_height
-    # Enable lift shaping if latched grasp OR fingertips are very near cube,
-    # but only below the transport target height (cup_height + 0.02 ≈ 0.095m cube bottom
-    # → cube center ≈ 0.11m). Cap at 0.12m cube center to avoid rewarding extreme lifting.
+    # Require a registered grasp before lift shaping fires.
+    # Removing d_avg fallback prevents the collision-carry exploit where the robot
+    # swings its arm under the cube and lifts it via physics contact forces.
     below_cap = cube_height < 0.12
-    is_active = (stage_grasped | (d_avg < zone_radius)) & below_cap
+    is_active = stage_grasped & below_cap
     reward = lift_weight * torch.clamp(delta, min=0.0) * is_active.float()
     return reward, cube_height
 
