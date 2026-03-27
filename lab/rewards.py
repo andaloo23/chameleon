@@ -348,13 +348,14 @@ def compute_pick_place_rewards(
     height_above_rest = torch.clamp(cube_z - 0.02, min=0.0, max=0.08)
     height_reward = height_bonus_weight * height_above_rest * is_grasped.float()
 
-    # Per-step exponential potential toward cup target (post-lift only).
-    # Bounded: max = transport_potential_weight/step. Provides absolute gradient
-    # toward the cup at every position — unlike delta reward which is 0 when stationary.
+    # Per-step exponential potential toward cup target.
+    # Gated on is_grasped & stage_lifted (must currently hold cube AND have lifted).
+    # Prevents farming: after dropping, potential stops even though stage_lifted stays latched.
+    # Bounded: max = transport_potential_weight/step at dist=0.
     transport_potential_reward = (
         transport_potential_weight
         * torch.exp(-curr_transport_dist / transport_potential_sigma)
-        * stage_lifted.float()
+        * (is_grasped & stage_lifted).float()
     )
 
     # One-time bonuses
