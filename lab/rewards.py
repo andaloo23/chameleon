@@ -43,8 +43,11 @@ def compute_lift_shaping_delta(
     during lifting (from cube rotation) don't zero out the lift signal.
     """
     delta = cube_height - prev_cube_height
-    # Enable lift shaping if latched grasp OR fingertips are very near cube
-    is_active = stage_grasped | (d_avg < zone_radius)
+    # Enable lift shaping if latched grasp OR fingertips are very near cube,
+    # but only below the transport target height (cup_height + 0.02 ≈ 0.095m cube bottom
+    # → cube center ≈ 0.11m). Cap at 0.12m cube center to avoid rewarding extreme lifting.
+    below_cap = cube_height < 0.12
+    is_active = (stage_grasped | (d_avg < zone_radius)) & below_cap
     reward = lift_weight * torch.clamp(delta, min=0.0) * is_active.float()
     return reward, cube_height
 
