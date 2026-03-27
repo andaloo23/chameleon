@@ -566,7 +566,7 @@ class PickPlaceEnv(DirectRLEnv):
             cube_half_size=self.cfg.cube_scale[2] / 2.0,
             droppable_min_height=self.cfg.aligned_min_height_above_rim,
             in_cup_height_margin=self.cfg.in_cup_height_margin,
-            droppable_xy_radius=self.cfg.cup_inner_radius_top,
+            droppable_xy_radius=self.cfg.cup_inner_radius_top,  # must be within cup opening to release
         )
         
         # Compute 2D reach distance (diagnostic only)
@@ -628,6 +628,8 @@ class PickPlaceEnv(DirectRLEnv):
             approach_delta_weight=self.cfg.rew_approach_delta_weight,
             transport_xy_weight=self.cfg.transport_xy_weight,
             transport_z_weight=self.cfg.transport_z_weight,
+            transport_potential_weight=self.cfg.transport_potential_weight,
+            transport_potential_sigma=self.cfg.transport_potential_sigma,
         )
         
 
