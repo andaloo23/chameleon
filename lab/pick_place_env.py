@@ -546,6 +546,19 @@ class PickPlaceEnv(DirectRLEnv):
         self._fixed_tip_in_left_zone   = (_d_fixed_to_face  < zone_r) & contact_confirmed
         self._moving_tip_in_right_zone = (_d_moving_to_face < zone_r) & contact_confirmed
 
+        # Physical grasp fallback: cube clearly airborne + fingertip right next to it + gripper closed.
+        # Catches genuine grasps where fingertips miss the exact OBB face zones.
+        cube_bottom_z = cube_pos[:, 2] - self.cfg.cube_scale[2] / 2.0
+        gripper_tip_dist_to_cube = torch.norm(gripper_tip_pos - cube_pos, dim=1)
+        physical_grasp = (
+            (cube_bottom_z > 0.05) &
+            (gripper_tip_dist_to_cube < 0.08) &
+            (gripper_value > 0.10) &
+            (gripper_value < 0.85)
+        )
+        left_in_zone_final  = self._fixed_tip_in_left_zone  | physical_grasp
+        right_in_zone_final = self._moving_tip_in_right_zone | physical_grasp
+
         # Calculate Local Tip-to-Cube vectors (stationary when cube is held)
         # Transform world-space delta into gripper's local frame
         # Inverse rotation = rotate by conjugate q* = (-x, -y, -z, w)
@@ -554,11 +567,11 @@ class PickPlaceEnv(DirectRLEnv):
 
         gripper_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - gripper_tip_pos)
         jaw_tip_local_dist = quat_apply(gripper_quat_inv, cube_pos - jaw_tip_pos)
-        
+
         # Update grasp detector with fingertip zone occupancy
         self.grasp_detector.update(
-            left_in_zone=self._fixed_tip_in_left_zone,
-            right_in_zone=self._moving_tip_in_right_zone,
+            left_in_zone=left_in_zone_final,
+            right_in_zone=right_in_zone_final,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
             cup_height=self.cfg.cup_height,
