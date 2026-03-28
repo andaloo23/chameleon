@@ -189,7 +189,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_grasp_bonus = 200.0
     
     # Stage 2b: Per-step reward for maintaining grasp (balanced to avoid hold-still local optimum)
-    rew_grasp_hold_weight = 2.0
+    rew_grasp_hold_weight = 0.5
 
     # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
     rew_lift_bonus = 500.0
@@ -198,7 +198,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_lift_shaping_weight = 300.0
 
     # Stage 3b: Per-step height bonus while grasped — absolute gradient to maintain height
-    rew_height_bonus_weight = 20.0
+    rew_height_bonus_weight = 5.0
 
     # Stage 4: Transport to cup (3D delta-based shaping)
     # Distance metric: sqrt(transport_xy_weight*(dx²+dy²) + transport_z_weight*dz²)
