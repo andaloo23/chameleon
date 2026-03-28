@@ -173,7 +173,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     cup_cube_min_distance = 0.10  # Minimum separation between cube and cup
 
     # ===== Action Scaling =====
-    action_scale = 0.1  # Increased from 0.05 for faster overall robot response
+    action_scale = 0.2  # 2x speed increase for faster transport
 
     # ===== Action Smoothing =====
     # EMA on joint targets: smoothed = alpha * prev_smoothed + (1-alpha) * new_target
@@ -216,7 +216,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_success_bonus = 1000.0
     
     # Penalties
-    rew_action_cost_weight = 0.05   # Joint-velocity penalty to discourage oscillatory jitter during lift
+    rew_action_cost_weight = 0.025  # Halved alongside action_scale 2x to keep cost-per-distance constant
     rew_drop_penalty = 0.0      # Disabled: was canceling grasp_bonus (+100 grasp - 100 drop = 0 net)
     rew_cup_collision_penalty = -0.5
 
