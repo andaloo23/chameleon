@@ -167,7 +167,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
 
     # ===== Workspace Bounds =====
     # Sampling range for cube and cup positions (matches workspace.py)
-    workspace_radius_range = (0.20, 0.45)  # 200mm to 450mm from robot base
+    workspace_radius_range = (0.20, 0.42)  # 200mm to 420mm from robot base
     workspace_angle_range = (-70.0, 70.0)  # ±70° from -Y axis (cube)
     workspace_angle_range_cup = (-70.0, 70.0)  # ±70° for cup (same as cube)
     cup_cube_min_distance = 0.10  # Minimum separation between cube and cup
@@ -206,6 +206,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_transport_weight = 800.0
     transport_xy_weight = 1.0
     transport_z_weight = 1.0  # equal weight: pure Euclidean distance to target point above cup
+    transport_z_clearance = 0.08  # cube bottom target height above cup rim (increased for wrist clearance)
     transport_potential_weight = 40.0   # exp potential: max = weight/step at dist=0; bounded, never catastrophic
     transport_potential_sigma = 0.25   # distance scale (m): reward = weight*exp(-dist/sigma)
     

@@ -643,6 +643,7 @@ class PickPlaceEnv(DirectRLEnv):
             transport_z_weight=self.cfg.transport_z_weight,
             transport_potential_weight=self.cfg.transport_potential_weight,
             transport_potential_sigma=self.cfg.transport_potential_sigma,
+            transport_z_clearance=self.cfg.transport_z_clearance,
         )
         
 
@@ -893,7 +894,7 @@ class PickPlaceEnv(DirectRLEnv):
         cube_cup_dx = cube_pos[:, 0] - self._cup_pos[env_ids, 0]
         cube_cup_dy = cube_pos[:, 1] - self._cup_pos[env_ids, 1]
         cube_bottom_z = cube_pos[:, 2] - self.cfg.cube_scale[2] / 2.0
-        cup_z_target = self._cup_pos[env_ids, 2] + self.cfg.cup_height + 0.02
+        cup_z_target = self._cup_pos[env_ids, 2] + self.cfg.cup_height + self.cfg.transport_z_clearance
         cube_cup_dz = cube_bottom_z - cup_z_target
         self._prev_transport_dist[env_ids] = torch.sqrt(cube_cup_dx**2 + cube_cup_dy**2 + cube_cup_dz**2)
         # Reset fingertip HWM Phi scores to 0.0 (no best yet = d=inf equivalent).

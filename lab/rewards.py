@@ -62,6 +62,7 @@ def compute_transport_shaping_3d(
     transport_weight: float,
     xy_weight: float = 1.0,
     z_weight: float = 2.0,
+    z_clearance: float = 0.08,
 ) -> tuple[Tensor, Tensor]:
     """3D transport shaping (delta-based, post-grasp).
 
@@ -69,7 +70,7 @@ def compute_transport_shaping_3d(
     Reduce z_weight relative to xy_weight to focus gradient on horizontal
     navigation when height is already handled by height_bonus.
     """
-    z_target = cup_pos[:, 2] + cup_height + 0.02
+    z_target = cup_pos[:, 2] + cup_height + z_clearance
     z_bottom = cube_pos[:, 2] - cube_half_size
     dx = cube_pos[:, 0] - cup_pos[:, 0]
     dy = cube_pos[:, 1] - cup_pos[:, 1]
@@ -281,6 +282,7 @@ def compute_pick_place_rewards(
     transport_z_weight: float = 2.0,
     transport_potential_weight: float = 0.0,
     transport_potential_sigma: float = 0.25,
+    transport_z_clearance: float = 0.08,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Total reward for pick-and-place.
@@ -330,6 +332,7 @@ def compute_pick_place_rewards(
         cube_pos, cup_pos, cup_height, cube_half_size,
         prev_transport_dist, is_grasped & stage_lifted, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
+        z_clearance=transport_z_clearance,
     )
     cube_z = cube_pos[:, 2]
     lift_shaping_reward, curr_cube_z = compute_lift_shaping_delta(
