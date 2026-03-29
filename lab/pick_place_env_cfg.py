@@ -214,7 +214,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_droppable_bonus = 800.0
     
     # Stage 5: Success (one-time bonus)
-    rew_success_bonus = 1000.0
+    rew_success_bonus = 3000.0
     
     # Penalties
     rew_action_cost_weight = 0.025  # Halved alongside action_scale 2x to keep cost-per-distance constant

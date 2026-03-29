@@ -357,7 +357,7 @@ def compute_pick_place_rewards(
     transport_potential_reward = (
         transport_potential_weight
         * torch.exp(-curr_transport_dist / transport_potential_sigma)
-        * (is_grasped & stage_lifted).float()
+        * (is_grasped & stage_lifted & ~stage_droppable).float()
     )
 
     # One-time bonuses
