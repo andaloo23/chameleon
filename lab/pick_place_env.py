@@ -905,15 +905,30 @@ class PickPlaceEnv(DirectRLEnv):
         cube_quat[:, 0] = torch.cos(random_yaw / 2.0)  # w
         cube_quat[:, 3] = torch.sin(random_yaw / 2.0)  # z
 
-        # Write each cube variant: active variant at workspace, others parked underground
+        # Write each cube variant: active variant at workspace, others at unique park slots.
+        # Park slots are BEHIND the robot (+Y), which is never part of the workspace
+        # (workspace angle range ±70° from -Y axis), so they never interfere with active sim.
+        # 2-row grid: variants 0-4 at y=+0.75, variants 5-9 at y=+0.90; x evenly spread.
+        # Max park distance from origin: 0.93m < env_spacing/2 = 1.0m — safe.
         zero_vel_cube = torch.zeros(num_reset, 6, device=self.device)
         for k, cube_obj in enumerate(self.cubes):
             is_active_k = (cube_variant_idx == k)
-            center_z = torch.where(
-                is_active_k, cube_z,
-                torch.full((num_reset,), -10.0, device=self.device),
-            )
-            pos_k = torch.stack([cube_xy[:, 0], cube_xy[:, 1], center_z], dim=1)
+            # Use both +X and -X sides, with 0.1m spacing, at Y=+0.3 (within env bounds)
+            # Arrange: k=0..4 on -X, k=5..9 on +X
+            if k < 5:
+                park_px = -0.40 + k * 0.1  # -0.40, -0.30, -0.20, -0.10, 0.0
+                park_py = 0.3
+            else:
+                park_px = 0.10 + (k-5) * 0.1  # 0.10, 0.20, 0.30, 0.40, 0.50
+                park_py = 0.3
+            park_hz = self.cfg.cube_size_variants[k][2]  # rest height for this variant
+            active_pos = torch.stack([cube_xy[:, 0], cube_xy[:, 1], cube_z], dim=1)
+            park_pos   = torch.stack([
+                torch.full((num_reset,), park_px, device=self.device),
+                torch.full((num_reset,), park_py, device=self.device),
+                torch.full((num_reset,), park_hz, device=self.device),
+            ], dim=1)
+            pos_k = torch.where(is_active_k.unsqueeze(-1), active_pos, park_pos)
             pos_k += self.scene.env_origins[env_ids]
             cube_obj.write_root_pose_to_sim(torch.cat([pos_k, cube_quat], dim=1), env_ids)
             cube_obj.write_root_velocity_to_sim(zero_vel_cube, env_ids)
@@ -959,17 +974,25 @@ class PickPlaceEnv(DirectRLEnv):
         cup_local = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
         self._cup_pos[env_ids] = cup_local + self.scene.env_origins[env_ids]
 
-        # Place the active variant at the workspace position; park all others underground
+        # Place the active variant at the workspace position; park all others at unique slots
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
         zero_vel = torch.zeros(num_reset, 6, device=self.device)
         for k, (cup_obj, h) in enumerate(zip(self.cups, self.cfg.cup_height_variants)):
             is_active = (variant_idx == k)
-            center_z = torch.where(
-                is_active,
-                torch.full((num_reset,), h / 2.0, device=self.device),
-                torch.full((num_reset,), -10.0, device=self.device),
-            )
-            pos_world = torch.stack([cup_xy[:, 0], cup_xy[:, 1], center_z], dim=1) + self.scene.env_origins[env_ids]
+            # Use both +X and -X sides, with 0.12m spacing (accounts for max cup radius 0.057m), at Y=+0.6 (within env bounds)
+            if k < 3:
+                park_px = -0.24 + k * 0.12  # -0.24, -0.12, 0.0
+                park_py = 0.6
+            else:
+                park_px = 0.12 + (k-3) * 0.12  # 0.12, 0.24
+                park_py = 0.6
+            active_pos = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.full((num_reset,), h / 2.0, device=self.device)], dim=1)
+            park_pos   = torch.stack([
+                torch.full((num_reset,), park_px, device=self.device),
+                torch.full((num_reset,), park_py, device=self.device),
+                torch.full((num_reset,), h / 2.0, device=self.device),  # rest on ground at park slot
+            ], dim=1)
+            pos_world = torch.where(is_active.unsqueeze(-1), active_pos, park_pos) + self.scene.env_origins[env_ids]
             cup_obj.write_root_pose_to_sim(torch.cat([pos_world, cup_quat], dim=1), env_ids)
             cup_obj.write_root_velocity_to_sim(zero_vel, env_ids)
         

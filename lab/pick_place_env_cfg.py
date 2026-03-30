@@ -50,8 +50,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
             enable_ccd=True, # Re-enabled to prevent tunneling during "soft" contact
             min_position_iteration_count=64, # Increased for better stability
             min_velocity_iteration_count=32, # Better energy dissipation
-            gpu_found_lost_pairs_capacity=2**21,
-            gpu_total_aggregate_pairs_capacity=2**21,
+            gpu_found_lost_pairs_capacity=2**22,
+            gpu_total_aggregate_pairs_capacity=2**22,
+            gpu_max_rigid_contact_count=2**23,
+            gpu_max_rigid_patch_count=2**23,
             bounce_threshold_velocity=0.5, # Slightly higher to prevent jitter
         ),
     )
@@ -59,7 +61,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # ===== Scene Configuration =====
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs=4096,  # Default parallel environments
-        env_spacing=1.5,  # Space between environment clones
+        env_spacing=2.0,  # Must contain workspace (0.42m) + park slots (max 0.93m from origin)
         replicate_physics=True,
     )
 
