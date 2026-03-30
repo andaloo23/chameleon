@@ -91,9 +91,9 @@ class GraspDetectorTensor:
         right_in_zone: Tensor,
         cube_pos: Tensor,
         cup_pos: Tensor,
-        cup_height: float,
+        cup_height: Tensor,
         cup_inner_radius: float,
-        cube_half_size: float,
+        cube_half_size: Tensor,
         droppable_min_height: float = 0.005,
         in_cup_height_margin: float = 0.02,
         droppable_xy_radius: float | None = None,
@@ -114,7 +114,7 @@ class GraspDetectorTensor:
             right_in_zone:       Bool [num_envs] — moving jaw tip inside right face zone
             cube_pos:            [num_envs, 3]
             cup_pos:             [num_envs, 3]
-            cup_height:          scalar
+            cup_height:          [num_envs] per-env cup height
             cup_inner_radius:    scalar — physical cup opening (used for is_in_cup XY check)
             cube_half_size:      scalar
             droppable_min_height: scalar

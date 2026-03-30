@@ -14,7 +14,7 @@ import os
 import torch
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, RigidObjectCfg
+from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg, PhysxCfg
@@ -38,7 +38,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     
     # Action and observation space dimensions
     action_space = 6
-    observation_space = 25  # joint(12) + rel_cube(3) + rel_cup(3) + left_tip(3) + right_tip(3) + gripper_width(1)
+    observation_space = 29  # joint(12) + rel_cube(3) + rel_cup(3) + cup_height(1) + left_tip(3) + right_tip(3) + gripper_width(1) + cube_dims(3)
     state_space = 0
 
     # ===== Simulation Settings =====
@@ -123,38 +123,29 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
         restitution=0.0,
     )
 
-    # ===== Cube (Object to Pick) =====
-    cube_cfg: RigidObjectCfg = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/Cube",
-        spawn=sim_utils.CuboidCfg(
-            size=(0.03, 0.03, 0.03),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                max_depenetration_velocity=0.5, # Reduced for "softer" resolve to prevent kicking
-                linear_damping=0.5,
-                angular_damping=0.5,
-                disable_gravity=False,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.05), # Lighter cube for easier lifting (50g)
-            collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002,  # Increased to 2mm for smoother contact resolution
-                rest_offset=0.0,
-            ),
-            physics_material=high_friction_material,
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(1.0, 0.0, 0.0),  # Red
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, -0.15, 0.02),  # Default position (will be randomized)
-        ),
-    )
-    
     # Cube properties
-    cube_scale = (0.03, 0.03, 0.03)
     cube_mass = 0.05
+    # Cube size variants: each tuple is (half_x, half_y, half_z) in meters
+    # Full dimensions = 2x each half-size; range 2.5–4.5 cm
+    cube_size_variants: tuple = (
+        # Symmetric cubes
+        (0.0125, 0.0125, 0.0125),  # 2.5 cm
+        (0.0150, 0.0150, 0.0150),  # 3.0 cm
+        (0.0175, 0.0175, 0.0175),  # 3.5 cm
+        (0.0200, 0.0200, 0.0200),  # 4.0 cm
+        (0.0225, 0.0225, 0.0225),  # 4.5 cm
+        # Rectangular prisms
+        (0.0125, 0.0200, 0.0175),  # narrow x, wide y
+        (0.0200, 0.0125, 0.0175),  # wide x, narrow y
+        (0.0150, 0.0225, 0.0125),  # narrow x, widest y, flat
+        (0.0225, 0.0150, 0.0125),  # widest x, narrow y, flat
+        (0.0175, 0.0175, 0.0225),  # square base, tall
+    )
+    cube_color = (1.0, 0.0, 0.0)
 
     # ===== Cup (Target Container) =====
-    cup_height = 0.075  # 7.5cm
+    cup_height = 0.075  # 7.5cm — default / mean; actual per-episode height drawn from cup_height_variants
+    cup_height_variants: tuple = (0.055, 0.065, 0.075, 0.085, 0.095)  # heights to randomly select from at each episode reset
     cup_outer_radius_top = 0.057  # 5.7cm
     cup_outer_radius_bottom = 0.045  # 4.5cm
     cup_wall_thickness = 0.005  # 5mm
@@ -206,7 +197,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_transport_weight = 800.0
     transport_xy_weight = 1.0
     transport_z_weight = 1.0  # equal weight: pure Euclidean distance to target point above cup
-    transport_z_clearance = 0.08  # cube bottom target height above cup rim (increased for wrist clearance)
+    transport_z_clearance = 0.04  # cube bottom target height above cup rim
     transport_potential_weight = 0.0    # disabled: per-step potential creates hover exploit vs one-time bonuses
     transport_potential_sigma = 0.20   # distance scale (m): reward = weight*exp(-dist/sigma)
     

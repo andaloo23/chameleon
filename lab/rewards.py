@@ -55,8 +55,8 @@ def compute_lift_shaping_delta(
 def compute_transport_shaping_3d(
     cube_pos: Tensor,
     cup_pos: Tensor,
-    cup_height: float,
-    cube_half_size: float,
+    cup_height: Tensor,
+    cube_half_size_z: Tensor,
     prev_transport_dist: Tensor,
     is_grasped: Tensor,
     transport_weight: float,
@@ -71,7 +71,7 @@ def compute_transport_shaping_3d(
     navigation when height is already handled by height_bonus.
     """
     z_target = cup_pos[:, 2] + cup_height + z_clearance
-    z_bottom = cube_pos[:, 2] - cube_half_size
+    z_bottom = cube_pos[:, 2] - cube_half_size_z
     dx = cube_pos[:, 0] - cup_pos[:, 0]
     dy = cube_pos[:, 1] - cup_pos[:, 1]
     dz = z_bottom - z_target
@@ -125,7 +125,7 @@ def compute_penalties(
     is_grasped: Tensor,
     stage_grasped: Tensor,
     is_in_cup: Tensor,
-    cube_half_size: float,
+    cube_half_size_z: Tensor,
     action_cost_weight: float,
     drop_penalty: float,
     stage_dropped: Tensor,
@@ -133,7 +133,7 @@ def compute_penalties(
     """Penalty terms."""
     action_cost = -action_cost_weight * torch.norm(joint_vel, dim=1)
     cube_z = cube_pos[:, 2]
-    low_height = cube_z <= cube_half_size * 1.5
+    low_height = cube_z <= cube_half_size_z * 1.5
     dropped = stage_grasped & ~is_grasped & low_height & ~is_in_cup
     apply_drop_penalty = dropped & ~stage_dropped
     drop_penalty_reward = drop_penalty * apply_drop_penalty.float()
@@ -146,7 +146,7 @@ def compute_fingertip_obb_reach_reward(
     gripper_tip_pos: Tensor,
     jaw_tip_pos: Tensor,
     cube_pos: Tensor,
-    cube_half_size: float,
+    cube_half_size: Tensor,
     zone_margin: float,
     stage_grasped: Tensor,
     cube_quat_w: Tensor,
@@ -195,8 +195,8 @@ def compute_fingertip_obb_reach_reward(
     # --- Zone slab centers in cube-local space ---
     t = zone_margin
     face_offset = cube_half_size + 0.5 * t
-    r_local_pos = face_offset * axis_local
-    r_local_neg = -face_offset * axis_local
+    r_local_pos = face_offset.unsqueeze(-1) * axis_local
+    r_local_neg = -face_offset.unsqueeze(-1) * axis_local
 
     # --- Tips in cube-local space ---
     q_L = torch.bmm(R_inv, (gripper_tip_pos - cube_pos).unsqueeze(-1)).squeeze(-1)
@@ -252,8 +252,9 @@ def compute_pick_place_rewards(
     stage_droppable: Tensor,
     stage_success: Tensor,
     stage_dropped: Tensor,
-    cup_height: float,
-    cube_half_size: float,
+    cup_height: Tensor,
+    cube_half_size_z: Tensor,
+    cube_half_grasp: Tensor,
     zone_margin: float,
     # Fingertip inputs
     gripper_tip_pos: Tensor,
@@ -315,7 +316,7 @@ def compute_pick_place_rewards(
         gripper_tip_pos=gripper_tip_pos,
         jaw_tip_pos=jaw_tip_pos,
         cube_pos=cube_pos,
-        cube_half_size=cube_half_size,
+        cube_half_size=cube_half_grasp,
         zone_margin=zone_margin,
         stage_grasped=stage_grasped,
         cube_quat_w=cube_quat_w,
@@ -329,7 +330,7 @@ def compute_pick_place_rewards(
 
     # Post-grasp shaping (gated on stage_lifted to prevent dragging along table)
     transport_reward, curr_transport_dist = compute_transport_shaping_3d(
-        cube_pos, cup_pos, cup_height, cube_half_size,
+        cube_pos, cup_pos, cup_height, cube_half_size_z,
         prev_transport_dist, is_grasped & stage_lifted, transport_weight,
         xy_weight=transport_xy_weight, z_weight=transport_z_weight,
         z_clearance=transport_z_clearance,
@@ -347,7 +348,7 @@ def compute_pick_place_rewards(
     # Capped at 0.08m above rest (cube_z ~0.10m) to prevent extreme-lift local optimum:
     # without the cap the robot maximises reward by lifting to full arm extension (~30-40cm)
     # where the grasp becomes physically unstable and G%/L% collapse.
-    height_above_rest = torch.clamp(cube_z - 0.02, min=0.0, max=0.15)
+    height_above_rest = torch.clamp(cube_z - 0.02, min=0.0, max=0.11)
     height_reward = height_bonus_weight * height_above_rest * is_grasped.float()
 
     # Per-step exponential potential toward cup target.
@@ -376,7 +377,7 @@ def compute_pick_place_rewards(
     # Penalties
     action_cost, drop_penalty_reward, new_stage_dropped = compute_penalties(
         joint_vel, cube_pos, is_grasped, stage_grasped,
-        is_in_cup, cube_half_size, action_cost_weight, drop_penalty,
+        is_in_cup, cube_half_size_z, action_cost_weight, drop_penalty,
         stage_dropped
     )
 

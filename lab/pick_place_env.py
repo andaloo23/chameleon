@@ -138,8 +138,16 @@ class PickPlaceEnv(DirectRLEnv):
         self._gripper_tip_pos = torch.zeros(self.num_envs, 3, device=self.device)
         self._jaw_tip_pos     = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # Cup positions (will be set during reset)
+        # Cup positions, height, and active variant index (will be set during reset)
         self._cup_pos = torch.zeros(self.num_envs, 3, device=self.device)
+        self._cup_height = torch.full((self.num_envs,), self.cfg.cup_height, device=self.device)
+        self._active_cup_variant = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+
+        # Per-env cube dimension tensors (half-sizes in meters, set at reset)
+        self._cube_dims = torch.zeros(self.num_envs, 3, device=self.device)  # [N, 3] (half_x, half_y, half_z)
+        self._cube_half_size_z = torch.zeros(self.num_envs, device=self.device)  # [N]
+        self._cube_half_size_grasp = torch.zeros(self.num_envs, device=self.device)  # [N] approach-axis half-size
+        self._active_cube_variant = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
         # Previous fingertip-to-face distances for OBB reach reward (pre-grasp)
         self._prev_left_fingertip_dist  = torch.zeros(self.num_envs, device=self.device)
@@ -190,11 +198,31 @@ class PickPlaceEnv(DirectRLEnv):
                     physx_col_api.CreateRestOffsetAttr().Set(0.0)
                     physx_col_api.CreateContactOffsetAttr().Set(0.002)
         
-        # Create cube rigid object
-        self.cube = RigidObject(self.cfg.cube_cfg)
-        
-        # Don't apply convexDecomposition to cube - let it use default collision
-        
+        # Spawn each cube size variant at env_0 (will be cloned to all envs)
+        for i, (hx, hy, hz) in enumerate(self.cfg.cube_size_variants):
+            cube_spawn_cfg = sim_utils.CuboidCfg(
+                size=(hx * 2, hy * 2, hz * 2),
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                    max_depenetration_velocity=0.5,
+                    linear_damping=0.5,
+                    angular_damping=0.5,
+                    disable_gravity=False,
+                ),
+                mass_props=sim_utils.MassPropertiesCfg(mass=self.cfg.cube_mass),
+                collision_props=sim_utils.CollisionPropertiesCfg(
+                    contact_offset=0.002,
+                    rest_offset=0.0,
+                ),
+                physics_material=self.cfg.high_friction_material,
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=self.cfg.cube_color,
+                ),
+            )
+            cube_spawn_cfg.func(
+                f"/World/envs/env_0/Cube_{i}", cube_spawn_cfg,
+                translation=(0.0, 0.15 + i * 0.15, hz),
+            )
+
         # Add ground plane and ensure it has a small contact offset
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
         ground_prim = stage.GetPrimAtPath("/World/ground/Plane") # Typical path for PlaneCfg
@@ -209,8 +237,9 @@ class PickPlaceEnv(DirectRLEnv):
             ground_physx.CreateRestOffsetAttr().Set(0.0)
             # Static colliders don't have maxDepenetrationVelocity attributes that we need to set manually here
         
-        # Create hollow cup at env_0 (will be cloned)
-        self._create_cup_prim("/World/envs/env_0/Cup", (0.0, -0.3, 0.0))
+        # Create one cup prim per height variant at env_0 (will be cloned)
+        for i, h in enumerate(self.cfg.cup_height_variants):
+            self._create_cup_prim(f"/World/envs/env_0/Cup_{i}", (0.0, -0.3 - i * 0.5, 0.0), height=h)
         
         # Clone environments AFTER all assets are added to env_0
         self.scene.clone_environments(copy_from_source=False)
@@ -219,21 +248,36 @@ class PickPlaceEnv(DirectRLEnv):
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
         
-        # Create RigidObject wrapper for cup after cloning
+        # Create RigidObject wrappers for each cup height variant after cloning
         from isaaclab.assets import RigidObjectCfg
-        cup_wrapper_cfg = RigidObjectCfg(
-            prim_path="/World/envs/env_.*/Cup",
-            spawn=None,  # Already spawned
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(0.0, -0.3, 0.0),
-            ),
-        )
-        self.cup = RigidObject(cup_wrapper_cfg)
-        
+        self.cups = []
+        for i, h in enumerate(self.cfg.cup_height_variants):
+            cup_wrapper_cfg = RigidObjectCfg(
+                prim_path=f"/World/envs/env_.*/Cup_{i}",
+                spawn=None,  # Already spawned
+                init_state=RigidObjectCfg.InitialStateCfg(
+                    pos=(0.0, -0.3 - i * 0.5, 0.0),
+                ),
+            )
+            self.cups.append(RigidObject(cup_wrapper_cfg))
+
+        # Create RigidObject wrappers for each cube size variant after cloning
+        from isaaclab.assets import RigidObjectCfg as _RigidObjectCfg
+        self.cubes = []
+        for i, (hx, hy, hz) in enumerate(self.cfg.cube_size_variants):
+            cube_wrapper_cfg = _RigidObjectCfg(
+                prim_path=f"/World/envs/env_.*/Cube_{i}",
+                spawn=None,
+                init_state=_RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.15 + i * 0.15, hz)),
+            )
+            self.cubes.append(RigidObject(cube_wrapper_cfg))
+
         # Add assets to scene
         self.scene.articulations["robot"] = self.robot
-        self.scene.rigid_objects["cube"] = self.cube
-        self.scene.rigid_objects["cup"] = self.cup
+        for i, cube in enumerate(self.cubes):
+            self.scene.rigid_objects[f"cube_{i}"] = cube
+        for i, cup in enumerate(self.cups):
+            self.scene.rigid_objects[f"cup_{i}"] = cup
         
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -242,19 +286,19 @@ class PickPlaceEnv(DirectRLEnv):
 
 
 
-    def _create_cup_prim(self, prim_path: str, position: tuple):
+    def _create_cup_prim(self, prim_path: str, position: tuple, height: float | None = None):
         """Create a hollow cup mesh at the given prim path."""
         from pxr import Gf, UsdGeom, UsdPhysics, Usd, PhysxSchema
         import isaaclab.sim.utils.stage as stage_utils
-        
+
         stage = stage_utils.get_current_stage()
-        
+
         # Cup dimensions from config
         outer_r_top = self.cfg.cup_outer_radius_top
         outer_r_bot = self.cfg.cup_outer_radius_bottom
         inner_r_top = self.cfg.cup_inner_radius_top
         inner_r_bot = self.cfg.cup_inner_radius_bottom
-        height = self.cfg.cup_height
+        height = height if height is not None else self.cfg.cup_height
         bottom_thick = self.cfg.cup_bottom_thickness
         color = self.cfg.cup_color
         
@@ -365,6 +409,16 @@ class PickPlaceEnv(DirectRLEnv):
         
         return points, face_counts, face_indices
 
+    def _get_active_cube_state(self) -> tuple[Tensor, Tensor]:
+        """Return world-space (pos, quat) of the active cube for each env."""
+        all_pos  = torch.stack([c.data.root_pos_w  for c in self.cubes], dim=0)  # [V, N, 3]
+        all_quat = torch.stack([c.data.root_quat_w for c in self.cubes], dim=0)  # [V, N, 4]
+        idx = self._active_cube_variant  # [N]
+        arange = torch.arange(self.num_envs, device=self.device)
+        pos  = all_pos[idx, arange]   # [N, 3]
+        quat = all_quat[idx, arange]  # [N, 4]
+        return pos, quat
+
     def _pre_physics_step(self, actions: Tensor) -> None:
         """Process actions before physics step."""
         # Clip actions to [-1, 1]
@@ -415,8 +469,8 @@ class PickPlaceEnv(DirectRLEnv):
         self._gripper_tip_pos = gripper_pos + quat_apply(gripper_quat, self.tip_offset_gripper.unsqueeze(0).expand(n, -1))
         self._jaw_tip_pos     = jaw_pos     + quat_apply(jaw_quat,     self.tip_offset_jaw.unsqueeze(0).expand(n, -1))
         
-        cube_pos = self.cube.data.root_pos_w
-        
+        cube_pos, _ = self._get_active_cube_state()
+
         # Cube-relative fingertip positions (translation-invariant across workspace)
         gripper_tip_rel = self._gripper_tip_pos - cube_pos  # [num_envs, 3]
         jaw_tip_rel     = self._jaw_tip_pos     - cube_pos  # [num_envs, 3]
@@ -430,14 +484,16 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Concatenate observation
         obs = torch.cat([
-            self.joint_pos,                    # [num_envs, 6]
-            self.joint_vel,                    # [num_envs, 6]
-            cube_rel_gripper,                  # [num_envs, 3]
-            cup_rel_cube,                      # [num_envs, 3]
-            gripper_tip_rel,                   # [num_envs, 3]
-            jaw_tip_rel,                       # [num_envs, 3]
-            gripper_width                      # [num_envs, 1]
-        ], dim=1)  # total: 25
+            self.joint_pos,                        # [num_envs, 6]
+            self.joint_vel,                        # [num_envs, 6]
+            cube_rel_gripper,                      # [num_envs, 3]
+            cup_rel_cube,                          # [num_envs, 3]
+            self._cup_height.unsqueeze(-1),        # [num_envs, 1]
+            gripper_tip_rel,                       # [num_envs, 3]
+            jaw_tip_rel,                           # [num_envs, 3]
+            gripper_width,                         # [num_envs, 1]
+            self._cube_dims,                       # [num_envs, 3]
+        ], dim=1)  # total: 29
         
         return {"policy": obs}
 
@@ -452,13 +508,13 @@ class PickPlaceEnv(DirectRLEnv):
         # Reuse fingertip positions cached by _get_observations this step
         gripper_tip_pos = self._gripper_tip_pos
         jaw_tip_pos     = self._jaw_tip_pos
-        
-        cube_pos = self.cube.data.root_pos_w
-        
+
+        cube_pos, cube_quat_cached = self._get_active_cube_state()
+
         # Select which cube face axis to use + left/right assignment (once per episode at frame 1)
         first_frame_mask = self.episode_length_buf == 1
         if first_frame_mask.any():
-            cube_quat_w = self.cube.data.root_quat_w  # [num_envs, 4]
+            cube_quat_w = cube_quat_cached  # [num_envs, 4]
             n_envs = cube_quat_w.shape[0]
             local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
             local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
@@ -484,7 +540,7 @@ class PickPlaceEnv(DirectRLEnv):
 
         
         # Recompute best_axis for zone checks (every frame, from live pose)
-        cube_quat_w = self.cube.data.root_quat_w
+        cube_quat_w = cube_quat_cached
         n_envs = cube_quat_w.shape[0]
         local_x = torch.tensor([1.0, 0.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
         local_y = torch.tensor([0.0, 1.0, 0.0], device=self.device).unsqueeze(0).expand(n_envs, -1)
@@ -493,8 +549,6 @@ class PickPlaceEnv(DirectRLEnv):
         best_axis = torch.where(self._use_x.unsqueeze(-1), cube_x_world, cube_y_world)
         best_axis = best_axis / best_axis.norm(dim=-1, keepdim=True)
         
-        half = self.cfg.cube_scale[0] / 2.0
-        
         # --- Zone-entry check: Euclidean distance to assigned face zone center ---
         # Face zone center in cube-local space:
         #   face_offset = half_size + 0.5 * zone_margin  (same as rewards.py)
@@ -502,7 +556,6 @@ class PickPlaceEnv(DirectRLEnv):
         # A fingertip is "in zone" when its 3D Euclidean distance to the assigned
         # face center < grasp_zone_entry_radius.  This is directly comparable to
         # the fcL / fcR values printed in the keyboard script.
-        half_size = half
         margin = self._zone_margin
         is_local_x = self._use_x
         cube_quat_inv = cube_quat_w.clone()
@@ -510,12 +563,12 @@ class PickPlaceEnv(DirectRLEnv):
         fixed_local  = quat_apply(cube_quat_inv, gripper_tip_pos - cube_pos)
         moving_local = quat_apply(cube_quat_inv, jaw_tip_pos     - cube_pos)
 
-        face_offset = half_size + 0.5 * margin
+        face_offset = self._cube_half_size_grasp + 0.5 * margin  # [N]
         axis_local_vec = torch.zeros_like(cube_pos)
         axis_local_vec[:, 0] = is_local_x.float()
         axis_local_vec[:, 1] = (~is_local_x).float()
-        r_pos = face_offset * axis_local_vec   # +face center (cube-local)
-        r_neg = -face_offset * axis_local_vec  # -face center (cube-local)
+        r_pos = face_offset.unsqueeze(-1) * axis_local_vec   # +face center (cube-local)
+        r_neg = -face_offset.unsqueeze(-1) * axis_local_vec  # -face center (cube-local)
 
         d_fixed_pos  = torch.norm(fixed_local  - r_pos, dim=1)
         d_fixed_neg  = torch.norm(fixed_local  - r_neg, dim=1)
@@ -548,7 +601,7 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Physical grasp fallback: cube clearly airborne + fingertip right next to it + gripper closed.
         # Catches genuine grasps where fingertips miss the exact OBB face zones.
-        cube_bottom_z = cube_pos[:, 2] - self.cfg.cube_scale[2] / 2.0
+        cube_bottom_z = cube_pos[:, 2] - self._cube_half_size_z
         gripper_tip_dist_to_cube = torch.norm(gripper_tip_pos - cube_pos, dim=1)
         physical_grasp = (
             (cube_bottom_z > 0.05) &
@@ -574,9 +627,9 @@ class PickPlaceEnv(DirectRLEnv):
             right_in_zone=right_in_zone_final,
             cube_pos=cube_pos,
             cup_pos=self._cup_pos,
-            cup_height=self.cfg.cup_height,
+            cup_height=self._cup_height,
             cup_inner_radius=self.cfg.cup_inner_radius_top,
-            cube_half_size=self.cfg.cube_scale[2] / 2.0,
+            cube_half_size=self._cube_half_size_z,
             droppable_min_height=self.cfg.aligned_min_height_above_rim,
             in_cup_height_margin=self.cfg.in_cup_height_margin,
             droppable_xy_radius=self.cfg.cup_inner_radius_top * 0.5,  # tighter: cube must be well-centered above cup to release
@@ -613,13 +666,14 @@ class PickPlaceEnv(DirectRLEnv):
             stage_droppable=self._stage_droppable,
             stage_success=self._stage_success,
             stage_dropped=self._stage_dropped,
-            cup_height=self.cfg.cup_height,
-            cube_half_size=self.cfg.cube_scale[2] / 2.0,
+            cup_height=self._cup_height,
+            cube_half_size_z=self._cube_half_size_z,
+            cube_half_grasp=self._cube_half_size_grasp,
             zone_margin=self._zone_margin,
             # Fingertip inputs
             gripper_tip_pos=gripper_tip_pos,
             jaw_tip_pos=jaw_tip_pos,
-            cube_quat_w=self.cube.data.root_quat_w,
+            cube_quat_w=cube_quat_cached,
             use_x=self._use_x,
             gripper_value=gripper_value,
             gripper_close_threshold=self.cfg.grasp_close_command_threshold,
@@ -833,18 +887,36 @@ class PickPlaceEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         
+        # Cube variant selection
+        cube_variant_idx = torch.randint(0, len(self.cfg.cube_size_variants), (num_reset,), device=self.device)
+        self._active_cube_variant[env_ids] = cube_variant_idx
+        variants_dims = torch.tensor(self.cfg.cube_size_variants, device=self.device)  # [V, 3]
+        self._cube_dims[env_ids] = variants_dims[cube_variant_idx]  # [num_reset, 3]
+        self._cube_half_size_z[env_ids] = self._cube_dims[env_ids, 2]
+
         # Cube position
-        cube_z = torch.full((num_reset,), self.cfg.cube_scale[2] / 2.0, device=self.device)
+        cube_z = self._cube_half_size_z[env_ids]  # per-env height above table
         cube_pos = torch.stack([cube_xy[:, 0], cube_xy[:, 1], cube_z], dim=1)
         cube_pos += self.scene.env_origins[env_ids]
-        
+
         # Random yaw rotation for cube
         random_yaw = sample_uniform(-math.pi, math.pi, (num_reset,), self.device)
         cube_quat = torch.zeros(num_reset, 4, device=self.device)
         cube_quat[:, 0] = torch.cos(random_yaw / 2.0)  # w
         cube_quat[:, 3] = torch.sin(random_yaw / 2.0)  # z
-        self.cube.write_root_pose_to_sim(torch.cat([cube_pos, cube_quat], dim=1), env_ids)
-        self.cube.write_root_velocity_to_sim(torch.zeros(num_reset, 6, device=self.device), env_ids)
+
+        # Write each cube variant: active variant at workspace, others parked underground
+        zero_vel_cube = torch.zeros(num_reset, 6, device=self.device)
+        for k, cube_obj in enumerate(self.cubes):
+            is_active_k = (cube_variant_idx == k)
+            center_z = torch.where(
+                is_active_k, cube_z,
+                torch.full((num_reset,), -10.0, device=self.device),
+            )
+            pos_k = torch.stack([cube_xy[:, 0], cube_xy[:, 1], center_z], dim=1)
+            pos_k += self.scene.env_origins[env_ids]
+            cube_obj.write_root_pose_to_sim(torch.cat([pos_k, cube_quat], dim=1), env_ids)
+            cube_obj.write_root_velocity_to_sim(zero_vel_cube, env_ids)
         
         # Initialize axis selection immediately so frame 0 has correct OBB distances.
         # This must happen AFTER writing cube pose so quat_apply uses the new orientation.
@@ -864,21 +936,42 @@ class PickPlaceEnv(DirectRLEnv):
         best_axis_init = torch.where(self._use_x[env_ids].unsqueeze(-1), cube_x_world, cube_y_world)
         cross_z = cube_xy_3d[:, 0] * best_axis_init[:, 1] - cube_xy_3d[:, 1] * best_axis_init[:, 0]
         self._left_is_positive[env_ids] = cross_z > 0
-        
-        # Randomize cup positions (ensuring distance from cube)
+
+        # Set per-env approach-axis half-size (depends on _use_x which was just set)
+        use_x_mask = self._use_x[env_ids]
+        self._cube_half_size_grasp[env_ids] = torch.where(
+            use_x_mask,
+            self._cube_dims[env_ids, 0],  # half_x when approaching from X faces
+            self._cube_dims[env_ids, 1],  # half_y when approaching from Y faces
+        )
+
+        # Randomize cup XY position and height variant
         cup_xy = self._sample_workspace_xy(num_reset, existing_xy=cube_xy)
-        cup_z = torch.full((num_reset,), self.cfg.cup_height / 2.0, device=self.device)
-        cup_pos = torch.stack([cup_xy[:, 0], cup_xy[:, 1], cup_z], dim=1)
-        cup_pos_world = cup_pos + self.scene.env_origins[env_ids]
-        
-        # Update internal cup position tracking (world coordinates: cup base at table level)
+        if hasattr(self, '_debug_force_cup_variant') and self._debug_force_cup_variant is not None:
+            variant_idx = torch.full((num_reset,), self._debug_force_cup_variant, dtype=torch.long, device=self.device)
+        else:
+            variant_idx = torch.randint(0, len(self.cfg.cup_height_variants), (num_reset,), device=self.device)
+        variants_tensor = torch.tensor(self.cfg.cup_height_variants, device=self.device)
+        self._cup_height[env_ids] = variants_tensor[variant_idx]
+        self._active_cup_variant[env_ids] = variant_idx
+
+        # Update internal cup base position tracking (z=0 at table level in local coords)
         cup_local = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
         self._cup_pos[env_ids] = cup_local + self.scene.env_origins[env_ids]
-        
-        # Move cup using RigidObject API
+
+        # Place the active variant at the workspace position; park all others underground
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
-        self.cup.write_root_pose_to_sim(torch.cat([cup_pos_world, cup_quat], dim=1), env_ids)
-        self.cup.write_root_velocity_to_sim(torch.zeros(num_reset, 6, device=self.device), env_ids)
+        zero_vel = torch.zeros(num_reset, 6, device=self.device)
+        for k, (cup_obj, h) in enumerate(zip(self.cups, self.cfg.cup_height_variants)):
+            is_active = (variant_idx == k)
+            center_z = torch.where(
+                is_active,
+                torch.full((num_reset,), h / 2.0, device=self.device),
+                torch.full((num_reset,), -10.0, device=self.device),
+            )
+            pos_world = torch.stack([cup_xy[:, 0], cup_xy[:, 1], center_z], dim=1) + self.scene.env_origins[env_ids]
+            cup_obj.write_root_pose_to_sim(torch.cat([pos_world, cup_quat], dim=1), env_ids)
+            cup_obj.write_root_velocity_to_sim(zero_vel, env_ids)
         
 
         # Reset grasp detector state
@@ -893,8 +986,8 @@ class PickPlaceEnv(DirectRLEnv):
         # Initialize transport dist to cube-cup distance at episode start (world coords, correct now)
         cube_cup_dx = cube_pos[:, 0] - self._cup_pos[env_ids, 0]
         cube_cup_dy = cube_pos[:, 1] - self._cup_pos[env_ids, 1]
-        cube_bottom_z = cube_pos[:, 2] - self.cfg.cube_scale[2] / 2.0
-        cup_z_target = self._cup_pos[env_ids, 2] + self.cfg.cup_height + self.cfg.transport_z_clearance
+        cube_bottom_z = cube_pos[:, 2] - self._cube_half_size_z[env_ids]
+        cup_z_target = self._cup_pos[env_ids, 2] + self._cup_height[env_ids] + self.cfg.transport_z_clearance
         cube_cup_dz = cube_bottom_z - cup_z_target
         self._prev_transport_dist[env_ids] = torch.sqrt(cube_cup_dx**2 + cube_cup_dy**2 + cube_cup_dz**2)
         # Reset fingertip HWM Phi scores to 0.0 (no best yet = d=inf equivalent).
