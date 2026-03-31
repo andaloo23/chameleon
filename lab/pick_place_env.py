@@ -334,12 +334,13 @@ class PickPlaceEnv(DirectRLEnv):
         sim_utils.bind_physics_material(mesh_path, material_path)
         
         xform_prim = xform.GetPrim()
-        UsdPhysics.RigidBodyAPI.Apply(xform_prim)
+        rb_api = UsdPhysics.RigidBodyAPI.Apply(xform_prim)
+        rb_api.CreateKinematicEnabledAttr().Set(True)  # Cup never moves; kinematic = no gravity/contacts overhead
         physx_rb_api = PhysxSchema.PhysxRigidBodyAPI.Apply(xform_prim)
         physx_rb_api.CreateMaxDepenetrationVelocityAttr().Set(0.5)
-        
+
         mass_api = UsdPhysics.MassAPI.Apply(xform_prim)
-        mass_api.CreateMassAttr().Set(10.0)  # Heavy so it doesn't move
+        mass_api.CreateMassAttr().Set(10.0)
     
     def _build_cup_mesh(self, outer_r_top, outer_r_bot, height, inner_r_top, inner_r_bot, bottom_thick, segments=32):
         """Build hollow cup mesh geometry."""
@@ -720,6 +721,18 @@ class PickPlaceEnv(DirectRLEnv):
         )
         total_reward = total_reward + r_grip_close_delta
 
+        # Wrist clearance penalty: discourage the gripper body sitting below the cube
+        # during lifted/droppable stages, which blocks the drop path into the cup.
+        # Zero cost for any horizontal grasp (wrist level with or above cube).
+        cube_bottom_z = cube_pos[:, 2] - self._cube_half_size_z
+        wrist_below = torch.clamp(cube_bottom_z - gripper_pos[:, 2], min=0.0)
+        r_wrist_clearance = (
+            -self.cfg.rew_wrist_clearance_weight
+            * wrist_below
+            * (new_stage_lifted | new_stage_droppable).float()
+        )
+        total_reward = total_reward + r_wrist_clearance
+
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
         
@@ -974,7 +987,7 @@ class PickPlaceEnv(DirectRLEnv):
         cup_local = torch.stack([cup_xy[:, 0], cup_xy[:, 1], torch.zeros(num_reset, device=self.device)], dim=1)
         self._cup_pos[env_ids] = cup_local + self.scene.env_origins[env_ids]
 
-        # Place the active variant at the workspace position; park all others at unique slots
+        # Place the active variant at the workspace position; park all others underground
         cup_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(num_reset, 4)
         zero_vel = torch.zeros(num_reset, 6, device=self.device)
         for k, (cup_obj, h) in enumerate(zip(self.cups, self.cfg.cup_height_variants)):
@@ -990,11 +1003,20 @@ class PickPlaceEnv(DirectRLEnv):
             park_pos   = torch.stack([
                 torch.full((num_reset,), park_px, device=self.device),
                 torch.full((num_reset,), park_py, device=self.device),
-                torch.full((num_reset,), h / 2.0, device=self.device),  # rest on ground at park slot
+                torch.full((num_reset,), -10.0, device=self.device),
             ], dim=1)
             pos_world = torch.where(is_active.unsqueeze(-1), active_pos, park_pos) + self.scene.env_origins[env_ids]
             cup_obj.write_root_pose_to_sim(torch.cat([pos_world, cup_quat], dim=1), env_ids)
             cup_obj.write_root_velocity_to_sim(zero_vel, env_ids)
+
+        # Toggle kinematic per env: parked cups stay underground, active cup responds to physics
+        from pxr import UsdPhysics
+        import isaaclab.sim.utils.stage as stage_utils
+        stage = stage_utils.get_current_stage()
+        for env_idx, active_k in zip(env_ids.tolist(), variant_idx.tolist()):
+            for k in range(len(self.cfg.cup_height_variants)):
+                prim = stage.GetPrimAtPath(f"/World/envs/env_{env_idx}/Cup_{k}")
+                UsdPhysics.RigidBodyAPI.Get(stage, prim.GetPath()).GetKinematicEnabledAttr().Set(k != active_k)
         
 
         # Reset grasp detector state

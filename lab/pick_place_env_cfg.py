@@ -213,6 +213,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_action_cost_weight = 0.025  # Halved alongside action_scale 2x to keep cost-per-distance constant
     rew_drop_penalty = 0.0      # Disabled: was canceling grasp_bonus (+100 grasp - 100 drop = 0 net)
     rew_cup_collision_penalty = -0.5
+    # Per-step penalty for gripper body being below the cube bottom during lifted/droppable stages.
+    # Discourages the wrist-below-cube grip that blocks the drop path.
+    rew_wrist_clearance_weight = 20.0
 
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight     = 200.0   # weight for potential-based delta and close bonus
