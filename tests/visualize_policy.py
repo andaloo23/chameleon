@@ -140,7 +140,12 @@ def main():
         ever_droppable = torch.zeros(args.n_envs, dtype=torch.bool, device=device)
         ever_success   = torch.zeros(args.n_envs, dtype=torch.bool, device=device)
 
-        print(f"\n[Ep {ep+1}/{args.n}] Starting...", flush=True)
+        # Log active variant for this episode
+        cube_var_idx = env._active_cube_variant[0].item()
+        cup_var_idx  = env._active_cup_variant[0].item()
+        cube_dims = cfg.cube_size_variants[cube_var_idx]
+        cup_h     = cfg.cup_height_variants[cup_var_idx]
+        print(f"\n[Ep {ep+1}/{args.n}] cube={tuple(round(v*100,2) for v in cube_dims)}cm  cup_h={cup_h*100:.1f}cm", flush=True)
         prev_flags = ""
         for step in range(args.max_steps):
             with torch.no_grad():
