@@ -191,7 +191,7 @@ def main():
             if terminated[0].item() or truncated[0].item():
                 break
 
-            if step % args.render_every == 0:
+            if not args.headless and step % args.render_every == 0:
                 simulation_app.update()
 
             if args.delay > 0:
