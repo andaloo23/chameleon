@@ -215,7 +215,9 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_cup_collision_penalty = -0.5
     # Per-step reward for cube falling downward while above the cup after droppable milestone.
     # Rewards clean releases: if the wrist blocks the cube it won't fall freely.
-    rew_drop_guidance_weight = 2000.0
+    # NOTE: keep small — 2000 * fall_distance created a height-proportional exploit where the
+    # policy learned to fly as high as possible before releasing to maximise fall reward.
+    rew_drop_guidance_weight = 50.0
 
     # Pre-grasp fingertip reaching rewards
     rew_fingertip_obb_weight     = 200.0   # weight for potential-based delta and close bonus

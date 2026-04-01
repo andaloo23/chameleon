@@ -899,7 +899,7 @@ def train_ppo(
         # Update policy
         metrics = ppo_update(
             policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
-            n_epochs=5, batch_size=1024, entropy_coef=0.01,
+            n_epochs=5, batch_size=1024, entropy_coef=0.003,
             reward_normalizer=reward_normalizer,
         )
         
