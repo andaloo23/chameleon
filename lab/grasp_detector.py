@@ -95,6 +95,7 @@ class GraspDetectorTensor:
         cup_inner_radius: float,
         cube_half_size: Tensor,
         droppable_min_height: float = 0.005,
+        droppable_max_height: float = 0.10,
         in_cup_height_margin: float = 0.02,
         droppable_xy_radius: float | None = None,
         # Legacy params kept for API compatibility (unused)
@@ -117,7 +118,8 @@ class GraspDetectorTensor:
             cup_height:          [num_envs] per-env cup height
             cup_inner_radius:    scalar — physical cup opening (used for is_in_cup XY check)
             cube_half_size:      scalar
-            droppable_min_height: scalar
+            droppable_min_height: scalar — cube bottom must be at least this far above cup rim
+            droppable_max_height: scalar — cube bottom must be no more than this far above cup rim
             in_cup_height_margin: scalar
             droppable_xy_radius: scalar or None — XY tolerance for is_droppable (learning milestone).
                                  Defaults to cup_inner_radius if None. Set larger than cup_inner_radius
@@ -135,13 +137,15 @@ class GraspDetectorTensor:
         cup_top_z = cup_pos[:, 2] + cup_height
         cube_bottom_z = cube_z - cube_half_size
 
-        # is_droppable: learning milestone — cube is above cup height, within a generous XY radius.
-        # Uses droppable_xy_radius (wider) so the robot gets rewarded for lifting high
-        # before it achieves precise XY alignment.
+        # is_droppable: learning milestone — cube is in the drop window above the cup opening.
+        # Height window [min, max] forces the robot to descend to the correct drop altitude
+        # before the gripper is forced open. Without a ceiling the policy exploits high-arc
+        # transport: it overshoots vertically, satisfies XY, then drops from too high.
         _droppable_xy_r = droppable_xy_radius if droppable_xy_radius is not None else cup_inner_radius
         droppable_xy_ok = cube_cup_xy_dist <= _droppable_xy_r
-        above_cup = cube_bottom_z >= (cup_top_z + droppable_min_height)
-        self.is_droppable = droppable_xy_ok & above_cup
+        above_cup_min = cube_bottom_z >= (cup_top_z + droppable_min_height)
+        above_cup_max = cube_bottom_z <= (cup_top_z + droppable_max_height)
+        self.is_droppable = droppable_xy_ok & above_cup_min & above_cup_max
 
         # is_in_cup: success condition — cube physically inside the cup (tight XY = cup_inner_radius).
         cup_bottom_z = cup_pos[:, 2]

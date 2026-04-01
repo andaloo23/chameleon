@@ -632,6 +632,7 @@ class PickPlaceEnv(DirectRLEnv):
             cup_inner_radius=self.cfg.cup_inner_radius_top,
             cube_half_size=self._cube_half_size_z,
             droppable_min_height=self.cfg.aligned_min_height_above_rim,
+            droppable_max_height=self.cfg.aligned_max_height_above_rim,
             in_cup_height_margin=self.cfg.in_cup_height_margin,
             droppable_xy_radius=self.cfg.cup_inner_radius_top * 0.5,  # tighter: cube must be well-centered above cup to release
         )

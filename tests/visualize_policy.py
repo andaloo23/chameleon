@@ -84,11 +84,13 @@ def main():
     parser.add_argument("--render-every", type=int, default=1,
                         help="Only render every N steps (default: 1). "
                              "Increase to speed up playback, e.g. --render-every 5")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run without viewer (faster, for bulk evaluation)")
     args = parser.parse_args()
 
     # Isaac Lab must be launched before importing env
     from isaaclab.app import AppLauncher
-    app_launcher = AppLauncher(headless=False)
+    app_launcher = AppLauncher(headless=args.headless)
     simulation_app = app_launcher.app
 
     from isaaclab.utils.logger import configure_logging
