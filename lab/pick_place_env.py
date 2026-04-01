@@ -721,17 +721,18 @@ class PickPlaceEnv(DirectRLEnv):
         )
         total_reward = total_reward + r_grip_close_delta
 
-        # Wrist clearance penalty: discourage the gripper body sitting below the cube
-        # during lifted/droppable stages, which blocks the drop path into the cup.
-        # Zero cost for any horizontal grasp (wrist level with or above cube).
-        cube_bottom_z = cube_pos[:, 2] - self._cube_half_size_z
-        wrist_below = torch.clamp(cube_bottom_z - gripper_pos[:, 2], min=0.0)
-        r_wrist_clearance = (
-            -self.cfg.rew_wrist_clearance_weight
-            * wrist_below
-            * (new_stage_lifted | new_stage_droppable).float()
+        # Drop guidance reward: once the droppable milestone is reached, reward the cube
+        # falling downward while above the cup. Directly rewards clean releases — if the
+        # wrist blocks the cube it won't fall freely and this reward won't fire.
+        cube_falling = torch.clamp(self._prev_cube_z - cube_pos[:, 2], min=0.0)
+        above_cup_xy = torch.norm(cube_pos[:, :2] - self._cup_pos[:, :2], dim=1) < self.cfg.cup_inner_radius_top * 1.5
+        r_drop_guidance = (
+            self.cfg.rew_drop_guidance_weight
+            * cube_falling
+            * above_cup_xy.float()
+            * new_stage_droppable.float()
         )
-        total_reward = total_reward + r_wrist_clearance
+        total_reward = total_reward + r_drop_guidance
 
         # Accumulate per-fingertip debug metrics BEFORE updating cached values.
         not_grasped_mask = (~self._stage_grasped).float()
