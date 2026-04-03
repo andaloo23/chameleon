@@ -769,7 +769,10 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Update state for next step
         self._prev_gripper_cube_dist = new_dist
-        self._prev_transport_dist = new_transport_dist
+        # Ratchet: only update when cube moved closer to cup target.
+        # Prevents the elbow-close exploit: moving away inflates prev_dist,
+        # which would generate extra transport delta reward on the way back.
+        self._prev_transport_dist = torch.minimum(self._prev_transport_dist, new_transport_dist)
         self._prev_cube_z = new_cube_z
         self._prev_d_avg = new_d_avg
         self._prev_gripper_value = gripper_value.clone()
