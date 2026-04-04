@@ -305,18 +305,23 @@ def ppo_update(
             batch_old_log_probs = old_log_probs_tensor[batch_indices]
             batch_returns = returns_tensor[batch_indices]
             batch_advantages = advantages_tensor[batch_indices]
-            
+            batch_old_values = values_tensor[batch_indices]
+
             # Evaluate actions
             log_probs, entropy, values = policy.evaluate_actions(batch_obs, batch_actions)
-            
+
             # Policy loss (clipped surrogate)
             ratio = torch.exp(log_probs - batch_old_log_probs)
             surr1 = ratio * batch_advantages
             surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * batch_advantages
             policy_loss = -torch.min(surr1, surr2).mean()
-            
-            # Value loss
-            value_loss = nn.functional.mse_loss(values, batch_returns)
+
+            # Value loss (clipped): prevents the critic from taking steps too large
+            # relative to the old estimate, mirroring the actor's clipping mechanism
+            values_clipped = batch_old_values + torch.clamp(values - batch_old_values, -clip_eps, clip_eps)
+            value_loss_unclipped = (values - batch_returns).pow(2)
+            value_loss_clipped = (values_clipped - batch_returns).pow(2)
+            value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
             
             # Entropy bonus
             entropy_loss = -entropy.mean()
@@ -343,17 +348,19 @@ def ppo_update(
             n_updates += 1
             
             # KL Safety Brake: if KL divergence is too high, stop updating to prevent collapse
-            if approx_kl > 0.03:
-                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.03")
+            if approx_kl > 0.015:
+                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.015")
                 kl_brake_triggered = True
                 break
         
         if kl_brake_triggered:
             break
     
-    # Compute explained variance
+    # Compute explained variance using post-update value estimates
     with torch.no_grad():
-        explained_var = 1 - (returns_tensor - values_tensor).var() / (returns_tensor.var() + 1e-8)
+        _, new_values = policy.forward(obs_tensor)
+        new_values = new_values.squeeze(-1)
+        explained_var = 1 - (returns_tensor - new_values).var() / (returns_tensor.var() + 1e-8)
         explained_var = explained_var.item()
     
     metrics = {
@@ -899,7 +906,7 @@ def train_ppo(
         # Update policy
         metrics = ppo_update(
             policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
-            n_epochs=5, batch_size=1024, entropy_coef=0.005,
+            n_epochs=3, batch_size=1024, entropy_coef=0.005,
             reward_normalizer=reward_normalizer,
         )
         
@@ -909,6 +916,11 @@ def train_ppo(
         if curriculum:
             curriculum_recent_flags.extend(episode_flags)
         total_episodes += len(episode_rewards)
+
+        # Linear LR annealing: decay from initial LR to near-zero over training
+        lr_frac = max(1.0 - total_episodes / num_episodes, 1e-4)
+        for g in optimizer.param_groups:
+            g["lr"] = learning_rate * lr_frac
         avg_reward = np.mean(all_rewards) if all_rewards else 0.0
         
         # Store per-episode metrics for plotting
