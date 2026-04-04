@@ -205,8 +205,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Per-step exponential potential toward cup target during transport (gated on is_grasped &
     # stage_lifted & ~stage_droppable). Provides always-on directional signal; safe value chosen
     # so max per-episode potential (weight × 500 steps) < droppable_bonus + success_bonus (3800).
-    transport_potential_weight = 5.0
-    transport_potential_sigma = 0.30   # distance scale (m): larger sigma gives gradient from ~0.5m out
+    transport_potential_weight = 15.0
+    transport_potential_sigma = 0.35   # distance scale (m): larger sigma gives gradient from ~0.5m out
     
     # Stage 4: Aligned above cup (one-time bonus — cube reached target point above cup center)
     rew_droppable_bonus = 800.0
