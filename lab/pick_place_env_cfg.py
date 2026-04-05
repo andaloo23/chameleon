@@ -201,11 +201,11 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     rew_transport_weight = 800.0
     transport_xy_weight = 1.0
     transport_z_weight = 1.0  # equal weight: pure Euclidean distance to target point above cup
-    transport_z_clearance = 0.04  # cube bottom target height above cup rim
+    transport_z_clearance = 0.02  # cube bottom target height above cup rim (must be within droppable window [0.01, 0.03])
     # Per-step exponential potential toward cup target during transport (gated on is_grasped &
     # stage_lifted & ~stage_droppable). Provides always-on directional signal; safe value chosen
     # so max per-episode potential (weight × 500 steps) < droppable_bonus + success_bonus (3800).
-    transport_potential_weight = 15.0
+    transport_potential_weight = 5.0
     transport_potential_sigma = 0.35   # distance scale (m): larger sigma gives gradient from ~0.5m out
     
     # Stage 4: Aligned above cup (one-time bonus — cube reached target point above cup center)
