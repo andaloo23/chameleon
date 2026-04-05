@@ -252,7 +252,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Aligned = cube bottom above cup rim AND cube XY within cup_inner_radius_top of cup center.
     # This is the "target point" — cube is directly above the cup opening, ready to drop.
     aligned_min_height_above_rim = 0.01  # cube bottom must clear cup rim by at least 1cm
-    aligned_max_height_above_rim = 0.05  # cube bottom must be no more than 5cm above cup rim
+    aligned_max_height_above_rim = 0.03  # cube bottom must be no more than 3cm above cup rim
     in_cup_height_margin = 0.02
 
     # ===== Reset Configuration =====

@@ -634,7 +634,7 @@ class PickPlaceEnv(DirectRLEnv):
             droppable_min_height=self.cfg.aligned_min_height_above_rim,
             droppable_max_height=self.cfg.aligned_max_height_above_rim,
             in_cup_height_margin=self.cfg.in_cup_height_margin,
-            droppable_xy_radius=self.cfg.cup_inner_radius_top * 1.5,  # looser than cup opening: fires as learning milestone before precise in-cup alignment
+            droppable_xy_radius=self.cfg.cup_inner_radius_top * 1.05,  # tight: gripper force-open must match success zone
         )
         
         # Compute 2D reach distance (diagnostic only)
