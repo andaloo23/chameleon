@@ -904,14 +904,14 @@ def train_ppo(
             env, policy, buffer, n_steps=rollout_steps, num_envs=n_envs, state=rollout_state
         )
 
-        # Anneal KL threshold: 0.025 early (room to learn) → 0.012 late (protect near-optimal policy)
+        # Anneal KL threshold: 0.030 early (matches original run's permissiveness) → 0.012 late (protects near-optimal policy)
         train_frac = min(total_episodes / num_episodes, 1.0)
-        kl_threshold = 0.025 - 0.013 * train_frac
+        kl_threshold = 0.030 - 0.018 * train_frac
 
         # Update policy
         metrics = ppo_update(
             policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
-            n_epochs=3, batch_size=1024, entropy_coef=0.005,
+            n_epochs=5, batch_size=1024, entropy_coef=0.005,
             reward_normalizer=reward_normalizer,
             kl_threshold=kl_threshold,
         )
