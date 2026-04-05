@@ -260,6 +260,7 @@ def ppo_update(
     n_epochs: int = 5,
     batch_size: int = 1024,
     reward_normalizer: "RunningRewardNormalizer | None" = None,
+    kl_threshold: float = 0.02,
 ):
     """Perform PPO update. Returns dict of metrics."""
     # Get device from policy
@@ -348,8 +349,8 @@ def ppo_update(
             n_updates += 1
             
             # KL Safety Brake: if KL divergence is too high, stop updating to prevent collapse
-            if approx_kl > 0.015:
-                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > 0.015")
+            if approx_kl > kl_threshold:
+                print(f"      [KL Brake] Early stopping at epoch {epoch+1}, batch {start} | KL: {approx_kl:.4f} > {kl_threshold:.4f}")
                 kl_brake_triggered = True
                 break
         
@@ -903,11 +904,16 @@ def train_ppo(
             env, policy, buffer, n_steps=rollout_steps, num_envs=n_envs, state=rollout_state
         )
 
+        # Anneal KL threshold: 0.025 early (room to learn) → 0.012 late (protect near-optimal policy)
+        train_frac = min(total_episodes / num_episodes, 1.0)
+        kl_threshold = 0.025 - 0.013 * train_frac
+
         # Update policy
         metrics = ppo_update(
             policy, optimizer, buffer, last_values_per_env, num_envs=n_envs,
             n_epochs=3, batch_size=1024, entropy_coef=0.005,
             reward_normalizer=reward_normalizer,
+            kl_threshold=kl_threshold,
         )
         
         # Track statistics
