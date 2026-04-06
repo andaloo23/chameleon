@@ -178,17 +178,18 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 1: Approach cube (delta-based shaping)
     rew_approach_delta_weight = 50.0  # Coarse gripper-to-cube approach (pre-grasp delta shaping)
     
-    # Stage 2: Grasp cube (one-time bonus — reduced to avoid reward-spike domination)
-    rew_grasp_bonus = 200.0
-    
-    # Stage 2b: Per-step reward for maintaining grasp (balanced to avoid hold-still local optimum)
-    rew_grasp_hold_weight = 0.5
+    # Stage 2: Grasp cube (one-time bonus)
+    rew_grasp_bonus = 500.0
 
-    # Stage 3: Lift cube (one-time bonus — heavily increased as key milestone)
-    rew_lift_bonus = 500.0
+    # Stage 2b: Per-step reward for maintaining grasp — strong enough to make holding
+    # the cube continuously rewarding, not just the moment of grasping.
+    rew_grasp_hold_weight = 3.0
+
+    # Stage 3: Lift cube (one-time bonus)
+    rew_lift_bonus = 800.0
 
     # Stage 3: Lift cube (dense delta shaping per step)
-    rew_lift_shaping_weight = 300.0
+    rew_lift_shaping_weight = 500.0
 
     # Stage 3b: Per-step height bonus while grasped — absolute gradient to maintain height.
     # Set to 0: at 80% lift rate this is no longer needed for teaching, and a positive value
