@@ -70,6 +70,11 @@ class GraspDetectorTensor:
         self.is_droppable = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
         )
+        # Force-open: tighter XY radius than is_droppable — only open gripper when
+        # cube is precisely over the cup opening so the drop reliably lands inside.
+        self.should_force_open = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
         self.is_in_cup = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
         )
@@ -83,6 +88,7 @@ class GraspDetectorTensor:
             self.out_of_zone_frames[env_ids] = 0
             self.is_grasped[env_ids] = False
             self.is_droppable[env_ids] = False
+            self.should_force_open[env_ids] = False
             self.is_in_cup[env_ids] = False
 
     def update(
@@ -98,6 +104,7 @@ class GraspDetectorTensor:
         droppable_max_height: float = 0.10,
         in_cup_height_margin: float = 0.02,
         droppable_xy_radius: float | None = None,
+        force_open_xy_radius: float | None = None,
         # Legacy params kept for API compatibility (unused)
         gripper_value: Tensor | None = None,
         target_gripper: Tensor | None = None,
@@ -138,14 +145,21 @@ class GraspDetectorTensor:
         cube_bottom_z = cube_z - cube_half_size
 
         # is_droppable: learning milestone — cube is in the drop window above the cup opening.
-        # Height window [min, max] forces the robot to descend to the correct drop altitude
-        # before the gripper is forced open. Without a ceiling the policy exploits high-arc
-        # transport: it overshoots vertically, satisfies XY, then drops from too high.
+        # Height window [min, max] forces the robot to descend to the correct drop altitude.
+        # Uses a wider XY radius than force_open so the reward bonus fires early enough
+        # to give the policy a learning signal before it achieves precise alignment.
         _droppable_xy_r = droppable_xy_radius if droppable_xy_radius is not None else cup_inner_radius
         droppable_xy_ok = cube_cup_xy_dist <= _droppable_xy_r
         above_cup_min = cube_bottom_z >= (cup_top_z + droppable_min_height)
         above_cup_max = cube_bottom_z <= (cup_top_z + droppable_max_height)
         self.is_droppable = droppable_xy_ok & above_cup_min & above_cup_max
+
+        # should_force_open: gripper action override — tighter XY than is_droppable so the
+        # gripper only opens when the cube is precisely over the cup opening, making the
+        # drop reliably land inside. Defaults to cup_inner_radius (exact success XY zone).
+        _force_open_xy_r = force_open_xy_radius if force_open_xy_radius is not None else cup_inner_radius
+        force_open_xy_ok = cube_cup_xy_dist <= _force_open_xy_r
+        self.should_force_open = force_open_xy_ok & above_cup_min & above_cup_max
 
         # is_in_cup: success condition — cube physically inside the cup (tight XY = cup_inner_radius).
         cup_bottom_z = cup_pos[:, 2]

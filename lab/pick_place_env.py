@@ -442,12 +442,13 @@ class PickPlaceEnv(DirectRLEnv):
         self._smoothed_joint_targets = alpha * self._smoothed_joint_targets + (1.0 - alpha) * raw_targets
         self._joint_targets = self._smoothed_joint_targets
 
-        # Rule: if droppable (cube above cup, within XY tolerance), force gripper fully open.
-        # Applied after EMA so the release is immediate and not damped out.
+        # Rule: force gripper fully open only when cube is precisely over the cup opening.
+        # Uses should_force_open (tighter XY than is_droppable) so the gripper opens only
+        # when the release position will reliably result in the cube landing inside the cup.
         gripper_open_pos = self.cfg.joint_limits["gripper"][1]  # upper limit = fully open
-        droppable = self.grasp_detector.is_droppable
-        self._joint_targets[droppable, self._gripper_joint_idx] = gripper_open_pos
-        self._smoothed_joint_targets[droppable, self._gripper_joint_idx] = gripper_open_pos
+        force_open = self.grasp_detector.should_force_open
+        self._joint_targets[force_open, self._gripper_joint_idx] = gripper_open_pos
+        self._smoothed_joint_targets[force_open, self._gripper_joint_idx] = gripper_open_pos
 
     def _apply_action(self) -> None:
         """Apply joint position targets to robot."""
@@ -634,7 +635,8 @@ class PickPlaceEnv(DirectRLEnv):
             droppable_min_height=self.cfg.aligned_min_height_above_rim,
             droppable_max_height=self.cfg.aligned_max_height_above_rim,
             in_cup_height_margin=self.cfg.in_cup_height_margin,
-            droppable_xy_radius=self.cfg.cup_inner_radius_top * 1.05,  # tight: gripper force-open must match success zone
+            droppable_xy_radius=self.cfg.cup_inner_radius_top * 1.3,   # milestone zone: wide enough to give reward signal
+            force_open_xy_radius=self.cfg.cup_inner_radius_top * 1.0,  # force-open zone: exact cup opening, drops reliably land inside
         )
         
         # Compute 2D reach distance (diagnostic only)
