@@ -181,9 +181,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Stage 2: Grasp cube (one-time bonus)
     rew_grasp_bonus = 500.0
 
-    # Stage 2b: Per-step reward for maintaining grasp. Keep small — too high creates a
-    # hold-still local optimum where collecting grasp_hold beats risky transport.
-    rew_grasp_hold_weight = 0.5
+    # Stage 2b: Per-step reward for maintaining grasp. Must satisfy:
+    #   weight × episode_length < droppable_bonus  →  1.5 × 500 = 750 < 800 ✓ (no hold-still optimum)
+    # Too low (0.5) causes grasp instability during aggressive transport exploration.
+    rew_grasp_hold_weight = 1.5
 
     # Stage 3: Lift cube (one-time bonus)
     rew_lift_bonus = 800.0
