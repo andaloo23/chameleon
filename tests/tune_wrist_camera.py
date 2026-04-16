@@ -84,7 +84,7 @@ def main():
         carb.input.KeyboardInput.R: (3, +1),
         carb.input.KeyboardInput.V: (3, -1),
         carb.input.KeyboardInput.T: (4, +1),
-        carb.input.KeyboardInput.G: (4, -1),
+        carb.input.KeyboardInput.B: (4, -1),
     }
 
     def _update_wrist_prim():
@@ -208,7 +208,7 @@ def main():
     keyboard = appwindow.get_keyboard()
     _sub = input_interface.subscribe_to_keyboard_events(keyboard, on_key)
 
-    print("\nJoints:      Q/A W/S E/D R/V T/G  |  Y=open  U=close")
+    print("\nJoints:      Q/A W/S E/D R/V T/B  |  Y=open  U=close")
     print("Translation: 1/2=X  3/4=Y  5/6=Z  |  7/8=pos step")
     print("Rotation:    I/K=Rx  O/L=Ry  F/H=Rz  |  9/0=rot step")
     print("P: save frames   ESC: exit\n")
