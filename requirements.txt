@@ -7,3 +7,6 @@ scipy
 timm==0.9.10
 transformers==4.57.6
 h5py>=3.10,<4
+# LeRobot 0.4.4 keeps Python >=3.10 compatibility, which is typically safer inside
+# Isaac Sim / Isaac Lab environments than the latest 0.5.x releases.
+lerobot==0.4.4
