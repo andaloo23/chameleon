@@ -243,10 +243,6 @@ class PickPlaceEnv(DirectRLEnv):
         for i, h in enumerate(self.cfg.cup_height_variants):
             self._create_cup_prim(f"/World/envs/env_0/Cup_{i}", (0.0, -0.3 - i * 0.5, 0.0), height=h)
 
-        # Spawn camera prims in env_0 BEFORE cloning so they appear in all envs.
-        if self.cfg.enable_cameras:
-            self._spawn_camera_prims(stage)
-
         # Clone environments AFTER all assets are added to env_0
         self.scene.clone_environments(copy_from_source=False)
         
@@ -327,58 +323,56 @@ class PickPlaceEnv(DirectRLEnv):
             s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
             return (R[1,0]-R[0,1])/s, (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s
 
-    def _spawn_camera_prims(self, stage) -> None:
-        """Create bare USD Camera prims in env_0 so clone_environments copies them to all envs."""
-        from pxr import UsdGeom, Gf
-
-        def _make_cam(prim_path: str, translation, quat_wxyz):
-            cam = UsdGeom.Camera.Define(stage, prim_path)
-            cam.GetFocalLengthAttr().Set(24.0)
-            cam.GetHorizontalApertureAttr().Set(20.955)
-            cam.GetVerticalApertureAttr().Set(20.955)
-            cam.GetClippingRangeAttr().Set(Gf.Vec2f(0.05, 5.0))
-            xf = UsdGeom.Xformable(cam.GetPrim())
-            xf.ClearXformOpOrder()
-            xf.AddTranslateOp().Set(Gf.Vec3d(*translation))
-            w, x, y, z = quat_wxyz
-            xf.AddOrientOp().Set(Gf.Quatf(float(w), float(x), float(y), float(z)))
-
-        # Third-person: fixed position in env frame looking at workspace
-        eye = np.array(self.cfg.camera_third_person_eye)
-        target = np.array(self.cfg.camera_third_person_target)
-        q_tp = self._lookat_quat(eye, target)
-        _make_cam("/World/envs/env_0/third_person_cam", eye, q_tp)
-
-        # Wrist camera: child of gripper link — moves with the end-effector.
-        # Gripper –Y is toward the fingertips (tip_offset ≈ [0.01, –0.102, 0]).
-        # Rx(–90°) rotates camera –Z to align with gripper –Y: q = (0.707, –0.707, 0, 0).
-        wx, wy, wz = self.cfg.camera_wrist_pos
-        _make_cam(
-            "/World/envs/env_0/Robot/gripper/wrist_cam",
-            (wx, wy, wz),
-            (0.707, -0.707, 0.0, 0.0),
-        )
-
     def _create_camera_sensors(self) -> None:
-        """Wrap the cloned camera prims with TiledCamera sensors (called after clone)."""
+        """Create TiledCamera sensors via Isaac Lab's spawning (called after clone)."""
         from isaaclab.sensors import TiledCamera, TiledCameraCfg
 
         W, H = self.cfg.camera_width, self.cfg.camera_height
 
+        # Compute third-person orientation quaternion (w,x,y,z) from eye/target positions
+        eye = np.array(self.cfg.camera_third_person_eye)
+        target = np.array(self.cfg.camera_third_person_target)
+        q_tp = self._lookat_quat(eye, target)  # (w,x,y,z)
+
+        pinhole_cfg = sim_utils.PinholeCameraCfg(
+            focal_length=24.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.05, 5.0),
+        )
+
+        # Third-person: env-local position looking at workspace.
+        # convention="opengl" — camera –Z is forward, +Y is up (matches _lookat_quat).
         self.camera_third_person = TiledCamera(TiledCameraCfg(
             prim_path="/World/envs/env_.*/third_person_cam",
-            spawn=None,          # prim already created by _spawn_camera_prims
+            spawn=pinhole_cfg,
             data_types=["rgb"],
             width=W,
             height=H,
+            offset=TiledCameraCfg.OffsetCfg(
+                pos=tuple(float(v) for v in eye),
+                rot=q_tp,
+                convention="opengl",
+            ),
         ))
 
+        # Wrist camera: child of gripper link — translates/rotates with end-effector.
+        # Rx(–90°) aligns camera –Z with gripper –Y (toward fingertips).
+        wx, wy, wz = self.cfg.camera_wrist_pos
         self.camera_wrist = TiledCamera(TiledCameraCfg(
             prim_path="/World/envs/env_.*/Robot/gripper/wrist_cam",
-            spawn=None,
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=24.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.01, 2.0),
+            ),
             data_types=["rgb"],
             width=W,
             height=H,
+            offset=TiledCameraCfg.OffsetCfg(
+                pos=(float(wx), float(wy), float(wz)),
+                rot=(0.707, -0.707, 0.0, 0.0),
+                convention="opengl",
+            ),
         ))
 
     def update_cameras(self) -> dict[str, torch.Tensor]:
