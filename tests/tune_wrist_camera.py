@@ -13,8 +13,8 @@ Active Camera Translation:
   1/2: X -/+    3/4: Y -/+    5/6: Z -/+
   7/8: translation step -/+
 
-Active Camera Rotation (euler degrees):
-  I/K: Rx -/+    O/L: Ry -/+    F/H: Rz -/+
+Active Camera Rotation (incremental, world-space axes — no gimbal lock):
+  I/K: world X -/+    O/L: world Y -/+    F/H: world Z -/+
   9/0: rotation step -/+
 
   P:   Print current values + save both frames
@@ -39,21 +39,46 @@ from lab.pick_place_env import PickPlaceEnv
 from lab.pick_place_env_cfg import PickPlaceEnvCfg
 
 
-def euler_to_quat(rx_deg, ry_deg, rz_deg):
-    """XYZ intrinsic euler angles (degrees) → (w, x, y, z) quaternion."""
-    rx, ry, rz = math.radians(rx_deg), math.radians(ry_deg), math.radians(rz_deg)
-    cx, sx = math.cos(rx / 2), math.sin(rx / 2)
-    cy, sy = math.cos(ry / 2), math.sin(ry / 2)
-    cz, sz = math.cos(rz / 2), math.sin(rz / 2)
+def quat_mul(a, b):
+    """Multiply two (w,x,y,z) quaternions."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
     return (
-        cx * cy * cz + sx * sy * sz,
-        sx * cy * cz - cx * sy * sz,
-        cx * sy * cz + sx * cy * sz,
-        cx * cy * sz - sx * sy * cz,
+        aw*bw - ax*bx - ay*by - az*bz,
+        aw*bx + ax*bw + ay*bz - az*by,
+        aw*by - ax*bz + ay*bw + az*bx,
+        aw*bz + ax*by - ay*bx + az*bw,
     )
 
 
-def _set_prim_matrix(prim_path, pos, euler):
+def quat_normalize(q):
+    w, x, y, z = q
+    n = math.sqrt(w*w + x*x + y*y + z*z)
+    return (w/n, x/n, y/n, z/n)
+
+
+def axis_angle_to_quat(ax, ay, az, angle_deg):
+    """Unit axis (ax,ay,az) + angle in degrees → (w,x,y,z)."""
+    a = math.radians(angle_deg) / 2
+    s = math.sin(a)
+    return (math.cos(a), ax*s, ay*s, az*s)
+
+
+def euler_to_quat(rx_deg, ry_deg, rz_deg):
+    """XYZ intrinsic euler (degrees) → (w,x,y,z). Used only for wrist seed."""
+    rx, ry, rz = math.radians(rx_deg), math.radians(ry_deg), math.radians(rz_deg)
+    cx, sx = math.cos(rx/2), math.sin(rx/2)
+    cy, sy = math.cos(ry/2), math.sin(ry/2)
+    cz, sz = math.cos(rz/2), math.sin(rz/2)
+    return (
+        cx*cy*cz + sx*sy*sz,
+        sx*cy*cz - cx*sy*sz,
+        cx*sy*cz + sx*cy*sz,
+        cx*cy*sz - sx*sy*cz,
+    )
+
+
+def _set_prim_matrix(prim_path, pos, quat):
     import isaaclab.sim.utils.stage as stage_utils
     from pxr import UsdGeom, Gf
 
@@ -62,7 +87,7 @@ def _set_prim_matrix(prim_path, pos, euler):
     if not prim or not prim.IsValid():
         print(f"[WARN] prim not found: {prim_path}")
         return
-    w, x, y, z = euler_to_quat(*euler)
+    w, x, y, z = quat
     rot = Gf.Rotation(Gf.Quatd(float(w), float(x), float(y), float(z)))
     mat = Gf.Matrix4d()
     mat.SetRotate(rot)
@@ -84,25 +109,23 @@ def main():
     joint_targets = env.robot.data.joint_pos[0].clone()
     JOINT_STEP = 0.05
 
-    # Per-camera state: [pos, euler_rot]
-    # Top camera: seed from cfg eye/target → convert target to euler
     cameras = {
         "wrist": {
             "prim": "/World/envs/env_0/Robot/gripper/wrist_cam",
             "save_tag": "wrist",
             "pos": list(cfg.camera_wrist_pos),
-            "euler": [-90.0, 0.0, 0.0],
+            "quat": euler_to_quat(-160.0, 0.0, 0.0),  # seed from known good value
         },
         "top": {
             "prim": "/World/envs/env_0/third_person_cam",
             "save_tag": "third_person",
             "pos": list(cfg.camera_third_person_eye),
-            "euler": [-180.0, 0.0, 0.0],  # straight down, adjust from here
+            "quat": euler_to_quat(-180.0, 0.0, 0.0),  # straight down
         },
     }
     active = "wrist"
     pos_step = 0.005
-    rot_step = 5.0
+    rot_step = 5.0  # degrees per keypress
 
     input_state = {"running": True}
 
@@ -121,7 +144,16 @@ def main():
 
     def _update():
         cam = cameras[active]
-        _set_prim_matrix(cam["prim"], cam["pos"], cam["euler"])
+        _set_prim_matrix(cam["prim"], cam["pos"], cam["quat"])
+
+    def _rotate(ax, ay, az, sign):
+        """Apply an incremental world-space rotation to the active camera."""
+        cam = cameras[active]
+        dq = axis_angle_to_quat(ax, ay, az, sign * rot_step)
+        cam["quat"] = quat_normalize(quat_mul(dq, cam["quat"]))  # world-space: pre-multiply
+        _update()
+        _print_state()
+        _save_frame(cam["save_tag"])
 
     def _save_frame(tag):
         images = env.update_cameras()
@@ -132,12 +164,10 @@ def main():
 
     def _print_state():
         cam = cameras[active]
-        q = euler_to_quat(*cam["euler"])
+        w, x, y, z = cam["quat"]
         p = cam["pos"]
-        e = cam["euler"]
         print(f"[{active.upper()}] pos=({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f})  "
-              f"euler=({e[0]:.1f}°, {e[1]:.1f}°, {e[2]:.1f}°)  "
-              f"quat=({q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f})")
+              f"quat=({w:.4f}, {x:.4f}, {y:.4f}, {z:.4f})")
 
     def on_key(event):
         nonlocal active, pos_step, rot_step
@@ -189,25 +219,13 @@ def main():
             pos_step = min(0.10, pos_step * 2)
             print(f"[CAM] pos_step -> {pos_step:.4f}m")
 
-        # Rotation
-        elif k == carb.input.KeyboardInput.I:
-            cam["euler"][0] += rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
-        elif k == carb.input.KeyboardInput.K:
-            cam["euler"][0] -= rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
-        elif k == carb.input.KeyboardInput.O:
-            cam["euler"][1] += rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
-        elif k == carb.input.KeyboardInput.L:
-            cam["euler"][1] -= rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
-        elif k == carb.input.KeyboardInput.F:
-            cam["euler"][2] += rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
-        elif k == carb.input.KeyboardInput.H:
-            cam["euler"][2] -= rot_step
-            _update(); _print_state(); _save_frame(cam["save_tag"])
+        # Rotation — incremental world-space, no gimbal lock
+        elif k == carb.input.KeyboardInput.I:  _rotate(1, 0, 0, +1)
+        elif k == carb.input.KeyboardInput.K:  _rotate(1, 0, 0, -1)
+        elif k == carb.input.KeyboardInput.O:  _rotate(0, 1, 0, +1)
+        elif k == carb.input.KeyboardInput.L:  _rotate(0, 1, 0, -1)
+        elif k == carb.input.KeyboardInput.F:  _rotate(0, 0, 1, +1)
+        elif k == carb.input.KeyboardInput.H:  _rotate(0, 0, 1, -1)
 
         elif k == carb.input.KeyboardInput.KEY_9:
             rot_step = max(1.0, rot_step / 2)
@@ -231,7 +249,7 @@ def main():
     print("\nTAB: toggle active camera (wrist / top)")
     print("Joints:      Q/A W/S E/D R/V T/B  |  Y=open  U=close")
     print("Translation: 1/2=X  3/4=Y  5/6=Z  |  7/8=pos step")
-    print("Rotation:    I/K=Rx  O/L=Ry  F/H=Rz  |  9/0=rot step")
+    print("Rotation:    I/K=worldX  O/L=worldY  F/H=worldZ  |  9/0=rot step")
     print("P: save both frames   ESC: exit\n")
     print(f"Active camera: {active.upper()}")
     _print_state()
@@ -247,17 +265,16 @@ def main():
     env.close()
     simulation_app.close()
 
-    print("\n── Paste into pick_place_env_cfg.py ──")
+    print("\n── Paste into pick_place_env_cfg.py / _create_camera_sensors ──")
     for name, cam in cameras.items():
-        q = euler_to_quat(*cam["euler"])
+        w, x, y, z = cam["quat"]
         p = cam["pos"]
         print(f"\n# {name}")
         if name == "wrist":
             print(f"camera_wrist_pos: tuple = {tuple(round(v, 4) for v in p)}")
         else:
             print(f"camera_third_person_eye: tuple = {tuple(round(v, 4) for v in p)}")
-        print(f"# rot=({q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f})  "
-              f"euler=({cam['euler'][0]:.1f}, {cam['euler'][1]:.1f}, {cam['euler'][2]:.1f})")
+        print(f"rot=({w:.4f}, {x:.4f}, {y:.4f}, {z:.4f})")
 
 
 if __name__ == "__main__":
