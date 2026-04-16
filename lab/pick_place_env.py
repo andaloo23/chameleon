@@ -370,7 +370,7 @@ class PickPlaceEnv(DirectRLEnv):
             height=H,
             offset=TiledCameraCfg.OffsetCfg(
                 pos=(float(wx), float(wy), float(wz)),
-                rot=(0.707, -0.707, 0.0, 0.0),
+                rot=(0.1736, -0.9848, 0.0, 0.0),
                 convention="opengl",
             ),
         ))

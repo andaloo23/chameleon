@@ -272,7 +272,7 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Wrist camera: translation offset (x,y,z) in gripper-link–local frame.
     # Gripper looks along its –Y axis (tip_offset_gripper ≈ [0.01, –0.102, 0]).
     # Positive Y offset = behind fingertips; positive Z = above centre.
-    camera_wrist_pos: tuple = (0.0, 0.04, 0.03)
+    camera_wrist_pos: tuple = (0.0, -0.025, -0.22)
 
     # Domain randomization ranges for lighting (sim-to-real).
     # Randomised once per reset call — provides diverse illumination in the dataset.
