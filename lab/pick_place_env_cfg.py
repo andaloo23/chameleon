@@ -266,8 +266,8 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # Third-person camera: position (x,y,z) and look-at target in env-local frame.
     # Robot is at origin; workspace extends 0.2–0.42 m in the –Y direction.
     # Tune these in Isaac Sim viewer → Viewport → Camera if the framing is off.
-    camera_third_person_eye: tuple = (0.35, 0.40, 0.45)
-    camera_third_person_target: tuple = (0.0, -0.15, 0.05)
+    camera_third_person_eye: tuple = (0.0, -0.10, 0.70)
+    camera_third_person_target: tuple = (0.0, -0.25, 0.0)
 
     # Wrist camera: translation offset (x,y,z) in gripper-link–local frame.
     # Gripper looks along its –Y axis (tip_offset_gripper ≈ [0.01, –0.102, 0]).
