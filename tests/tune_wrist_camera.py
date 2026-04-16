@@ -98,19 +98,18 @@ def main():
             return
 
         xf = UsdGeom.Xformable(prim)
-        ops = {op.GetOpName(): op for op in xf.GetOrderedXformOps()}
 
-        tx, ty, tz = wrist_pos
-        if "xformOp:translate" in ops:
-            ops["xformOp:translate"].Set(Gf.Vec3d(tx, ty, tz))
-        else:
-            xf.AddTranslateOp().Set(Gf.Vec3d(tx, ty, tz))
-
+        # Build a 4x4 matrix from current pos + euler rotation.
+        # Using MakeMatrixXform avoids fighting whatever op types Isaac Lab created.
         w, x, y, z = euler_to_quat(*wrist_rot_euler)
-        if "xformOp:orient" in ops:
-            ops["xformOp:orient"].Set(Gf.Quatf(float(w), float(x), float(y), float(z)))
-        else:
-            xf.AddOrientOp().Set(Gf.Quatf(float(w), float(x), float(y), float(z)))
+        rot = Gf.Rotation(Gf.Quatd(float(w), float(x), float(y), float(z)))
+        mat = Gf.Matrix4d()
+        mat.SetRotate(rot)
+        tx, ty, tz = wrist_pos
+        mat.SetTranslateOnly(Gf.Vec3d(tx, ty, tz))
+
+        xf.ClearXformOpOrder()
+        xf.MakeMatrixXform().Set(mat)
 
     def _save_frame(tag: str = "wrist"):
         images = env.update_cameras()
