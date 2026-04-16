@@ -72,34 +72,25 @@ def main():
         carb.input.KeyboardInput.G: (4, -1),
     }
 
-    def _rebuild_wrist_camera():
-        """Destroy and recreate the wrist TiledCamera with the updated offset."""
-        from isaaclab.sensors import TiledCamera, TiledCameraCfg
-        import isaaclab.sim as sim_utils
+    def _move_wrist_camera():
+        """Update the wrist camera prim translation in-place via USD (no sensor teardown)."""
+        import isaaclab.sim.utils.stage as stage_utils
+        from pxr import UsdGeom, Gf
 
-        env.camera_wrist._sensor_prims = []   # detach old prims
-        try:
-            env.camera_wrist.__del__()
-        except Exception:
-            pass
-
-        wx, wy, wz = wrist_offset
-        env.camera_wrist = TiledCamera(TiledCameraCfg(
-            prim_path="/World/envs/env_.*/Robot/gripper/wrist_cam",
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=24.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.01, 2.0),
-            ),
-            data_types=["rgb"],
-            width=cfg.camera_width,
-            height=cfg.camera_height,
-            offset=TiledCameraCfg.OffsetCfg(
-                pos=(float(wx), float(wy), float(wz)),
-                rot=(0.707, -0.707, 0.0, 0.0),
-                convention="opengl",
-            ),
-        ))
+        stage = stage_utils.get_current_stage()
+        # Only need to update env_0 — other envs share the same relative offset
+        # but for a 1-env tune session this is sufficient.
+        prim = stage.GetPrimAtPath("/World/envs/env_0/Robot/gripper/wrist_cam")
+        if not prim or not prim.IsValid():
+            print("[WARN] wrist_cam prim not found")
+            return
+        xf = UsdGeom.Xformable(prim)
+        ops = {op.GetOpName(): op for op in xf.GetOrderedXformOps()}
+        tx, ty, tz = wrist_offset
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(tx, ty, tz))
+        else:
+            xf.AddTranslateOp().Set(Gf.Vec3d(tx, ty, tz))
 
     def _save_frame(tag: str = "wrist"):
         images = env.update_cameras()
@@ -135,7 +126,7 @@ def main():
             axis, direction = axis_map[k]
             wrist_offset[axis] += direction * cam_step
             print(f"[CAM] wrist_pos = ({wrist_offset[0]:.4f}, {wrist_offset[1]:.4f}, {wrist_offset[2]:.4f})  step={cam_step:.4f}")
-            _rebuild_wrist_camera()
+            _move_wrist_camera()
             _save_frame("wrist")
 
         elif k == carb.input.KeyboardInput.KEY_7:
