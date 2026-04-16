@@ -11,8 +11,10 @@ to Isaac Lab's batched, GPU-accelerated framework.
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Sequence
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -240,7 +242,11 @@ class PickPlaceEnv(DirectRLEnv):
         # Create one cup prim per height variant at env_0 (will be cloned)
         for i, h in enumerate(self.cfg.cup_height_variants):
             self._create_cup_prim(f"/World/envs/env_0/Cup_{i}", (0.0, -0.3 - i * 0.5, 0.0), height=h)
-        
+
+        # Spawn camera prims in env_0 BEFORE cloning so they appear in all envs.
+        if self.cfg.enable_cameras:
+            self._spawn_camera_prims(stage)
+
         # Clone environments AFTER all assets are added to env_0
         self.scene.clone_environments(copy_from_source=False)
         
@@ -278,13 +284,142 @@ class PickPlaceEnv(DirectRLEnv):
             self.scene.rigid_objects[f"cube_{i}"] = cube
         for i, cup in enumerate(self.cups):
             self.scene.rigid_objects[f"cup_{i}"] = cup
-        
+
         # Add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
+        # Create TiledCamera wrappers AFTER cloning (prims already exist in all envs).
+        if self.cfg.enable_cameras:
+            self._create_camera_sensors()
 
+    # ── Camera helpers ─────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _lookat_quat(eye: np.ndarray, target: np.ndarray) -> tuple[float, float, float, float]:
+        """Return (w,x,y,z) quaternion for a camera at *eye* looking at *target*.
+
+        Uses OpenGL/USD convention: camera –Z = view direction, +Y = up.
+        world_up is Z; falls back to Y when view direction is parallel to Z.
+        """
+        world_up = np.array([0.0, 0.0, 1.0])
+        z = eye - target
+        z /= np.linalg.norm(z)
+        x = np.cross(world_up, z)
+        if np.linalg.norm(x) < 1e-6:          # view is nearly vertical — use Y as up
+            world_up = np.array([0.0, 1.0, 0.0])
+            x = np.cross(world_up, z)
+        x /= np.linalg.norm(x)
+        y = np.cross(z, x)                     # orthogonalised up
+        R = np.column_stack([x, y, z])          # rotation matrix (cols = camera axes in world)
+        # Shepperd's method: rotation matrix → quaternion
+        t = R.trace()
+        if t > 0:
+            s = 0.5 / np.sqrt(t + 1.0)
+            return 0.25 / s, (R[2,1]-R[1,2])*s, (R[0,2]-R[2,0])*s, (R[1,0]-R[0,1])*s
+        elif R[0,0] > R[1,1] and R[0,0] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+            return (R[2,1]-R[1,2])/s, 0.25*s, (R[0,1]+R[1,0])/s, (R[0,2]+R[2,0])/s
+        elif R[1,1] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+            return (R[0,2]-R[2,0])/s, (R[0,1]+R[1,0])/s, 0.25*s, (R[1,2]+R[2,1])/s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+            return (R[1,0]-R[0,1])/s, (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s
+
+    def _spawn_camera_prims(self, stage) -> None:
+        """Create bare USD Camera prims in env_0 so clone_environments copies them to all envs."""
+        from pxr import UsdGeom, Gf
+
+        def _make_cam(prim_path: str, translation, quat_wxyz):
+            cam = UsdGeom.Camera.Define(stage, prim_path)
+            cam.GetFocalLengthAttr().Set(24.0)
+            cam.GetHorizontalApertureAttr().Set(20.955)
+            cam.GetVerticalApertureAttr().Set(20.955)
+            cam.GetClippingRangeAttr().Set(Gf.Vec2f(0.05, 5.0))
+            xf = UsdGeom.Xformable(cam.GetPrim())
+            xf.ClearXformOpOrder()
+            xf.AddTranslateOp().Set(Gf.Vec3d(*translation))
+            w, x, y, z = quat_wxyz
+            xf.AddOrientOp().Set(Gf.Quatf(float(w), float(x), float(y), float(z)))
+
+        # Third-person: fixed position in env frame looking at workspace
+        eye = np.array(self.cfg.camera_third_person_eye)
+        target = np.array(self.cfg.camera_third_person_target)
+        q_tp = self._lookat_quat(eye, target)
+        _make_cam("/World/envs/env_0/third_person_cam", eye, q_tp)
+
+        # Wrist camera: child of gripper link — moves with the end-effector.
+        # Gripper –Y is toward the fingertips (tip_offset ≈ [0.01, –0.102, 0]).
+        # Rx(–90°) rotates camera –Z to align with gripper –Y: q = (0.707, –0.707, 0, 0).
+        wx, wy, wz = self.cfg.camera_wrist_pos
+        _make_cam(
+            "/World/envs/env_0/Robot/gripper/wrist_cam",
+            (wx, wy, wz),
+            (0.707, -0.707, 0.0, 0.0),
+        )
+
+    def _create_camera_sensors(self) -> None:
+        """Wrap the cloned camera prims with TiledCamera sensors (called after clone)."""
+        from isaaclab.sensors import TiledCamera, TiledCameraCfg
+
+        W, H = self.cfg.camera_width, self.cfg.camera_height
+
+        self.camera_third_person = TiledCamera(TiledCameraCfg(
+            prim_path="/World/envs/env_.*/third_person_cam",
+            spawn=None,          # prim already created by _spawn_camera_prims
+            data_types=["rgb"],
+            width=W,
+            height=H,
+        ))
+
+        self.camera_wrist = TiledCamera(TiledCameraCfg(
+            prim_path="/World/envs/env_.*/Robot/gripper/wrist_cam",
+            spawn=None,
+            data_types=["rgb"],
+            width=W,
+            height=H,
+        ))
+
+    def update_cameras(self) -> dict[str, torch.Tensor]:
+        """Render cameras and return RGB tensors. Call from dataset-collection scripts.
+
+        Returns:
+            dict with keys "third_person" and "wrist", each [num_envs, H, W, 4] uint8.
+        """
+        if not self.cfg.enable_cameras:
+            raise RuntimeError("Cameras are disabled. Set cfg.enable_cameras=True.")
+        dt = self.physics_dt * self.cfg.decimation
+        self.camera_third_person.update(dt, force_recompute=True)
+        self.camera_wrist.update(dt, force_recompute=True)
+        return {
+            "third_person": self.camera_third_person.data.output["rgb"],
+            "wrist": self.camera_wrist.data.output["rgb"],
+        }
+
+    def _randomize_lighting(self) -> None:
+        """Randomly vary dome-light intensity and colour for sim-to-real domain adaptation."""
+        from pxr import Gf
+        import isaaclab.sim.utils.stage as stage_utils
+
+        stage = stage_utils.get_current_stage()
+        light_prim = stage.GetPrimAtPath("/World/Light")
+        if not (light_prim and light_prim.IsValid()):
+            return
+
+        lo_i, hi_i = self.cfg.light_intensity_range
+        intensity_attr = light_prim.GetAttribute("inputs:intensity")
+        if intensity_attr:
+            intensity_attr.Set(float(random.uniform(lo_i, hi_i)))
+
+        (r0, g0, b0), (r1, g1, b1) = self.cfg.light_color_range
+        color_attr = light_prim.GetAttribute("inputs:color")
+        if color_attr:
+            color_attr.Set(Gf.Vec3f(
+                random.uniform(r0, r1),
+                random.uniform(g0, g1),
+                random.uniform(b0, b1),
+            ))
 
     def _create_cup_prim(self, prim_path: str, position: tuple, height: float | None = None):
         """Create a hollow cup mesh at the given prim path."""
@@ -878,7 +1013,11 @@ class PickPlaceEnv(DirectRLEnv):
             env_ids = self.robot._ALL_INDICES
         
         super()._reset_idx(env_ids)
-        
+
+        # Domain randomization: vary global lighting for sim-to-real diversity.
+        if self.cfg.enable_cameras:
+            self._randomize_lighting()
+
         # Convert to tensor if needed
         if not isinstance(env_ids, Tensor):
             env_ids = torch.tensor(env_ids, device=self.device, dtype=torch.long)

@@ -257,6 +257,29 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     aligned_max_height_above_rim = 0.06  # cube bottom must be no more than 6cm above cup rim
     in_cup_height_margin = 0.02
 
+    # ===== Camera Configuration =====
+    # Set enable_cameras=True for dataset collection; leave False during RL training (saves overhead).
+    enable_cameras: bool = False
+    camera_width: int = 224   # π0.5 / most VLAs expect 224×224
+    camera_height: int = 224
+
+    # Third-person camera: position (x,y,z) and look-at target in env-local frame.
+    # Robot is at origin; workspace extends 0.2–0.42 m in the –Y direction.
+    # Tune these in Isaac Sim viewer → Viewport → Camera if the framing is off.
+    camera_third_person_eye: tuple = (0.35, 0.40, 0.45)
+    camera_third_person_target: tuple = (0.0, -0.15, 0.05)
+
+    # Wrist camera: translation offset (x,y,z) in gripper-link–local frame.
+    # Gripper looks along its –Y axis (tip_offset_gripper ≈ [0.01, –0.102, 0]).
+    # Positive Y offset = behind fingertips; positive Z = above centre.
+    camera_wrist_pos: tuple = (0.0, 0.04, 0.03)
+
+    # Domain randomization ranges for lighting (sim-to-real).
+    # Randomised once per reset call — provides diverse illumination in the dataset.
+    light_intensity_range: tuple = (800.0, 3000.0)
+    # RGB colour range: ((r_min,g_min,b_min), (r_max,g_max,b_max))
+    light_color_range: tuple = ((0.65, 0.62, 0.55), (1.0, 0.98, 0.90))
+
     # ===== Reset Configuration =====
     # Randomization ranges for cube/cup positions are defined in workspace bounds above
     initial_joint_noise = 0.0  # No noise on joint positions at reset
