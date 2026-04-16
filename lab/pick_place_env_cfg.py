@@ -280,6 +280,22 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     # RGB colour range: ((r_min,g_min,b_min), (r_max,g_max,b_max))
     light_color_range: tuple = ((0.65, 0.62, 0.55), (1.0, 0.98, 0.90))
 
+    # Collection-time visual domain randomization.
+    # Keep disabled during PPO training; enable when recording demonstrations for PI0.5.
+    domain_randomization_enable: bool = False
+    domain_randomize_lighting: bool = True
+    domain_randomize_object_colors: bool = True
+    domain_randomize_camera_pose: bool = True
+    # Global lighting changes are visible to every environment. Leave this off when collecting
+    # with multiple parallel envs to avoid mid-episode light jumps in still-running episodes.
+    domain_randomize_on_partial_reset: bool = False
+    cube_color_range: tuple = ((0.10, 0.10, 0.10), (0.95, 0.95, 0.95))
+    cup_color_range: tuple = ((0.10, 0.10, 0.10), (0.95, 0.95, 0.95))
+    camera_third_person_eye_jitter: tuple = (0.03, 0.03, 0.05)
+    camera_third_person_target_jitter: tuple = (0.04, 0.04, 0.03)
+    camera_wrist_pos_jitter: tuple = (0.004, 0.004, 0.006)
+    camera_wrist_rot_jitter_deg: tuple = (4.0, 4.0, 8.0)
+
     # ===== Reset Configuration =====
     # Randomization ranges for cube/cup positions are defined in workspace bounds above
     initial_joint_noise = 0.0  # No noise on joint positions at reset

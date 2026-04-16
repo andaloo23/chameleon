@@ -323,6 +323,142 @@ class PickPlaceEnv(DirectRLEnv):
             s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
             return (R[1,0]-R[0,1])/s, (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s
 
+    @staticmethod
+    def _quat_mul(
+        a: tuple[float, float, float, float],
+        b: tuple[float, float, float, float],
+    ) -> tuple[float, float, float, float]:
+        """Multiply two quaternions in (w, x, y, z) format."""
+        aw, ax, ay, az = a
+        bw, bx, by, bz = b
+        return (
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        )
+
+    @staticmethod
+    def _euler_xyz_to_quat(rx_deg: float, ry_deg: float, rz_deg: float) -> tuple[float, float, float, float]:
+        """Convert XYZ intrinsic Euler angles in degrees to a quaternion."""
+        rx, ry, rz = np.radians([rx_deg, ry_deg, rz_deg])
+        cx, sx = np.cos(rx / 2.0), np.sin(rx / 2.0)
+        cy, sy = np.cos(ry / 2.0), np.sin(ry / 2.0)
+        cz, sz = np.cos(rz / 2.0), np.sin(rz / 2.0)
+        return (
+            cx * cy * cz + sx * sy * sz,
+            sx * cy * cz - cx * sy * sz,
+            cx * sy * cz + sx * cy * sz,
+            cx * cy * sz - sx * sy * cz,
+        )
+
+    def _set_prim_local_pose(
+        self,
+        prim_path: str,
+        pos: tuple[float, float, float] | np.ndarray,
+        quat: tuple[float, float, float, float],
+    ) -> None:
+        """Write a local xform on a USD prim."""
+        import isaaclab.sim.utils.stage as stage_utils
+        from pxr import Gf, UsdGeom
+
+        stage = stage_utils.get_current_stage()
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return
+
+        w, x, y, z = quat
+        px, py, pz = (float(v) for v in pos)
+        q2 = [w * w, x * x, y * y, z * z]
+        mat = Gf.Matrix4d(
+            q2[0] + q2[1] - q2[2] - q2[3], 2 * (x * y + w * z),               2 * (x * z - w * y),               0.0,
+            2 * (x * y - w * z),               q2[0] - q2[1] + q2[2] - q2[3], 2 * (y * z + w * x),               0.0,
+            2 * (x * z + w * y),               2 * (y * z - w * x),               q2[0] - q2[1] - q2[2] + q2[3], 0.0,
+            px,                                  py,                                  pz,                                  1.0,
+        )
+        xf = UsdGeom.Xformable(prim)
+        xf.ClearXformOpOrder()
+        xf.MakeMatrixXform().Set(mat)
+
+    def _sample_rgb(self, value_range: tuple[tuple[float, float, float], tuple[float, float, float]]) -> tuple[float, float, float]:
+        """Sample a random RGB triple from a configured min/max range."""
+        low = np.array(value_range[0], dtype=np.float32)
+        high = np.array(value_range[1], dtype=np.float32)
+        rgb = np.random.uniform(low=low, high=high)
+        return float(rgb[0]), float(rgb[1]), float(rgb[2])
+
+    def _set_prim_color(self, prim_path: str, rgb: tuple[float, float, float]) -> None:
+        """Best-effort color override for meshes/materials under a prim."""
+        import isaaclab.sim.utils.stage as stage_utils
+        from pxr import Gf, Usd, UsdGeom, Vt
+
+        stage = stage_utils.get_current_stage()
+        root = stage.GetPrimAtPath(prim_path)
+        if not root or not root.IsValid():
+            return
+
+        rgb_vec = Gf.Vec3f(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+        rgb_arr = Vt.Vec3fArray([rgb_vec])
+
+        for prim in Usd.PrimRange(root):
+            if prim.IsA(UsdGeom.Gprim):
+                UsdGeom.Gprim(prim).CreateDisplayColorAttr().Set(rgb_arr)
+            for attr_name in ("inputs:diffuseColor", "inputs:diffuse_color_constant"):
+                attr = prim.GetAttribute(attr_name)
+                if attr and attr.IsValid():
+                    attr.Set(rgb_vec)
+
+    def _randomize_camera_pose(self, env_idx: int) -> None:
+        """Jitter the third-person and wrist cameras for one environment."""
+        if not self.cfg.enable_cameras or not self.cfg.domain_randomize_camera_pose:
+            return
+
+        base_eye = np.array(self.cfg.camera_third_person_eye, dtype=np.float32)
+        eye_jitter = np.array(self.cfg.camera_third_person_eye_jitter, dtype=np.float32)
+        eye = base_eye + np.random.uniform(-eye_jitter, eye_jitter)
+
+        base_target = np.array(self.cfg.camera_third_person_target, dtype=np.float32)
+        target_jitter = np.array(self.cfg.camera_third_person_target_jitter, dtype=np.float32)
+        target = base_target + np.random.uniform(-target_jitter, target_jitter)
+
+        q_tp = self._lookat_quat(eye, target)
+        self._set_prim_local_pose(f"/World/envs/env_{env_idx}/third_person_cam", eye, q_tp)
+
+        base_wrist = np.array(self.cfg.camera_wrist_pos, dtype=np.float32)
+        wrist_jitter = np.array(self.cfg.camera_wrist_pos_jitter, dtype=np.float32)
+        wrist_pos = base_wrist + np.random.uniform(-wrist_jitter, wrist_jitter)
+
+        rot_jitter = np.array(self.cfg.camera_wrist_rot_jitter_deg, dtype=np.float32)
+        rx, ry, rz = np.random.uniform(-rot_jitter, rot_jitter)
+        q_base = (0.1736, -0.9848, 0.0, 0.0)
+        q_jitter = self._euler_xyz_to_quat(float(rx), float(ry), float(rz))
+        q_wrist = self._quat_mul(q_jitter, q_base)
+        self._set_prim_local_pose(f"/World/envs/env_{env_idx}/Robot/gripper/wrist_cam", wrist_pos, q_wrist)
+
+    def _randomize_episode_visuals(self, env_ids: Tensor, cube_variant_idx: Tensor, cup_variant_idx: Tensor) -> None:
+        """Apply per-episode visual randomization to active objects and cameras."""
+        if not self.cfg.domain_randomization_enable:
+            return
+
+        env_list = env_ids.tolist()
+        cube_list = cube_variant_idx.tolist()
+        cup_list = cup_variant_idx.tolist()
+
+        if self.cfg.domain_randomize_object_colors:
+            for env_idx, cube_idx, cup_idx in zip(env_list, cube_list, cup_list):
+                self._set_prim_color(
+                    f"/World/envs/env_{env_idx}/Cube_{cube_idx}",
+                    self._sample_rgb(self.cfg.cube_color_range),
+                )
+                self._set_prim_color(
+                    f"/World/envs/env_{env_idx}/Cup_{cup_idx}",
+                    self._sample_rgb(self.cfg.cup_color_range),
+                )
+
+        if self.cfg.enable_cameras and self.cfg.domain_randomize_camera_pose:
+            for env_idx in env_list:
+                self._randomize_camera_pose(env_idx)
+
     def _create_camera_sensors(self) -> None:
         """Create TiledCamera sensors via Isaac Lab's spawning (called after clone)."""
         from isaaclab.sensors import TiledCamera, TiledCameraCfg
@@ -1008,8 +1144,18 @@ class PickPlaceEnv(DirectRLEnv):
         
         super()._reset_idx(env_ids)
 
-        # Domain randomization: vary global lighting for sim-to-real diversity.
-        if self.cfg.enable_cameras:
+        # Global lighting randomization affects every environment in the stage. Keep it on full
+        # resets by default so parallel collection does not introduce mid-episode light jumps.
+        should_randomize_global = (
+            self.cfg.domain_randomization_enable
+            and self.cfg.domain_randomize_lighting
+            and self.cfg.enable_cameras
+            and (
+                self.cfg.domain_randomize_on_partial_reset
+                or len(env_ids) == self.num_envs
+            )
+        )
+        if should_randomize_global:
             self._randomize_lighting()
 
         # Convert to tensor if needed
@@ -1157,7 +1303,8 @@ class PickPlaceEnv(DirectRLEnv):
             for k in range(len(self.cfg.cup_height_variants)):
                 prim = stage.GetPrimAtPath(f"/World/envs/env_{env_idx}/Cup_{k}")
                 UsdPhysics.RigidBodyAPI.Get(stage, prim.GetPath()).GetKinematicEnabledAttr().Set(k != active_k)
-        
+
+        self._randomize_episode_visuals(env_ids, cube_variant_idx, variant_idx)
 
         # Reset grasp detector state
         self.grasp_detector.reset(env_ids)
