@@ -1,6 +1,8 @@
 huggingface-hub
 imageio
-numpy
+# Isaac Lab / Isaac Sim require NumPy < 2. Newer LeRobot transitive deps may otherwise
+# upgrade this environment to NumPy 2.x and break sensor / simulation bindings.
+numpy<2
 peft
 Pillow
 scipy

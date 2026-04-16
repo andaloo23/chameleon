@@ -83,9 +83,8 @@ class LeRobotEpisodeWriter:
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
         except ImportError as exc:
             raise RuntimeError(
-                "LeRobot is required for dataset export. Install it with "
-                '`pip install "lerobot[pi]@git+https://github.com/huggingface/lerobot.git"` '
-                "or a recent `pip install lerobot`."
+                "LeRobot is required for dataset export. Install the repo requirements "
+                "in your Isaac Lab Python environment with `python -m pip install -r requirements.txt`."
             ) from exc
 
         create_kwargs = {
