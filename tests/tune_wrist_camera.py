@@ -78,6 +78,43 @@ def euler_to_quat(rx_deg, ry_deg, rz_deg):
     )
 
 
+def _read_prim_state(prim_path):
+    """Read local pos and quat (w,x,y,z) from a prim as Isaac Lab set it up."""
+    import isaaclab.sim.utils.stage as stage_utils
+    from pxr import UsdGeom, Gf
+
+    stage = stage_utils.get_current_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        return [0.0, 0.0, 0.0], (1.0, 0.0, 0.0, 0.0)
+
+    xf = UsdGeom.Xformable(prim)
+    ops = {op.GetOpName(): op for op in xf.GetOrderedXformOps()}
+
+    pos = [0.0, 0.0, 0.0]
+    quat = (1.0, 0.0, 0.0, 0.0)
+
+    if "xformOp:transform" in ops:
+        mat = ops["xformOp:transform"].Get()
+        t = mat.ExtractTranslation()
+        pos = [t[0], t[1], t[2]]
+        q = mat.ExtractRotation().GetQuat()
+        im = q.GetImaginary()
+        quat = (q.GetReal(), im[0], im[1], im[2])
+    else:
+        if "xformOp:translate" in ops:
+            t = ops["xformOp:translate"].Get()
+            pos = [t[0], t[1], t[2]]
+        for op_name in ("xformOp:orient", "xformOp:orientf"):
+            if op_name in ops:
+                q = ops[op_name].Get()
+                im = q.GetImaginary()
+                quat = (q.GetReal(), im[0], im[1], im[2])
+                break
+
+    return pos, quat
+
+
 def _set_prim_matrix(prim_path, pos, quat):
     import isaaclab.sim.utils.stage as stage_utils
     from pxr import UsdGeom, Gf
@@ -88,10 +125,14 @@ def _set_prim_matrix(prim_path, pos, quat):
         print(f"[WARN] prim not found: {prim_path}")
         return
     w, x, y, z = quat
-    rot = Gf.Rotation(Gf.Quatd(float(w), float(x), float(y), float(z)))
-    mat = Gf.Matrix4d()
-    mat.SetRotate(rot)
-    mat.SetTranslateOnly(Gf.Vec3d(*pos))
+    # Build matrix directly from quaternion to avoid Gf.Rotation constructor ambiguity
+    q2 = [w*w, x*x, y*y, z*z]
+    mat = Gf.Matrix4d(
+        q2[0]+q2[1]-q2[2]-q2[3], 2*(x*y+w*z),           2*(x*z-w*y),           0,
+        2*(x*y-w*z),           q2[0]-q2[1]+q2[2]-q2[3], 2*(y*z+w*x),           0,
+        2*(x*z+w*y),           2*(y*z-w*x),           q2[0]-q2[1]-q2[2]+q2[3], 0,
+        pos[0],                pos[1],                pos[2],                    1,
+    )
     xf = UsdGeom.Xformable(prim)
     xf.ClearXformOpOrder()
     xf.MakeMatrixXform().Set(mat)
@@ -109,18 +150,24 @@ def main():
     joint_targets = env.robot.data.joint_pos[0].clone()
     JOINT_STEP = 0.05
 
+    # Read actual transforms Isaac Lab put on the prims — don't guess/seed them.
+    wrist_prim = "/World/envs/env_0/Robot/gripper/wrist_cam"
+    top_prim   = "/World/envs/env_0/third_person_cam"
+    wrist_pos_init, wrist_quat_init = _read_prim_state(wrist_prim)
+    top_pos_init,   top_quat_init   = _read_prim_state(top_prim)
+
     cameras = {
         "wrist": {
-            "prim": "/World/envs/env_0/Robot/gripper/wrist_cam",
+            "prim": wrist_prim,
             "save_tag": "wrist",
-            "pos": list(cfg.camera_wrist_pos),
-            "quat": euler_to_quat(-160.0, 0.0, 0.0),  # seed from known good value
+            "pos": wrist_pos_init,
+            "quat": wrist_quat_init,
         },
         "top": {
-            "prim": "/World/envs/env_0/third_person_cam",
+            "prim": top_prim,
             "save_tag": "third_person",
-            "pos": list(cfg.camera_third_person_eye),
-            "quat": euler_to_quat(-180.0, 0.0, 0.0),  # straight down
+            "pos": top_pos_init,
+            "quat": top_quat_init,
         },
     }
     active = "wrist"
