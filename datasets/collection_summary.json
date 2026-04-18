@@ -1,0 +1,286 @@
+{
+  "checkpoint": "C:\\isaacsim\\ppo_checkpoint_final.pt",
+  "repo_id": "andaloo23/so100_pick_place_pi05",
+  "dataset_root": "C:\\Users\\LocalPC\\dev\\chameleon\\datasets",
+  "requested_successes": 10,
+  "saved_successes": 10,
+  "failed_attempts": 4,
+  "total_attempts": 14,
+  "success_rate": 0.7142857142857143,
+  "saved_frames": 689,
+  "n_envs": 1,
+  "record_every": 2,
+  "control_dt_s": 0.016,
+  "effective_record_hz": 31.25,
+  "stored_dataset_fps": 31,
+  "deterministic_policy": true,
+  "domain_randomization": true,
+  "domain_randomization_config": {
+    "light_intensity_range": [
+      800.0,
+      3000.0
+    ],
+    "light_color_range": [
+      [
+        0.65,
+        0.62,
+        0.55
+      ],
+      [
+        1.0,
+        0.98,
+        0.9
+      ]
+    ],
+    "cube_color_range": [
+      [
+        0.1,
+        0.1,
+        0.1
+      ],
+      [
+        0.95,
+        0.95,
+        0.95
+      ]
+    ],
+    "cup_color_range": [
+      [
+        0.1,
+        0.1,
+        0.1
+      ],
+      [
+        0.95,
+        0.95,
+        0.95
+      ]
+    ],
+    "third_person_eye_jitter": [
+      0.03,
+      0.03,
+      0.05
+    ],
+    "third_person_target_jitter": [
+      0.04,
+      0.04,
+      0.03
+    ],
+    "wrist_pos_jitter": [
+      0.004,
+      0.004,
+      0.006
+    ],
+    "wrist_rot_jitter_deg": [
+      4.0,
+      4.0,
+      8.0
+    ]
+  },
+  "joint_noise": 0.0,
+  "prompts": [
+    "Pick up the cube and place it in the cup."
+  ],
+  "episodes": [
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6285.022441890091,
+      "control_steps": 174,
+      "recorded_steps": 87,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 0,
+      "cube_dims_cm": [
+        2.5,
+        2.5,
+        2.5
+      ],
+      "cup_variant_idx": 0,
+      "cup_height_cm": 5.5,
+      "attempt_index": 1,
+      "saved_episode_index": 0
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 5643.028944954276,
+      "control_steps": 120,
+      "recorded_steps": 60,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 4,
+      "cube_dims_cm": [
+        4.5,
+        4.5,
+        4.5
+      ],
+      "cup_variant_idx": 3,
+      "cup_height_cm": 8.5,
+      "attempt_index": 2,
+      "saved_episode_index": 1
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6055.62910239771,
+      "control_steps": 136,
+      "recorded_steps": 68,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 3,
+      "cube_dims_cm": [
+        4.0,
+        4.0,
+        4.0
+      ],
+      "cup_variant_idx": 1,
+      "cup_height_cm": 6.5,
+      "attempt_index": 3,
+      "saved_episode_index": 2
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 5902.9445444867015,
+      "control_steps": 88,
+      "recorded_steps": 44,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 1,
+      "cube_dims_cm": [
+        3.0,
+        3.0,
+        3.0
+      ],
+      "cup_variant_idx": 2,
+      "cup_height_cm": 7.5,
+      "attempt_index": 4,
+      "saved_episode_index": 3
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6871.532734572887,
+      "control_steps": 162,
+      "recorded_steps": 81,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 0,
+      "cube_dims_cm": [
+        2.5,
+        2.5,
+        2.5
+      ],
+      "cup_variant_idx": 4,
+      "cup_height_cm": 9.5,
+      "attempt_index": 5,
+      "saved_episode_index": 4
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6394.816582873464,
+      "control_steps": 163,
+      "recorded_steps": 82,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 8,
+      "cube_dims_cm": [
+        4.5,
+        3.0,
+        2.5
+      ],
+      "cup_variant_idx": 2,
+      "cup_height_cm": 7.5,
+      "attempt_index": 7,
+      "saved_episode_index": 5
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 5689.835635159165,
+      "control_steps": 109,
+      "recorded_steps": 55,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 7,
+      "cube_dims_cm": [
+        3.0,
+        4.5,
+        2.5
+      ],
+      "cup_variant_idx": 2,
+      "cup_height_cm": 7.5,
+      "attempt_index": 9,
+      "saved_episode_index": 6
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6428.2383075244725,
+      "control_steps": 176,
+      "recorded_steps": 88,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 2,
+      "cube_dims_cm": [
+        3.5,
+        3.5,
+        3.5
+      ],
+      "cup_variant_idx": 4,
+      "cup_height_cm": 9.5,
+      "attempt_index": 10,
+      "saved_episode_index": 7
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 6179.892777517438,
+      "control_steps": 159,
+      "recorded_steps": 80,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 4,
+      "cube_dims_cm": [
+        4.5,
+        4.5,
+        4.5
+      ],
+      "cup_variant_idx": 1,
+      "cup_height_cm": 6.5,
+      "attempt_index": 11,
+      "saved_episode_index": 8
+    },
+    {
+      "prompt": "Pick up the cube and place it in the cup.",
+      "reward": 5755.603102579713,
+      "control_steps": 87,
+      "recorded_steps": 44,
+      "grasped": true,
+      "lifted": true,
+      "droppable": true,
+      "success": true,
+      "cube_variant_idx": 0,
+      "cube_dims_cm": [
+        2.5,
+        2.5,
+        2.5
+      ],
+      "cup_variant_idx": 1,
+      "cup_height_cm": 6.5,
+      "attempt_index": 14,
+      "saved_episode_index": 9
+    }
+  ]
+}

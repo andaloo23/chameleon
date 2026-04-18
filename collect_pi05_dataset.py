@@ -120,7 +120,7 @@ class LeRobotEpisodeWriter:
                     # Some revisions expect a task payload rather than a raw string.
                     self.dataset.add_frame(frame, task={"task": task})
                     continue
-            self.dataset.add_frame(frame)
+            self.dataset.add_frame({**frame, "task": task})
 
         save_kwargs: dict[str, Any] = {}
         if self._supports_save_task:
@@ -301,6 +301,10 @@ def main() -> int:
     app_launcher = AppLauncher(headless=args.headless, enable_cameras=True)
     simulation_app = app_launcher.app
 
+    import carb
+    carb.settings.get_settings().set("/rtx/dlss/enabled", False)
+    carb.settings.get_settings().set("/rtx/post/dlss/execMode", 0)
+
     from lab.pick_place_env import PickPlaceEnv
     from lab.pick_place_env_cfg import PickPlaceEnvCfg
 
@@ -359,7 +363,6 @@ def main() -> int:
 
     try:
         while saved_episodes < args.episodes and (max_attempts is None or total_attempts < max_attempts):
-            images = env.update_cameras()
             joint_pos = env.robot.data.joint_pos.clone()
             joint_vel = env.robot.data.joint_vel.clone()
 
@@ -374,15 +377,16 @@ def main() -> int:
 
             expert_targets = compute_expert_joint_targets(env, actions)
 
+            next_obs_dict, reward, terminated, truncated, info = env.step(actions)
+            done = terminated | truncated
+
+            images = env.update_cameras()
+
             for env_idx in range(args.n_envs):
                 episode = pending[env_idx]
                 if episode.control_steps % args.record_every == 0:
                     episode.frames.append(build_frame(images, joint_pos, joint_vel, expert_targets, env_idx))
                     episode.recorded_steps += 1
-
-            next_obs_dict, reward, terminated, truncated, info = env.step(actions)
-            done = terminated | truncated
-
             milestones = info.get("milestone_flags", {})
             grasped = milestones.get("grasped", torch.zeros(args.n_envs, dtype=torch.bool, device=env.device))
             lifted = milestones.get("lifted", torch.zeros(args.n_envs, dtype=torch.bool, device=env.device))

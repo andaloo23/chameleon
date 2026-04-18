@@ -460,8 +460,8 @@ class PickPlaceEnv(DirectRLEnv):
                 self._randomize_camera_pose(env_idx)
 
     def _create_camera_sensors(self) -> None:
-        """Create TiledCamera sensors via Isaac Lab's spawning (called after clone)."""
-        from isaaclab.sensors import TiledCamera, TiledCameraCfg
+        """Create Camera sensors via Isaac Lab's spawning (called after clone)."""
+        from isaaclab.sensors import Camera, CameraCfg
 
         W, H = self.cfg.camera_width, self.cfg.camera_height
 
@@ -478,13 +478,13 @@ class PickPlaceEnv(DirectRLEnv):
 
         # Third-person: env-local position looking at workspace.
         # convention="opengl" — camera –Z is forward, +Y is up (matches _lookat_quat).
-        self.camera_third_person = TiledCamera(TiledCameraCfg(
+        self.camera_third_person = Camera(CameraCfg(
             prim_path="/World/envs/env_.*/third_person_cam",
             spawn=pinhole_cfg,
             data_types=["rgb"],
             width=W,
             height=H,
-            offset=TiledCameraCfg.OffsetCfg(
+            offset=CameraCfg.OffsetCfg(
                 pos=tuple(float(v) for v in eye),
                 rot=q_tp,
                 convention="opengl",
@@ -494,7 +494,7 @@ class PickPlaceEnv(DirectRLEnv):
         # Wrist camera: child of gripper link — translates/rotates with end-effector.
         # Rx(–90°) aligns camera –Z with gripper –Y (toward fingertips).
         wx, wy, wz = self.cfg.camera_wrist_pos
-        self.camera_wrist = TiledCamera(TiledCameraCfg(
+        self.camera_wrist = Camera(CameraCfg(
             prim_path="/World/envs/env_.*/Robot/gripper/wrist_cam",
             spawn=sim_utils.PinholeCameraCfg(
                 focal_length=24.0,
@@ -504,7 +504,7 @@ class PickPlaceEnv(DirectRLEnv):
             data_types=["rgb"],
             width=W,
             height=H,
-            offset=TiledCameraCfg.OffsetCfg(
+            offset=CameraCfg.OffsetCfg(
                 pos=(float(wx), float(wy), float(wz)),
                 rot=(0.1736, -0.9848, 0.0, 0.0),
                 convention="opengl",
@@ -520,8 +520,8 @@ class PickPlaceEnv(DirectRLEnv):
         if not self.cfg.enable_cameras:
             raise RuntimeError("Cameras are disabled. Set cfg.enable_cameras=True.")
         dt = self.physics_dt * self.cfg.decimation
-        self.camera_third_person.update(dt, force_recompute=True)
-        self.camera_wrist.update(dt, force_recompute=True)
+        self.camera_third_person.update(dt)
+        self.camera_wrist.update(dt)
         return {
             "third_person": self.camera_third_person.data.output["rgb"],
             "wrist": self.camera_wrist.data.output["rgb"],
