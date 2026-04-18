@@ -1,0 +1,6 @@
+__pycache__/
+lab/__pycache__
+.env
+.claude
+ppo_training_metrics.png
+.pytest_cache
