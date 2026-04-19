@@ -212,10 +212,12 @@ def build_features(cfg, use_videos: bool) -> dict[str, Any]:
         "observation.images.third_person": {
             "dtype": image_dtype,
             "shape": (3, cfg.camera_height, cfg.camera_width),
+            "names": ["channels", "height", "width"],
         },
         "observation.images.wrist": {
             "dtype": image_dtype,
             "shape": (3, cfg.camera_height, cfg.camera_width),
+            "names": ["channels", "height", "width"],
         },
         "observation.state": {
             "dtype": "float32",
