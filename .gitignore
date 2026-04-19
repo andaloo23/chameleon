@@ -4,3 +4,4 @@ lab/__pycache__
 .claude
 ppo_training_metrics.png
 .pytest_cache
+datasets/
