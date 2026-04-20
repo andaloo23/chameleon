@@ -37,12 +37,12 @@ for _sp in site.getsitepackages():
         "return self.paligemma.model.get_image_features(image)",
         "return self.paligemma.model.get_image_features(image.to(dtype=next(self.paligemma.vision_tower.parameters()).dtype))",
     )
-    # Patch 5: SigLIP encoder has mixed-precision weights (layer_norm float32, hidden states bfloat16)
-    # cast hidden states to layer_norm weight dtype and back to avoid RuntimeError
+    # Patch 5: cast entire paligemma to bfloat16 after loading checkpoint — the pi05_base
+    # checkpoint has mixed dtypes (some layers float32, some bfloat16) which causes matmul errors
     _patch_file(
-        os.path.join(_sp, "transformers", "models", "siglip", "modeling_siglip.py"),
-        "        residual = hidden_states\n\n        hidden_states = self.layer_norm1(hidden_states)\n        hidden_states, _ = self.self_attn(\n            hidden_states=hidden_states,\n            attention_mask=attention_mask,\n            **kwargs,\n        )\n        hidden_states = residual + hidden_states\n\n        residual = hidden_states\n        hidden_states = self.layer_norm2(hidden_states)\n        hidden_states = self.mlp(hidden_states)\n        hidden_states = residual + hidden_states",
-        "        residual = hidden_states\n        _hs_dtype = hidden_states.dtype\n        hidden_states = self.layer_norm1(hidden_states.to(self.layer_norm1.weight.dtype)).to(_hs_dtype)\n        hidden_states, _ = self.self_attn(\n            hidden_states=hidden_states,\n            attention_mask=attention_mask,\n            **kwargs,\n        )\n        hidden_states = residual + hidden_states\n\n        residual = hidden_states\n        hidden_states = self.layer_norm2(hidden_states.to(self.layer_norm2.weight.dtype)).to(_hs_dtype)\n        hidden_states = self.mlp(hidden_states)\n        hidden_states = residual + hidden_states",
+        os.path.join(_sp, "lerobot", "policies", "pi05", "modeling_pi05.py"),
+        "            # Load the remapped state dict into the model\n            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)",
+        "            # Load the remapped state dict into the model\n            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)\n\n            # Cast entire paligemma to config dtype for consistency — checkpoints may have mixed dtypes\n            if hasattr(config, \"dtype\") and config.dtype == \"bfloat16\":\n                model.model.paligemma_with_expert.paligemma.to(torch.bfloat16)\n                model.model.paligemma_with_expert.gemma_expert.to(torch.bfloat16)",
     )
 
 import sys
