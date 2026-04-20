@@ -46,5 +46,6 @@ sys.argv = [
     '--rename_map={"observation.images.third_person": "observation.images.base_0_rgb", "observation.images.wrist": "observation.images.left_wrist_0_rgb"}',
 ]
 
-from lerobot.scripts.lerobot_train import train
-train()
+if __name__ == "__main__":
+    from lerobot.scripts.lerobot_train import train
+    train()
