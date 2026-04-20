@@ -30,6 +30,13 @@ for _sp in site.getsitepackages():
         "self.policy.pretrained_path = Path(policy_path)",
         'import re as _re; self.policy.pretrained_path = policy_path if _re.match(r"^[\\w.-]+/[\\w.-]+$", policy_path) else Path(policy_path)',
     )
+    # Patch 4: cast image to vision encoder dtype — standard transformers keeps SigLIP
+    # in float32 even when the rest of the model is bfloat16
+    _patch_file(
+        os.path.join(_sp, "lerobot", "policies", "pi05", "modeling_pi05.py"),
+        "return self.paligemma.model.get_image_features(image)",
+        "return self.paligemma.model.get_image_features(image.to(dtype=next(self.paligemma.vision_tower.parameters()).dtype))",
+    )
 
 import sys
 sys.argv = [
