@@ -30,19 +30,18 @@ for _sp in site.getsitepackages():
         "self.policy.pretrained_path = Path(policy_path)",
         'import re as _re; self.policy.pretrained_path = policy_path if _re.match(r"^[\\w.-]+/[\\w.-]+$", policy_path) else Path(policy_path)',
     )
-    # Patch 4: cast image to vision encoder dtype — standard transformers keeps SigLIP
-    # in float32 even when the rest of the model is bfloat16
+    # Patch 4: keep the entire vision tower in float32 (standard transformers has mixed dtype
+    # issues in the SigLIP encoder when encoder layers are bfloat16 but embeddings are float32)
+    # and cast vision features to language model dtype afterward
+    _patch_file(
+        os.path.join(_sp, "lerobot", "policies", "pi05", "modeling_pi05.py"),
+        '            "vision_tower.vision_model.embeddings.patch_embedding.weight",\n            "vision_tower.vision_model.embeddings.patch_embedding.bias",\n            "vision_tower.vision_model.embeddings.position_embedding.weight",',
+        '            "vision_tower",  # keep entire vision tower in float32 — encoder has mixed dtype issues with standard transformers',
+    )
     _patch_file(
         os.path.join(_sp, "lerobot", "policies", "pi05", "modeling_pi05.py"),
         "return self.paligemma.model.get_image_features(image)",
-        "return self.paligemma.model.get_image_features(image.to(dtype=next(self.paligemma.vision_tower.parameters()).dtype))",
-    )
-    # Patch 5: cast entire paligemma to bfloat16 after loading checkpoint — the pi05_base
-    # checkpoint has mixed dtypes (some layers float32, some bfloat16) which causes matmul errors
-    _patch_file(
-        os.path.join(_sp, "lerobot", "policies", "pi05", "modeling_pi05.py"),
-        "            # Load the remapped state dict into the model\n            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)",
-        "            # Load the remapped state dict into the model\n            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)\n\n            # Cast entire paligemma to config dtype for consistency — checkpoints may have mixed dtypes\n            if hasattr(config, \"dtype\") and config.dtype == \"bfloat16\":\n                model.model.paligemma_with_expert.paligemma.to(torch.bfloat16)\n                model.model.paligemma_with_expert.gemma_expert.to(torch.bfloat16)",
+        "features = self.paligemma.model.get_image_features(image.float())\n        return features.to(dtype=next(self.paligemma.language_model.parameters()).dtype)",
     )
 
 import sys
