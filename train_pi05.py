@@ -50,6 +50,20 @@ for _sp in site.getsitepackages():
         "missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)",
         "missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=False)",
     )
+    # Patch 6: add AdaRMS compatibility to standard transformers GemmaRMSNorm and add
+    # _gated_residual helper. pi05 calls input_layernorm(x, cond=...) and unpacks a tuple;
+    # standard GemmaRMSNorm only accepts x. Use **kwargs so callers without cond still get
+    # a plain tensor (preserving normal Gemma forward pass compatibility).
+    _patch_file(
+        os.path.join(_sp, "transformers", "models", "gemma", "modeling_gemma.py"),
+        "    def forward(self, x):\n        output = self._norm(x.float())\n        # Llama does x.to(float16) * w whilst Gemma is (x * w).to(float16)\n        # See https://github.com/huggingface/transformers/pull/29402\n        output = output * (1.0 + self.weight.float())\n        return output.type_as(x)\n\n    def extra_repr(self):",
+        "    def forward(self, x, **kwargs):\n        output = self._norm(x.float())\n        # Llama does x.to(float16) * w whilst Gemma is (x * w).to(float16)\n        # See https://github.com/huggingface/transformers/pull/29402\n        output = output * (1.0 + self.weight.float())\n        output = output.type_as(x)\n        if 'cond' in kwargs:\n            return output, None  # AdaRMS compat: return (normed, gate=None) when cond is requested\n        return output\n\n    def extra_repr(self):",
+    )
+    _patch_file(
+        os.path.join(_sp, "transformers", "models", "gemma", "modeling_gemma.py"),
+        "\nclass GemmaMLP(nn.Module):",
+        "\n\ndef _gated_residual(residual, out, gate):\n    \"\"\"Residual connection with optional AdaRMS gate. gate=None means standard residual.\"\"\"\n    return residual + out\n\n\nclass GemmaMLP(nn.Module):",
+    )
 
 import sys
 sys.argv = [
@@ -63,6 +77,7 @@ sys.argv = [
     "--steps=5000",
     "--output_dir=outputs/pi05_so100_finetune",
     "--policy.empty_cameras=1",
+    "--policy.train_expert_only=true",
     '--rename_map={"observation.images.third_person": "observation.images.base_0_rgb", "observation.images.wrist": "observation.images.left_wrist_0_rgb"}',
 ]
 
