@@ -8,7 +8,7 @@ Trains the SO-100 arm to pick up a cube and place it into a cup. No human demons
 
 ## Pipeline
 
-1. **Reinforcement learning in simulation**: PPO policy trained with domain randomization, using privileged state information
-2. **Automated dataset collection**: 500 successful rollouts exported as a [LeRobot-compatible dataset](https://huggingface.co/datasets/andaloo23/so100_pick_place_pi05)
-3. **Teacher-student distillation**: PI0.5 fine-tuned via behavior cloning on collected episodes ([policy weights](https://huggingface.co/andaloo23/so100_pick_place_pi05_policy))
+1. **RL in IsaacLab**: PPO policy trained with domain randomization (privilged state information)
+2. **Dataset collection**: Successful rollouts exported as a [LeRobot-compatible dataset](https://huggingface.co/datasets/andaloo23/so100_pick_place_pi05), only includes image and joint observations
+3. **Fine-tune VLA**: PI0.5 fine-tuned via behavior cloning on collected episodes ([policy weights](https://huggingface.co/andaloo23/so100_pick_place_pi05_policy)). 
 4. **Real robot deployment**: coming soon
